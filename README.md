@@ -10,7 +10,7 @@ The current product is a local development preview with a staff web app. Archite
 | --- | --- | --- |
 | Platform | Sign-in, business workspaces, an owner membership created with each workspace, editable business profile and address, logo, four-color workspace palette | Inviting or adding other staff, student/parent portal, production subscription administration |
 | Clients | Tenant-scoped student and payer records; mapped CSV and `.xlsx` import with preview/commit; connected-source contact intake | Student/parent portal access |
-| Scheduling | Sessions UI displays read-only Calendly/Cal.com sessions; legacy local session APIs remain | UI-based local session creation/editing and provider booking actions; student self-service booking |
+| Scheduling | Month and week calendars with synced Calendly/Cal.com bookings, date navigation, daily agenda, and booking details; legacy local session APIs remain | UI-based local session creation/editing and provider booking actions; student self-service booking |
 | Learning | Staff assignments, progress records, and private persistent-disk resource uploads up to 20 MiB | Student/parent portal access and cloud object storage |
 | Billing | Staff invoice creation, issue, and payment allocation; invoice snapshots include business seller profile and logo | Automatic invoicing from completed sessions and recurring billing |
 | Payments | Explicitly labeled local sandbox attempts and simulated confirmations | Live Stripe, PayPal, or bank integrations; no real money is moved |

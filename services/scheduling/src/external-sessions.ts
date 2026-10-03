@@ -41,13 +41,36 @@ const sync = z.object({
   sessions: z.array(session).max(200),
 });
 const disconnected = z.object({ connectionId: z.string().uuid() });
+const maximumRangeMs = 93 * 24 * 60 * 60 * 1000;
 const filter = z
   .object({
     status: z.enum(["scheduled", "completed", "cancelled"]).optional(),
     connectionId: z.string().uuid().optional(),
+    from: z.string().datetime({ offset: true }).optional(),
+    to: z.string().datetime({ offset: true }).optional(),
     limit: z.coerce.number().int().min(1).max(200).default(100),
+    offset: z.coerce.number().int().min(0).max(100000).default(0),
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    if ((value.from === undefined) !== (value.to === undefined)) {
+      ctx.addIssue({
+        code: "custom",
+        path: [value.from === undefined ? "from" : "to"],
+        message: "from and to must be supplied together",
+      });
+      return;
+    }
+    if (value.from !== undefined && value.to !== undefined) {
+      const duration = Date.parse(value.to) - Date.parse(value.from);
+      if (duration <= 0 || duration > maximumRangeMs)
+        ctx.addIssue({
+          code: "custom",
+          path: ["to"],
+          message: "to must be after from and the range must not exceed 93 days",
+        });
+    }
+  });
 @Injectable()
 export class ExternalSessionsService {
   constructor(
@@ -114,16 +137,31 @@ export class ExternalSessionsService {
   async list(ctx: RequestContext, query: unknown) {
     const parsed = parseBody(filter, query);
     return this.db.withTenant(ctx.businessId, async (tx) => {
+      const conditions = `business_id=$1
+        AND ($2::text IS NULL OR status=$2)
+        AND ($3::uuid IS NULL OR connection_id=$3)
+        AND ($4::text IS NULL OR owner_user_id=$4)
+        AND ($5::timestamptz IS NULL OR (starts_at<$6::timestamptz AND ends_at>$5::timestamptz))`;
+      const parameters = [
+        ctx.businessId,
+        parsed.status ?? null,
+        parsed.connectionId ?? null,
+        ctx.role === "tutor" ? ctx.sub : null,
+        parsed.from ?? null,
+        parsed.to ?? null,
+      ];
+      const total = Number(
+        (
+          await tx.query(
+            `SELECT COUNT(*) AS total FROM external_sessions WHERE ${conditions}`,
+            parameters,
+          )
+        ).rows[0].total,
+      );
       const rows = (
         await tx.query(
-          `SELECT * FROM external_sessions WHERE business_id=$1 AND ($2::text IS NULL OR status=$2) AND ($3::uuid IS NULL OR connection_id=$3) AND ($4::text IS NULL OR owner_user_id=$4) ORDER BY starts_at DESC,id LIMIT $5`,
-          [
-            ctx.businessId,
-            parsed.status ?? null,
-            parsed.connectionId ?? null,
-            ctx.role === "tutor" ? ctx.sub : null,
-            parsed.limit,
-          ],
+          `SELECT * FROM external_sessions WHERE ${conditions} ORDER BY starts_at ${parsed.from === undefined ? "DESC" : "ASC"},id LIMIT $7 OFFSET $8`,
+          [...parameters, parsed.limit, parsed.offset],
         )
       ).rows;
       return {
@@ -146,6 +184,9 @@ export class ExternalSessionsService {
           createdAt: row.created_at.toISOString(),
           updatedAt: row.updated_at.toISOString(),
         })),
+        total,
+        limit: parsed.limit,
+        offset: parsed.offset,
       };
     });
   }

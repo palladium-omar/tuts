@@ -64,6 +64,14 @@ All events use the shared durable RabbitMQ exchange and transactional outbox/inb
 
 The integrations service checks the entitlement snapshot saved when a connection was last changed before dispatching background and webhook data. Manual connector mutations use the currently verified signed request context. The platform does not yet publish entitlement changes; an administrator changing entitlements outside the current platform APIs must reconnect or update the affected source before its background dispatch snapshot changes.
 
+## Calendar range reads
+
+Scheduling exposes the read-only external appointment projection at `GET /v1/external-sessions` (`/api/scheduling/v1/external-sessions` through the gateway). Calendar clients can supply paired `from` and `to` ISO datetimes with `Z` or an explicit UTC offset. The range must have `to > from` and span at most 93 days. The half-open interval `[from, to)` includes all overlapping sessions through `starts_at < to AND ends_at > from`, including sessions that span a range boundary. Sessions ending exactly at `from` or starting exactly at `to` are excluded.
+
+The response is `{items, total, limit, offset}`. `limit` defaults to 100 with a maximum of 200; `offset` defaults to 0 and accepts integers from 0 to 100,000. Clients page through the same range by advancing `offset` until they have fetched `total` matches. The total uses the same tenant, optional status and connection filters, and tutor ownership restriction as the items, even for an empty page. Ranged reads sort by start time ascending then ID. Calls without either timestamp retain start time descending then ID order and default pagination.
+
+For example, `/api/scheduling/v1/external-sessions?from=2026-10-01T00:00:00Z&to=2026-11-01T00:00:00Z&limit=200&offset=0` reads the first page of October's overlapping external appointments. This endpoint reads the scheduling projection; its range does not extend the provider's bounded synchronization window.
+
 ## Related contracts
 
 - [Service boundaries and feature composition](services.md)

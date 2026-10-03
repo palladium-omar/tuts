@@ -35,7 +35,8 @@ import {
 import { Notice } from "../components/shared";
 import { BusinessProfile, defaultPalette } from "../features/business-profile";
 import { CRM } from "../features/crm";
-import { Connectors, Sessions } from "../features/connectors";
+import { Connectors } from "../features/connectors";
+import { Sessions } from "../features/sessions-calendar";
 import { Learning } from "../features/learning";
 import { Activity, Invoices, Payments } from "../features/finance";
 const icons: Record<string, any> = {
