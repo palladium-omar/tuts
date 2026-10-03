@@ -6,7 +6,7 @@ Each service is an independently built Docker image and Node process, exposes `/
 
 ## Composition
 
-The gateway maps `/api/platform`, `/api/clients`, `/api/scheduling`, `/api/learning`, `/api/billing`, `/api/payments` and `/api/notifications` to configured service URLs. It checks membership and entitlement through platform, signs the verified request context, and proxies to the chosen service. The browser never receives internal signing credentials.
+The gateway maps `/api/platform`, `/api/clients`, `/api/scheduling`, `/api/learning`, `/api/billing`, `/api/payments`, `/api/notifications` and `/api/integrations` to configured service URLs. It checks membership and entitlement through platform, signs the verified request context, and proxies to the chosen service. The browser never receives internal signing credentials. The form-hook ingress at `/api/integrations/hooks/...` is a separate public route authenticated by a per-connection bearer secret.
 
 The frontend feature registry declares `id`, `label`, `path`, `entitlement`, and API prefix. Business configuration determines which entries appear. Services independently enforce entitlements, so hiding a navigation item is not access control. Provider selection and custom forms are data loaded through APIs.
 
@@ -24,9 +24,9 @@ These steps are the feature plugging workflow: establish ownership and contracts
 
 Platform identity and entitlements are a declared common prerequisite. Client references are opaque identifiers; a module may snapshot required display/payer data through an authenticated API. Identifiers from other services are not cross-database foreign keys. Shared IDs never authorize access.
 
-Scheduling produces session lifecycle events. Billing only consumes them when a tenant has billing enabled and has explicitly selected automatic invoicing. Billing creates its own invoice from a supplied price snapshot; absence of price or payer information leaves the workflow unconfigured. Manual invoices work without scheduling.
+The integrations service polls business-connected Calendly/Cal.com calendars and accepts contact sources. It publishes contact batches for the CRM and read-only session batches for scheduling; it never writes to provider bookings. See the [connector contracts](connectors.md) for the current protocols and user flow. Scheduling's local session API remains separate. Billing does not automatically invoice completed sessions; it consumes payment confirmations and business-profile updates, while staff create invoices directly.
 
-Billing and payments integrate through invoice/payment events. A payment attempt has an immutable amount, currency, business ID, invoice ID, and selected business connection. Billing remains the source of truth for invoice balance; payments remains the source of truth for provider transaction state. Learning can be used without a booking or invoice. Notifications consumes events and has its own delivery state.
+Billing and payments integrate through invoice/payment events. A payment attempt has an immutable amount, currency, business ID, invoice ID, and selected business connection. Billing remains the source of truth for invoice balance; payments remains the source of truth for provider transaction state. Learning can be used without a booking or invoice. Notifications consumes events and has its own delivery state. Platform business profile changes project the seller details and branding into billing; issuing an invoice snapshots the latest available profile.
 
 Reports initially use the owning service's APIs. A future reporting projection may consume events; it must not query service databases directly.
 

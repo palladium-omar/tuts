@@ -12,7 +12,8 @@
         "LEARNING_DB_PASSWORD": "${LEARNING_DB_PASSWORD}",
         "BILLING_DB_PASSWORD": "${BILLING_DB_PASSWORD}",
         "PAYMENTS_DB_PASSWORD": "${PAYMENTS_DB_PASSWORD}",
-        "NOTIFICATIONS_DB_PASSWORD": "${NOTIFICATIONS_DB_PASSWORD}"
+        "NOTIFICATIONS_DB_PASSWORD": "${NOTIFICATIONS_DB_PASSWORD}",
+        "INTEGRATIONS_DB_PASSWORD": "${INTEGRATIONS_DB_PASSWORD}"
       },
       "ports": [
         "127.0.0.1:5434:5432"
@@ -179,7 +180,8 @@
         "PORT": "4004",
         "DATABASE_URL": "postgresql://learning:${LEARNING_DB_PASSWORD}@postgres:5432/learning",
         "RABBITMQ_URL": "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672",
-        "CONTEXT_PUBLIC_KEY": "${CONTEXT_PUBLIC_KEY}"
+        "CONTEXT_PUBLIC_KEY": "${CONTEXT_PUBLIC_KEY}",
+        "UPLOAD_DIRECTORY": "/data/uploads"
       },
       "depends_on": {
         "postgres": {
@@ -199,7 +201,10 @@
         "interval": "10s",
         "timeout": "5s",
         "retries": 10
-      }
+      },
+      "volumes": [
+        "learning-uploads:/data/uploads"
+      ]
     },
     "billing": {
       "build": {
@@ -327,7 +332,8 @@
         "LEARNING_URL": "http://learning:4004",
         "BILLING_URL": "http://billing:4005",
         "PAYMENTS_URL": "http://payments:4006",
-        "NOTIFICATIONS_URL": "http://notifications:4007"
+        "NOTIFICATIONS_URL": "http://notifications:4007",
+        "INTEGRATIONS_URL": "http://integrations:4008"
       },
       "depends_on": {
         "platform": {
@@ -351,10 +357,46 @@
       "depends_on": [
         "gateway"
       ]
+    },
+    "integrations": {
+      "build": {
+        "context": ".",
+        "args": {
+          "SERVICE": "integrations"
+        }
+      },
+      "environment": {
+        "NODE_ENV": "development",
+        "PORT": "4008",
+        "DATABASE_URL": "postgresql://integrations:${INTEGRATIONS_DB_PASSWORD}@postgres:5432/integrations",
+        "RABBITMQ_URL": "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672",
+        "CONTEXT_PUBLIC_KEY": "${CONTEXT_PUBLIC_KEY}",
+        "INTEGRATIONS_ENCRYPTION_KEY": "${INTEGRATIONS_ENCRYPTION_KEY}"
+      },
+      "depends_on": {
+        "postgres": {
+          "condition": "service_healthy"
+        },
+        "rabbitmq": {
+          "condition": "service_healthy"
+        }
+      },
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://localhost:4008/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+        ],
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": 10
+      }
     }
   },
   "volumes": {
     "postgres-data": {},
-    "rabbitmq-data": {}
+    "rabbitmq-data": {},
+    "learning-uploads": {}
   }
 }

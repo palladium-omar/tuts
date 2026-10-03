@@ -1,6 +1,6 @@
 # HTTP contract
 
-> **Contract scope:** This describes the shared gateway and service API contract. Signed JWT context and staff authorization are implemented. Student/parent portal routes and relationship-based resource authorization are not yet shipped. The contract may also describe routes for future extensions; consult the [repository status](../../README.md#what-works-today) and service OpenAPI documents for current endpoints.
+> **Contract scope:** This describes the shared gateway and service API contract. Signed JWT context and staff authorization are implemented. Student/parent portal routes and relationship-based resource authorization are not yet shipped. Form connector hooks use a connection-specific bearer secret on a dedicated public ingress, not a browser session. The contract may also describe routes for future extensions; consult the [repository status](../../README.md#what-works-today) and service OpenAPI documents for current endpoints.
 
 External prefix: `/api/{service}/v1/...`. Gateway removes `/api/{service}` before forwarding. Platform authentication is exposed at `/api/platform/auth/*`; platform session/business endpoints are under `/v1`. APIs return JSON. Document endpoints in each service's generated OpenAPI document.
 
@@ -12,7 +12,7 @@ External prefix: `/api/{service}/v1/...`. Gateway removes `/api/{service}` befor
 4. Domain services verify the signature using a public key, expiry, issuer and audience, then verify their own entitlement and role requirements. They discard unsigned user context headers. The gateway overwrites client-supplied Authorization/context headers for browser session traffic.
 5. Authorized service-to-service reads forward the short-lived verified context over the private service network. Services have verification keys only and cannot mint user tokens. External machine/API credentials are a later explicit platform feature, not implicitly supported by browser cookies.
 
-Platform endpoints that create/select a business validate the session directly because a selected business may not yet exist. Provider webhooks and health endpoints are explicitly public at the domain layer; webhooks authenticate through the provider signature instead of user JWTs. Public annotations must be narrow.
+Platform endpoints that create/select a business validate the session directly because a selected business may not yet exist. Health endpoints are public at the domain layer. The integrations form-hook route is public to the browser-session gateway middleware but validates a high-entropy, connection-scoped bearer secret in the integrations service. It is capped at 1 MB at gateway JSON parsing. Other provider webhooks require their provider-specific signature verification; none is enabled for the payment providers today. Public routes and gateway bypasses must remain narrow.
 
 ## Errors
 

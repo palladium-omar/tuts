@@ -1,39 +1,98 @@
-# Clients service
+# Clients CRM service
 
-Port `4002`; service-owned PostgreSQL database. All business endpoints require a
-verified gateway context with the `clients` entitlement and owner/admin/tutor
-role. Parent/student portal access is not implemented and these roles are denied.
-Every domain SQL operation runs inside `Database.withTenant`, with forced RLS.
-
-Gateway external prefix is `/api/clients`.
+Port `4002`, gateway prefix `/api/clients`, service-owned PostgreSQL database.
+Every endpoint requires verified gateway membership, the `clients` entitlement,
+and an owner/admin/tutor role. Delete additionally requires owner/admin. Domain
+SQL uses a tenant transaction and forced RLS. Student/parent portal access remains
+unavailable.
 
 | Method | Path | Request / response |
 | --- | --- | --- |
-| GET | `/v1/clients` | Optional `kind`, `limit` (1–100, default 50), `offset`; `{items:[client]}` |
-| POST | `/v1/clients` | `{displayName,kind?:student or payer,email?,phone?,notes?}`; `{item:client}` |
+| GET | `/v1/clients` | Optional `kind`, `status`, `search`, `limit` (1–100, default 50), `offset`; `{items,total,limit,offset}` |
+| POST | `/v1/clients` | Editable contact properties; `{item:client}` |
 | GET | `/v1/clients/:id` | `{item:client}` or tenant-scoped 404 |
-| PATCH | `/v1/clients/:id` | Partial displayName/email/phone/notes; `{item:client}` |
-| GET | `/v1/clients/:id/payers` | Student's `{items:[{studentId,payerId,relationship,payer}]}` (max 100) |
-| POST | `/v1/clients/:id/payers` | `{payerId,relationship?:parent or guardian or sponsor or self or other}`; upserts `{item:relationship}` |
+| PATCH | `/v1/clients/:id` | Partial editable properties; `{item:client}` |
+| DELETE | `/v1/clients/:id` | Owner/admin; `{item:{id,deleted:true}}` |
+| GET | `/v1/clients/:id/payers` | `{items:[{studentId,payerId,relationship,payer}]}` (max 100) |
+| POST | `/v1/clients/:id/payers` | `{payerId,relationship?:parent or guardian or sponsor or self or other}` |
+| POST | `/v1/imports/parse` | Multipart `file`; `{item:{headers,rows,totalRows}}` |
+| POST | `/v1/imports/preview` | `{rows,mapping,duplicateMode}`; `{item:{rows,summary}}` |
+| POST | `/v1/imports/commit` | Same body plus `Idempotency-Key` header; `{item:{created,updated,skipped,errors,skippedRows}}` |
 
-Client shape: `{id,kind,displayName,email,phone,notes,createdAt,updatedAt}`. Email,
-phone and notes can be cleared with null. Kind is immutable. A payer is a distinct
-record, so a parent can pay for several students. Composite foreign keys prevent
-cross-business relationships. Missing foreign business IDs return 404.
+Client shape: `{id,kind,firstName,lastName,displayName,email,phone,notes,status,tags,
+source,createdAt,updatedAt}`. Create requires displayName or a first/last name.
+`kind` defaults to `student` and is immutable; `status` is lead/active/inactive,
+defaulting to lead for new contacts. Existing contacts retain all data and migrate
+to active. First/last names default to empty strings; existing display names are
+preserved without guessing a split. Editing names composes displayName unless
+explicitly supplied. Email, phone, notes and source can be cleared with null;
+names can be cleared with empty strings and tags with `[]`.
 
-Writes persist events in the same transaction: `clients.client-created.v1` carries
-only `{clientId}`; updates use `clients.client-updated.v1`, relationship writes use
-`clients.payer-linked.v1`. Events exclude contact data. Broker retry/deduplication
-is provided by service-kit. Ordinary record creation does not implement financial
-idempotency keys; clients are identified by server-generated UUIDs.
+Search matches literal substrings in names, email, phone and tags. Tenant totals
+are counted independently of the selected pagination window. Ordinary manual
+creation permits shared email addresses; imports report ambiguous existing
+matches instead of selecting one arbitrarily.
 
-`pnpm --filter @palladium/clients typecheck` and
-`pnpm --filter @palladium/clients test`. Controller tests use a bounded database double to cover tenant selection,
-outbox callback failure, absent-resource handling and input validation.
-Root integration verifies signed context/role/entitlement rejection and PostgreSQL
-RLS with two tenant contexts. No import/contact delivery, archival or portal
-resource relationship authorization is implemented.
+## Mapped imports
 
-Optional real database RLS tests run when `CLIENTS_TEST_DATABASE_URL` points to the
-already-migrated service database using its non-superuser runtime role. They use
-synthetic fixtures inside a rolled-back transaction and skip without that variable.
+CSV accepts comma, semicolon or tab delimiters, quoted cells and a UTF-8 BOM.
+XLSX reads the first worksheet; `.xls`, macro/encrypted workbooks and embedded
+objects are rejected. Limits: 5 MB uploaded, 20 MB expanded workbook archive,
+2,000 data rows, 100 columns, 4,000 characters per cell. Headers must be unique.
+ZIP entries are expanded under explicit byte limits before ExcelJS parses them;
+large sparse workbook dimensions and unsupported XML declarations are rejected.
+No cell formula is executed; cached formula results can be read.
+
+`mapping` is an object of contact field to file header, such as
+`{"firstName":"First name","lastName":"Surname","email":"Email","tags":"Labels"}`.
+Supported fields are firstName, lastName, displayName, email, phone, notes,
+status, tags, kind and source. Tags in files accept comma/semicolon/pipe separators.
+`duplicateMode` defaults to `skip`; `update` explicitly permits replacing mapped
+nonblank fields on an email match. Unmapped and blank values never overwrite
+contact properties. Name-only updates recompose the display name.
+
+Preview rows are `{rowNumber,action,clientId?,contact?,errors,message?}`, where
+action is create/update/skip/error. Row numbers include the file header (first data
+row is 2). Summary is `{created,updated,skipped,errors}` with error row count.
+Missing email rows skip with an explanation, repeated file emails use the first
+valid row, and multiple CRM matches are errors. Missing names are an error only
+for a new contact. Commit re-evaluates matches within a serialized tenant mutation
+transaction and applies valid rows atomically with outbox events. Per-row errors
+are returned as `{rowNumber,messages}` and skips as `{rowNumber,message}`.
+
+Use one stable `Idempotency-Key` (1–160 printable characters) per import attempt.
+Its tenant-scoped digest and result persist in the same transaction as contacts.
+The same key and content returns the original result; changed content returns
+409. Create/PATCH/delete, import commits and connector intake serialize email
+matching under the same tenant advisory lock. A new key remains a new import;
+choose skip mode for repeat files or update mode deliberately.
+
+## Connected source intake
+
+`integrations.contacts-received.v1` contains
+`{connectionId,source,contacts:[{externalId,firstName?,lastName?,displayName?,email?,
+phone?,notes?,status?,tags?}]}`. Each event contains at most 200 contacts.
+Service-kit inbox deduplication and the mutation/outbox transaction handle broker
+retries. `integrations.connection-disconnected.v1` persists a tenant-scoped source
+tombstone under the same connection advisory lock used by contact intake. Any
+contact event processed after that disconnect is ignored, including delayed or
+retried batches. Existing imported CRM contacts and source links are retained; a
+new connection UUID is required to reconnect. RLS scopes durable external mappings by business, connection and external
+ID. Existing mappings win; otherwise normalized email can link a single existing
+contact. Email ambiguity or malformed rows produce issues. Source contacts with
+stable external IDs can be created without an email.
+
+Connectors fill empty fields only, preserving local edits, display names, existing
+status and nonempty tags. New source contacts default to student/lead. A nonblank
+existing email is preserved when the source changes its email. Filling a blank
+email is rejected if it would introduce a duplicate. Each delivery emits
+`clients.source-synced.v1` with `{connectionId,created,updated,skipped,errors,
+issues:[{externalId,reason}]}` for the integrations service to record its outcome.
+
+Client mutations emit transactional `clients.client-created.v1`,
+`clients.client-updated.v1`, `clients.client-deleted.v1`, or
+`clients.payer-linked.v1` with identifiers, excluding contact properties. Delete
+removes local payer/source links; other services keep their own historical data.
+
+Build: `pnpm --filter @palladium/clients build`. Automated tests were neither added
+nor run for this change under the coordinating user's instruction.

@@ -5,7 +5,7 @@ import { createRequire } from 'node:module';
 
 const root = new URL('../', import.meta.url);
 const settings = parseEnv(await readFile(new URL('.env', root), 'utf8'));
-const names = ['platform', 'clients', 'scheduling', 'learning', 'billing', 'payments', 'notifications'];
+const names = ['platform', 'clients', 'scheduling', 'learning', 'billing', 'payments', 'notifications', 'integrations'];
 const configuration = { ...process.env, ...settings };
 const systemEnvironment = { ...process.env };
 const applicationKeys = new Set([
@@ -43,6 +43,8 @@ const launches = [...names, 'gateway', 'web'].map((name, index) => {
   }
   if (name === 'platform') Object.assign(env, select(['PLATFORM_INTERNAL_SECRET', 'BETTER_AUTH_SECRET', 'PUBLIC_APP_URL', 'PUBLIC_GATEWAY_URL']));
   if (name === 'payments') Object.assign(env, select(['PAYMENT_ENCRYPTION_KEY', 'ALLOW_SANDBOX_PAYMENTS']));
+  if (name === 'integrations') Object.assign(env, select(['INTEGRATIONS_ENCRYPTION_KEY']));
+  if (name === 'learning') env.UPLOAD_DIRECTORY = new URL('.local/uploads/', root).pathname;
   if (name === 'gateway') {
     Object.assign(env, select(['CONTEXT_PRIVATE_KEY', 'PLATFORM_INTERNAL_SECRET', 'PUBLIC_APP_URL', 'PUBLIC_GATEWAY_URL', ...names.map(service => `${service.toUpperCase()}_URL`)]));
     env.PORT = '8080';

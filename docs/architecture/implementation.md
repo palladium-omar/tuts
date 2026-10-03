@@ -1,6 +1,6 @@
 # Shared implementation contract
 
-> **Contract scope:** This document describes the shared target interfaces and contributor requirements. The contracts and some runtime helpers are implemented, but a listed interface does not mean every feature that could use it is shipped. See the [repository status](../../README.md#what-works-today) and individual service READMEs for current behavior. Student/parent portal authorization and resource uploads remain future work.
+> **Contract scope:** This document describes the shared interfaces and contributor requirements. The runtime, eight domain services, and some workflows are implemented, but a listed interface does not mean every feature that could use it is shipped. See the [repository status](../../README.md#what-works-today), [connector contract](connectors.md), and service READMEs for current behavior. Student/parent portal authorization and production integrations remain future work.
 
 This document fixes the common interface used by independently implemented services. Ask the coordinating agent before changing shared packages or these interfaces.
 
@@ -16,6 +16,7 @@ services/learning/
 services/billing/
 services/payments/
 services/notifications/
+services/integrations/     external scheduling and contact connectors
 packages/contracts/        wire types only
 packages/service-kit/      Nest bootstrap, auth, database, events
 infra/                     local database provisioning
@@ -71,7 +72,7 @@ Services have package names `@palladium/<name>` and scripts `dev: tsx watch src/
 
 ## Environment
 
-All services: `DATABASE_URL`, `RABBITMQ_URL`, `CONTEXT_PUBLIC_KEY` (PEM, escaped newlines accepted), `PORT`. Gateway additionally has `CONTEXT_PRIVATE_KEY`, `PLATFORM_INTERNAL_SECRET`, and `<SERVICE>_URL` values. Platform has `PLATFORM_INTERNAL_SECRET`, `BETTER_AUTH_SECRET`, `PUBLIC_APP_URL`, `PUBLIC_GATEWAY_URL`. Payments has `PAYMENT_ENCRYPTION_KEY` and `ALLOW_SANDBOX_PAYMENTS`; production must reject sandbox. Shared infrastructure supports `DISABLE_BROKER=true` only for bounded tests.
+All services: `DATABASE_URL`, `RABBITMQ_URL`, `CONTEXT_PUBLIC_KEY` (PEM, escaped newlines accepted), `PORT`. Gateway additionally has `CONTEXT_PRIVATE_KEY`, `PLATFORM_INTERNAL_SECRET`, and `<SERVICE>_URL` values. Platform has `PLATFORM_INTERNAL_SECRET`, `BETTER_AUTH_SECRET`, `PUBLIC_APP_URL`, `PUBLIC_GATEWAY_URL`. Payments has `PAYMENT_ENCRYPTION_KEY` and `ALLOW_SANDBOX_PAYMENTS`; production must reject sandbox. Integrations has `INTEGRATIONS_ENCRYPTION_KEY`, a stable 32-byte key encoded as hexadecimal or base64. `pnpm setup:local` creates this key and new local database credentials while preserving existing environment values. Shared infrastructure supports `DISABLE_BROKER=true` only for bounded tests.
 
 Do not add guessed success stubs for external providers. A provider connection or capability that is not implemented must be returned as unavailable. External API credentials and production authorization are not supplied by this repository.
 

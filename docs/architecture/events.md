@@ -20,7 +20,8 @@ RabbitMQ topic exchange: `palladium.events`. Each consuming service has its own 
     "invoiceId": "uuid",
     "amountMinor": 12000,
     "currency": "USD",
-    "provider": "stripe"
+    "provider": "sandbox",
+    "simulated": true
   }
 }
 ```
@@ -35,15 +36,22 @@ Consumers insert `(consumer, event_id)` into an inbox in the same transaction as
 
 Financial status transitions must be monotonic or explicitly reconciled. A stale provider notification cannot change a confirmed payment back to pending. An unknown invoice/payment reference is retained for investigation/retry, never silently treated as settled.
 
-## Initial event catalogue
+## Selected event catalogue
+
+The table covers cross-service flows relevant to the current implementation. Individual service READMEs document their other emitted events.
 
 | Event | Producer | Consumer | Required payload |
 | --- | --- | --- | --- |
 | `clients.client-created.v1` | clients | notifications, optional | clientId |
+| `clients.source-synced.v1` | clients | integrations | connectionId, created, updated, skipped, errors, issues, receivedAt |
 | `scheduling.session-created.v1` | scheduling | notifications | sessionId, clientId, startsAt |
-| `scheduling.session-completed.v1` | scheduling | optional billing workflow | sessionId, clientId; price/payer snapshot only if configured |
+| `scheduling.session-completed.v1` | scheduling | notifications | sessionId, clientId |
 | `learning.assignment-created.v1` | learning | notifications | assignmentId, clientId, dueAt |
 | `billing.invoice-issued.v1` | billing | payments invoice projection, notifications | invoiceId, amountMinor, currency |
 | `payments.payment-confirmed.v1` | payments | billing, notifications | paymentId, invoiceId, amountMinor, currency, provider |
+| `platform.business-profile-updated.v1` | platform | billing | businessId, name, profile, branding, revision |
+| `integrations.contacts-received.v1` | integrations | clients | connectionId, source, contacts (up to 200) |
+| `integrations.sessions-synced.v1` | integrations | scheduling | connectionId, provider, ownerUserId, sessions (up to 200) |
+| `integrations.connection-disconnected.v1` | integrations | clients, scheduling | connectionId |
 
 Optional automation must check tenant configuration. Financial reconciliation consumers continue settling previously accepted payments even after feature access changes. Emit a new event version for incompatible payload changes. Adding consumers must not require changing the producer's implementation.

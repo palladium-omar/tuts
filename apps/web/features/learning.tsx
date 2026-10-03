@@ -1,0 +1,405 @@
+import { useEffect, useState, type FormEvent } from "react";
+import { Download, FileText, Plus, Upload, X } from "lucide-react";
+import {
+  date,
+  downloadFile,
+  errorMessage,
+  type Api,
+  type Row,
+} from "../lib/api";
+import { Empty, Modal, Notice } from "../components/shared";
+export function Learning({
+  api,
+  businessId,
+}: {
+  api: Api;
+  businessId: string;
+}) {
+  const [studentId, setStudentId] = useState("");
+  const [rows, setRows] = useState<Row[]>([]),
+    [students, setStudents] = useState<Row[]>([]),
+    [creating, setCreating] = useState(false),
+    [selected, setSelected] = useState<Row | null>(null),
+    [files, setFiles] = useState<File[]>([]),
+    [uploaded, setUploaded] = useState<Row[]>([]),
+    [error, setError] = useState(""),
+    [message, setMessage] = useState(""),
+    [busy, setBusy] = useState(false),
+    [loading, setLoading] = useState(true);
+  async function load() {
+    setLoading(true);
+    try {
+      const data = await api("learning/v1/assignments");
+      setRows(data.items);
+      setError("");
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+  useEffect(() => {
+    void load();
+  }, [api]);
+  async function openCreate() {
+    setError("");
+    try {
+      const all: Row[] = [];
+      for (let offset = 0; offset < 2000; offset += 100) {
+        const result = await api(
+          `clients/v1/clients?kind=student&limit=100&offset=${offset}`,
+        );
+        all.push(...result.items);
+        if (result.items.length < 100) break;
+      }
+      setStudents(all);
+      setFiles([]);
+      setUploaded([]);
+      setStudentId("");
+      setCreating(true);
+    } catch (e) {
+      setError(errorMessage(e));
+    }
+  }
+  async function create(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const form = new FormData(e.currentTarget);
+    setBusy(true);
+    setError("");
+    const attachments = [...uploaded];
+    try {
+      for (const file of files) {
+        if (attachments.some((a) => a.uploadFile === file)) continue;
+        const body = new FormData();
+        body.set("clientId", String(form.get("clientId")));
+        body.set("title", file.name);
+        body.set("file", file);
+        const { item } = await api(
+          "learning/v1/resources/upload",
+          "POST",
+          body,
+        );
+        attachments.push({
+          ...item,
+          uploadName: file.name,
+          uploadSize: file.size,
+          uploadFile: file,
+        });
+        setUploaded([...attachments]);
+      }
+      await api("learning/v1/assignments", "POST", {
+        clientId: form.get("clientId"),
+        title: form.get("title"),
+        description: form.get("description") || "",
+        resourceIds: attachments.map((a) => a.id),
+        ...(form.get("dueAt")
+          ? { dueAt: new Date(String(form.get("dueAt"))).toISOString() }
+          : {}),
+      });
+      setCreating(false);
+      setFiles([]);
+      setUploaded([]);
+      await load();
+      setMessage("Assignment saved with its files.");
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function download(resource: Row) {
+    try {
+      await downloadFile(
+        `learning/v1/resources/${resource.id}/download`,
+        businessId,
+        resource.fileName ?? resource.title,
+      );
+    } catch (e) {
+      setError(errorMessage(e));
+    }
+  }
+  async function progress(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!selected) return;
+    const f = new FormData(e.currentTarget);
+    const review = selected.status === "submitted";
+    setBusy(true);
+    setError("");
+    try {
+      await api(
+        `learning/v1/assignments/${selected.id}/${review ? "review" : "submit"}`,
+        "POST",
+        review
+          ? { status: f.get("status"), feedback: f.get("feedback") || "" }
+          : { submissionText: f.get("submissionText") },
+      );
+      setSelected(null);
+      await load();
+      setMessage(review ? "Review saved." : "Submission recorded.");
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <>
+      <div className="section-heading">
+        <div>
+          <h1>Give every student a clear next step.</h1>
+          <p className="muted">
+            Assign worksheets, PDFs, and learning materials. Keep submissions
+            and feedback alongside the work.
+          </p>
+        </div>
+        <button className="primary" onClick={() => void openCreate()}>
+          <Plus size={16} />
+          New assignment
+        </button>
+      </div>
+      <Notice error={!creating && !selected ? error : ""} message={message} />
+      <section className="panel">
+        <div className="panel-title">
+          <h3>Assignments & materials</h3>
+          <span className="tag">{rows.length} assignments</span>
+        </div>
+        {loading ? (
+          <Empty>Loading assignments…</Empty>
+        ) : !rows.length ? (
+          <Empty>
+            <FileText size={30} />
+            <h3>Your students’ work belongs here.</h3>
+            <p>Add an assignment and attach the resources they need.</p>
+          </Empty>
+        ) : (
+          <div className="assignment-grid">
+            {rows.map((row) => (
+              <article className="assignment-card" key={row.id}>
+                <div className="panel-title">
+                  <strong>{row.title}</strong>
+                  <span className={`status ${row.status}`}>{row.status}</span>
+                </div>
+                <p>{row.description}</p>
+                {row.dueAt && (
+                  <small className="muted">Due {date(row.dueAt)}</small>
+                )}
+                <div className="attachment-list">
+                  {row.resources?.map((r: Row) => (
+                    <button
+                      key={r.id}
+                      disabled={r.storageStatus !== "stored"}
+                      onClick={() => void download(r)}
+                    >
+                      <FileText size={16} />
+                      <span>{r.fileName ?? r.title}</span>
+                      <Download size={15} />
+                    </button>
+                  ))}
+                </div>
+                {row.feedback && <blockquote>{row.feedback}</blockquote>}
+                <button
+                  className="link"
+                  onClick={() => {
+                    setSelected(row);
+                    setError("");
+                  }}
+                >
+                  View work & progress
+                </button>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+      {creating && (
+        <Modal
+          title="New assignment"
+          onClose={() => {
+            if (!busy) setCreating(false);
+          }}
+        >
+          <Notice error={error} />
+          <form onSubmit={create}>
+            <div className="form-grid">
+              <label>
+                Student
+                <select
+                  name="clientId"
+                  value={studentId}
+                  onChange={(e) => setStudentId(e.target.value)}
+                  required
+                  disabled={busy || uploaded.length > 0}
+                >
+                  <option value="">Choose a student</option>
+                  {students.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.displayName}
+                    </option>
+                  ))}
+                </select>
+                {uploaded.length > 0 && (
+                  <input type="hidden" name="clientId" value={studentId} />
+                )}
+              </label>
+              <label>
+                Assignment title
+                <input name="title" required maxLength={200} />
+              </label>
+              <label>
+                Due date (optional)
+                <input name="dueAt" type="datetime-local" />
+              </label>
+            </div>
+            <label className="file-drop">
+              <Upload size={28} />
+              <strong>Add learning materials</strong>
+              <span>
+                PDF, Word, PowerPoint, images, or text · up to 20 MB per file
+              </span>
+              <input
+                type="file"
+                multiple
+                disabled={busy}
+                accept=".pdf,.docx,.pptx,.png,.jpg,.jpeg,.webp,.txt"
+                onChange={(e) => {
+                  const incoming = [...(e.target.files ?? [])];
+                  if (incoming.some((f) => f.size > 20 * 1024 * 1024)) {
+                    setError("Each attachment must be 20 MB or smaller.");
+                    return;
+                  }
+                  if (files.length + incoming.length > 20) {
+                    setError("Attach up to 20 files per assignment.");
+                    return;
+                  }
+                  setFiles([...files, ...incoming]);
+                  setError("");
+                  e.target.value = "";
+                }}
+              />
+            </label>
+            <div className="attachment-list">
+              {files.map((file, i) => (
+                <div className="chosen-file" key={`${file.name}-${i}`}>
+                  <FileText size={17} />
+                  <span>
+                    {file.name}
+                    <small>
+                      {(file.size / 1024).toFixed(0)} KB
+                      {uploaded.some((r) => r.uploadFile === file)
+                        ? " · uploaded"
+                        : ""}
+                    </small>
+                  </span>
+                  <button
+                    type="button"
+                    disabled={
+                      busy || uploaded.some((r) => r.uploadFile === file)
+                    }
+                    aria-label={`Remove ${file.name}`}
+                    onClick={() => setFiles(files.filter((_, j) => i !== j))}
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <label>
+              Note for the student (optional)
+              <textarea
+                name="description"
+                rows={3}
+                placeholder="For example: complete questions 1–12 in the attached worksheet."
+                maxLength={5000}
+              />
+            </label>
+            <div className="form-actions">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => setCreating(false)}
+              >
+                Cancel
+              </button>
+              <button className="primary" disabled={busy}>
+                {busy ? "Uploading & saving…" : "Create assignment"}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+      {selected && (
+        <Modal
+          title={selected.title}
+          onClose={() => {
+            if (!busy) setSelected(null);
+          }}
+        >
+          <Notice error={error} />
+          <p>{selected.description}</p>
+          <div className="attachment-list">
+            {selected.resources?.map((r: Row) => (
+              <button
+                key={r.id}
+                disabled={r.storageStatus !== "stored"}
+                onClick={() => void download(r)}
+              >
+                <FileText size={16} />
+                {r.fileName ?? r.title}
+                <Download size={16} />
+              </button>
+            ))}
+          </div>
+          {selected.submissionText && (
+            <section className="submission">
+              <h3>Student work</h3>
+              <p>{selected.submissionText}</p>
+            </section>
+          )}
+          {selected.feedback && <blockquote>{selected.feedback}</blockquote>}
+          {["assigned", "needs_revision", "submitted"].includes(
+            selected.status,
+          ) && (
+            <form onSubmit={progress}>
+              {selected.status === "submitted" ? (
+                <>
+                  <label>
+                    Review
+                    <select name="status">
+                      <option value="completed">Complete</option>
+                      <option value="needs_revision">
+                        Needs another attempt
+                      </option>
+                    </select>
+                  </label>
+                  <label>
+                    Feedback
+                    <textarea name="feedback" rows={4} />
+                  </label>
+                </>
+              ) : (
+                <>
+                  <p className="muted">
+                    Record work received from this student.
+                  </p>
+                  <label>
+                    Submission / work received
+                    <textarea name="submissionText" required rows={4} />
+                  </label>
+                </>
+              )}
+              <div className="form-actions">
+                <button className="primary" disabled={busy}>
+                  {busy
+                    ? "Saving…"
+                    : selected.status === "submitted"
+                      ? "Save review"
+                      : "Record submission"}
+                </button>
+              </div>
+            </form>
+          )}
+        </Modal>
+      )}
+    </>
+  );
+}
