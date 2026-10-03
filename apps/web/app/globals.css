@@ -54,6 +54,26 @@ button:disabled {
   cursor: default;
   opacity: 0.5;
 }
+button:focus-visible,
+a:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+}
+.skip-link {
+  position: fixed;
+  z-index: 100;
+  left: 16px;
+  top: -80px;
+  background: var(--surface);
+  padding: 12px 18px;
+  border-radius: 8px;
+}
+.skip-link:focus {
+  top: 12px;
+}
+.content:focus {
+  outline: none;
+}
 a {
   color: var(--accent);
 }
@@ -409,7 +429,7 @@ input[type="color"] {
   background: var(--background);
   color: var(--ink);
 }
-aside {
+.shell > aside {
   width: 244px;
   background: var(--surface);
   border-right: 1px solid var(--line);
@@ -417,13 +437,27 @@ aside {
   inset: 0 auto 0 0;
   display: flex;
   flex-direction: column;
-  padding: 29px 18px;
+  padding: 24px 18px;
   z-index: 10;
 }
-aside .wordmark {
+.shell > aside .wordmark {
   padding-left: 11px;
-  margin-bottom: 28px;
+  margin-bottom: 20px;
   color: var(--accent);
+}
+.sidebar-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.sidebar-heading {
+  flex-shrink: 0;
+}
+.mobile-menu-toggle,
+.mobile-business {
+  display: none;
 }
 .business-picker {
   display: flex;
@@ -433,7 +467,7 @@ aside .wordmark {
   background: var(--tint);
   border: 1px solid var(--line);
   border-radius: 9px;
-  margin-bottom: 27px;
+  margin-bottom: 20px;
 }
 .business-picker select {
   padding: 0;
@@ -496,7 +530,7 @@ nav button.active,
 }
 .sidebar-bottom {
   margin-top: auto;
-  padding-top: 25px;
+  padding-top: 16px;
 }
 .sidebar-bottom > button {
   width: 100%;
@@ -829,6 +863,14 @@ tr:last-child td {
 .modal .panel-title > button {
   border: 0;
   padding: 6px;
+}
+.modal .form-actions {
+  position: sticky;
+  bottom: -1px;
+  z-index: 2;
+  background: var(--surface);
+  padding: 16px 0;
+  box-shadow: 0 -8px 16px var(--surface);
 }
 .import-preview {
   max-height: 320px;
@@ -1177,16 +1219,92 @@ blockquote,
   .shell {
     display: block;
   }
-  aside {
+  .shell > aside {
     position: static;
     width: 100%;
     padding: 18px;
     border-right: 0;
     border-bottom: 1px solid var(--line);
   }
-  aside .wordmark {
-    margin: 0 0 16px;
+  .shell > aside .wordmark {
+    margin: 0;
     padding: 0;
+    font-size: 23px;
+  }
+  .sidebar-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+  }
+  .sidebar-heading > div {
+    min-width: 0;
+  }
+  .mobile-business {
+    display: block;
+    font-size: 11px;
+    color: var(--muted);
+    max-width: 230px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    margin-top: 4px;
+  }
+  .mobile-menu-toggle {
+    display: inline-flex;
+    min-height: 44px;
+    flex-shrink: 0;
+  }
+  .sidebar-content {
+    display: none;
+    overflow: visible;
+  }
+  .sidebar-content.is-open {
+    display: flex;
+    padding-top: 18px;
+  }
+  .sidebar-content nav {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    overflow: visible;
+  }
+  .sidebar-content nav button {
+    min-height: 44px;
+  }
+  .sidebar-content .sidebar-bottom {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+  .sidebar-content .sidebar-bottom > button {
+    min-height: 44px;
+  }
+  .sidebar-content .new-business {
+    display: flex !important;
+  }
+  .sidebar-content .profile {
+    grid-column: 1 / -1;
+    width: 100%;
+    border-top: 1px solid var(--line);
+    margin-top: 6px;
+    padding-top: 12px;
+  }
+  .sidebar-content .profile > div {
+    display: block;
+  }
+  .sidebar-content .profile .avatar {
+    display: grid;
+  }
+  .sidebar-content .profile button {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  .sidebar-content .business-picker {
+    max-width: none;
+    width: 100%;
+  }
+  .sidebar-content .business-picker select {
+    flex: 1;
+    max-width: none;
   }
   .business-picker {
     margin-bottom: 16px;

@@ -44,7 +44,13 @@ export function Modal({
           'button:not([disabled]),input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),a[href],[tabindex="0"]',
         ) ?? [],
       ).filter((el) => el.getClientRects().length);
-    targets()[0]?.focus();
+    const focusable = targets();
+    const firstField = focusable.find((el) =>
+      el.matches(
+        'input:not([type="file"]):not([readonly]),select,textarea:not([readonly])',
+      ),
+    );
+    (firstField ?? focusable[0])?.focus();
     const keydown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();

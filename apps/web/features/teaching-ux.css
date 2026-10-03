@@ -1,0 +1,55 @@
+.teaching-student {
+  color: var(--accent);
+  font-weight: 600;
+  margin: 8px 0;
+}
+.teaching-progress-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 0 18px;
+  border-bottom: 1px solid var(--line);
+}
+.teaching-materials-heading {
+  margin-top: 24px;
+}
+.teaching-work-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.teaching-prerequisite {
+  padding: 30px 10px;
+  text-align: center;
+}
+.teaching-prerequisite p {
+  max-width: 460px;
+  margin: 12px auto 24px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+.teaching-completed,
+.invoice-draft-note {
+  background: var(--tint);
+  border-radius: 8px;
+  padding: 14px 16px;
+  color: var(--accent);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.invoice-preview-total {
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--tint);
+  padding: 16px;
+  border-radius: 8px;
+}
+.invoice-preview-total strong {
+  font-size: 20px;
+}
+.invoice-date {
+  margin-top: 8px;
+  color: var(--muted);
+}

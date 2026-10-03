@@ -8,12 +8,28 @@ import {
   type Row,
 } from "../lib/api";
 import { Empty, Modal, Notice } from "../components/shared";
+import "./teaching-ux.css";
+
+const assignmentStatus: Record<string, string> = {
+  assigned: "Assigned",
+  submitted: "Ready for review",
+  completed: "Completed",
+  needs_revision: "Needs another attempt",
+};
+const fileSize = (bytes: number) =>
+  bytes < 1024
+    ? `${bytes} bytes`
+    : bytes < 1024 * 1024
+      ? `${Math.ceil(bytes / 1024)} KB`
+      : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 export function Learning({
   api,
   businessId,
+  onOpenClients,
 }: {
   api: Api;
   businessId: string;
+  onOpenClients?: () => void;
 }) {
   const [studentId, setStudentId] = useState("");
   const [rows, setRows] = useState<Row[]>([]),
@@ -25,7 +41,21 @@ export function Learning({
     [error, setError] = useState(""),
     [message, setMessage] = useState(""),
     [busy, setBusy] = useState(false),
+    [opening, setOpening] = useState(false),
+    [saveStep, setSaveStep] = useState(""),
     [loading, setLoading] = useState(true);
+  async function loadStudents() {
+    const all: Row[] = [];
+    for (let offset = 0; offset < 2000; offset += 100) {
+      const result = await api(
+        `clients/v1/clients?kind=student&limit=100&offset=${offset}`,
+      );
+      all.push(...result.items);
+      if (result.items.length < 100) break;
+    }
+    setStudents(all);
+    return all;
+  }
   async function load() {
     setLoading(true);
     try {
@@ -40,25 +70,22 @@ export function Learning({
   }
   useEffect(() => {
     void load();
+    void loadStudents().catch(() => setStudents([]));
   }, [api]);
   async function openCreate() {
     setError("");
+    setMessage("");
+    setOpening(true);
     try {
-      const all: Row[] = [];
-      for (let offset = 0; offset < 2000; offset += 100) {
-        const result = await api(
-          `clients/v1/clients?kind=student&limit=100&offset=${offset}`,
-        );
-        all.push(...result.items);
-        if (result.items.length < 100) break;
-      }
-      setStudents(all);
+      await loadStudents();
       setFiles([]);
       setUploaded([]);
       setStudentId("");
       setCreating(true);
     } catch (e) {
       setError(errorMessage(e));
+    } finally {
+      setOpening(false);
     }
   }
   async function create(e: FormEvent<HTMLFormElement>) {
@@ -68,8 +95,9 @@ export function Learning({
     setError("");
     const attachments = [...uploaded];
     try {
-      for (const file of files) {
+      for (const [index, file] of files.entries()) {
         if (attachments.some((a) => a.uploadFile === file)) continue;
+        setSaveStep(`Uploading file ${index + 1} of ${files.length}…`);
         const body = new FormData();
         body.set("clientId", String(form.get("clientId")));
         body.set("title", file.name);
@@ -87,6 +115,7 @@ export function Learning({
         });
         setUploaded([...attachments]);
       }
+      setSaveStep("Saving assignment…");
       await api("learning/v1/assignments", "POST", {
         clientId: form.get("clientId"),
         title: form.get("title"),
@@ -100,11 +129,16 @@ export function Learning({
       setFiles([]);
       setUploaded([]);
       await load();
-      setMessage("Assignment saved with its files.");
+      setMessage(
+        attachments.length
+          ? "Assignment saved with its files."
+          : "Assignment saved.",
+      );
     } catch (e) {
       setError(errorMessage(e));
     } finally {
       setBusy(false);
+      setSaveStep("");
     }
   }
   async function download(resource: Row) {
@@ -152,16 +186,22 @@ export function Learning({
             and feedback alongside the work.
           </p>
         </div>
-        <button className="primary" onClick={() => void openCreate()}>
+        <button
+          className="primary"
+          disabled={opening}
+          onClick={() => void openCreate()}
+        >
           <Plus size={16} />
-          New assignment
+          {opening ? "Loading students…" : "New assignment"}
         </button>
       </div>
       <Notice error={!creating && !selected ? error : ""} message={message} />
       <section className="panel">
         <div className="panel-title">
           <h3>Assignments & materials</h3>
-          <span className="tag">{rows.length} assignments</span>
+          <span className="tag">
+            {rows.length} {rows.length === 1 ? "assignment" : "assignments"}
+          </span>
         </div>
         {loading ? (
           <Empty>Loading assignments…</Empty>
@@ -177,9 +217,15 @@ export function Learning({
               <article className="assignment-card" key={row.id}>
                 <div className="panel-title">
                   <strong>{row.title}</strong>
-                  <span className={`status ${row.status}`}>{row.status}</span>
+                  <span className={`status ${row.status}`}>
+                    {assignmentStatus[row.status] ?? row.status}
+                  </span>
                 </div>
-                <p>{row.description}</p>
+                <p className="teaching-student">
+                  {students.find((s) => s.id === row.clientId)?.displayName ??
+                    "Student unavailable"}
+                </p>
+                {row.description && <p>{row.description}</p>}
                 {row.dueAt && (
                   <small className="muted">Due {date(row.dueAt)}</small>
                 )}
@@ -196,7 +242,12 @@ export function Learning({
                     </button>
                   ))}
                 </div>
-                {row.feedback && <blockquote>{row.feedback}</blockquote>}
+                {row.feedback && (
+                  <blockquote>
+                    <strong>Feedback</strong>
+                    <p>{row.feedback}</p>
+                  </blockquote>
+                )}
                 <button
                   className="link"
                   onClick={() => {
@@ -219,112 +270,162 @@ export function Learning({
           }}
         >
           <Notice error={error} />
-          <form onSubmit={create}>
-            <div className="form-grid">
-              <label>
-                Student
-                <select
-                  name="clientId"
-                  value={studentId}
-                  onChange={(e) => setStudentId(e.target.value)}
-                  required
-                  disabled={busy || uploaded.length > 0}
+          {!students.length ? (
+            <div className="teaching-prerequisite">
+              <FileText size={28} />
+              <h3>Add a student first</h3>
+              <p>
+                Assignments belong to a student. Add a contact in CRM and choose
+                Student as their relationship, then return here.
+              </p>
+              {onOpenClients && (
+                <button
+                  className="primary"
+                  onClick={() => {
+                    setCreating(false);
+                    onOpenClients();
+                  }}
                 >
-                  <option value="">Choose a student</option>
-                  {students.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.displayName}
-                    </option>
-                  ))}
-                </select>
-                {uploaded.length > 0 && (
-                  <input type="hidden" name="clientId" value={studentId} />
-                )}
-              </label>
-              <label>
-                Assignment title
-                <input name="title" required maxLength={200} />
-              </label>
-              <label>
-                Due date (optional)
-                <input name="dueAt" type="datetime-local" />
-              </label>
+                  Open CRM
+                </button>
+              )}
             </div>
-            <label className="file-drop">
-              <Upload size={28} />
-              <strong>Add learning materials</strong>
-              <span>
-                PDF, Word, PowerPoint, images, or text · up to 20 MB per file
-              </span>
-              <input
-                type="file"
-                multiple
-                disabled={busy}
-                accept=".pdf,.docx,.pptx,.png,.jpg,.jpeg,.webp,.txt"
-                onChange={(e) => {
-                  const incoming = [...(e.target.files ?? [])];
-                  if (incoming.some((f) => f.size > 20 * 1024 * 1024)) {
-                    setError("Each attachment must be 20 MB or smaller.");
-                    return;
-                  }
-                  if (files.length + incoming.length > 20) {
-                    setError("Attach up to 20 files per assignment.");
-                    return;
-                  }
-                  setFiles([...files, ...incoming]);
-                  setError("");
-                  e.target.value = "";
-                }}
-              />
-            </label>
-            <div className="attachment-list">
-              {files.map((file, i) => (
-                <div className="chosen-file" key={`${file.name}-${i}`}>
-                  <FileText size={17} />
-                  <span>
-                    {file.name}
-                    <small>
-                      {(file.size / 1024).toFixed(0)} KB
-                      {uploaded.some((r) => r.uploadFile === file)
-                        ? " · uploaded"
-                        : ""}
-                    </small>
-                  </span>
-                  <button
-                    type="button"
-                    disabled={
-                      busy || uploaded.some((r) => r.uploadFile === file)
-                    }
-                    aria-label={`Remove ${file.name}`}
-                    onClick={() => setFiles(files.filter((_, j) => i !== j))}
+          ) : (
+            <form onSubmit={create}>
+              <div className="form-grid">
+                <label>
+                  Student
+                  <select
+                    name="clientId"
+                    value={studentId}
+                    onChange={(e) => setStudentId(e.target.value)}
+                    required
+                    disabled={busy || uploaded.length > 0}
                   >
-                    <X size={16} />
-                  </button>
-                </div>
-              ))}
-            </div>
-            <label>
-              Note for the student (optional)
-              <textarea
-                name="description"
-                rows={3}
-                placeholder="For example: complete questions 1–12 in the attached worksheet."
-                maxLength={5000}
-              />
-            </label>
-            <div className="form-actions">
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => setCreating(false)}
-              >
-                Cancel
-              </button>
-              <button className="primary" disabled={busy}>
-                {busy ? "Uploading & saving…" : "Create assignment"}
-              </button>
-            </div>
-          </form>
+                    <option value="">Choose a student</option>
+                    {students.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.displayName}
+                      </option>
+                    ))}
+                  </select>
+                  {uploaded.length > 0 && (
+                    <input type="hidden" name="clientId" value={studentId} />
+                  )}
+                </label>
+                <label>
+                  Assignment title
+                  <input
+                    name="title"
+                    required
+                    maxLength={200}
+                    disabled={busy}
+                    placeholder="For example: Algebra practice"
+                  />
+                </label>
+                <label>
+                  Due date (optional)
+                  <input name="dueAt" type="datetime-local" disabled={busy} />
+                  <small className="field-hint">
+                    Time is shown in{" "}
+                    {Intl.DateTimeFormat().resolvedOptions().timeZone}.
+                  </small>
+                </label>
+              </div>
+              <label className="file-drop">
+                <Upload size={28} />
+                <strong>Add learning materials</strong>
+                <span>
+                  PDF, Word, PowerPoint, images, or text · up to 20 MB per file
+                </span>
+                <input
+                  type="file"
+                  multiple
+                  disabled={busy}
+                  accept=".pdf,.docx,.pptx,.png,.jpg,.jpeg,.webp,.txt"
+                  aria-label="Choose learning material files"
+                  onChange={(e) => {
+                    const incoming = [...(e.target.files ?? [])].filter(
+                      (file, index, incomingFiles) =>
+                        !files.some(
+                          (existing) =>
+                            existing.name === file.name &&
+                            existing.size === file.size &&
+                            existing.lastModified === file.lastModified,
+                        ) &&
+                        incomingFiles.findIndex(
+                          (other) =>
+                            other.name === file.name &&
+                            other.size === file.size &&
+                            other.lastModified === file.lastModified,
+                        ) === index,
+                    );
+                    e.target.value = "";
+                    if (incoming.some((f) => f.size > 20 * 1024 * 1024)) {
+                      setError("Each attachment must be 20 MB or smaller.");
+                      return;
+                    }
+                    if (files.length + incoming.length > 20) {
+                      setError("Attach up to 20 files per assignment.");
+                      return;
+                    }
+                    setFiles([...files, ...incoming]);
+                    setError("");
+                  }}
+                />
+              </label>
+              <div className="attachment-list">
+                {files.map((file, i) => (
+                  <div className="chosen-file" key={`${file.name}-${i}`}>
+                    <FileText size={17} />
+                    <span>
+                      {file.name}
+                      <small>
+                        {fileSize(file.size)}
+                        {uploaded.some((r) => r.uploadFile === file)
+                          ? " · uploaded"
+                          : ""}
+                      </small>
+                    </span>
+                    <button
+                      type="button"
+                      disabled={
+                        busy || uploaded.some((r) => r.uploadFile === file)
+                      }
+                      aria-label={`Remove ${file.name}`}
+                      onClick={() => setFiles(files.filter((_, j) => i !== j))}
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <label>
+                Note for the student (optional)
+                <textarea
+                  name="description"
+                  rows={3}
+                  placeholder="For example: complete questions 1–12 in the attached worksheet."
+                  maxLength={5000}
+                  disabled={busy}
+                />
+              </label>
+              <div className="form-actions">
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setCreating(false)}
+                >
+                  Cancel
+                </button>
+                <button className="primary" disabled={busy}>
+                  {busy
+                    ? saveStep || "Saving assignment…"
+                    : "Create assignment"}
+                </button>
+              </div>
+            </form>
+          )}
         </Modal>
       )}
       {selected && (
@@ -335,7 +436,25 @@ export function Learning({
           }}
         >
           <Notice error={error} />
-          <p>{selected.description}</p>
+          <div className="teaching-progress-meta">
+            <strong>
+              {students.find((s) => s.id === selected.clientId)?.displayName ??
+                "Student unavailable"}
+            </strong>
+            <span className={`status ${selected.status}`}>
+              {assignmentStatus[selected.status] ?? selected.status}
+            </span>
+            {selected.dueAt && (
+              <small className="muted">Due {date(selected.dueAt)}</small>
+            )}
+          </div>
+          {selected.description && (
+            <p className="teaching-work-text">{selected.description}</p>
+          )}
+          <h3 className="teaching-materials-heading">Learning materials</h3>
+          {!selected.resources?.length && (
+            <p className="muted">No files attached to this assignment.</p>
+          )}
           <div className="attachment-list">
             {selected.resources?.map((r: Row) => (
               <button
@@ -352,10 +471,21 @@ export function Learning({
           {selected.submissionText && (
             <section className="submission">
               <h3>Student work</h3>
-              <p>{selected.submissionText}</p>
+              <p className="teaching-work-text">{selected.submissionText}</p>
             </section>
           )}
-          {selected.feedback && <blockquote>{selected.feedback}</blockquote>}
+          {selected.feedback && (
+            <blockquote>
+              <strong>Feedback</strong>
+              <p className="teaching-work-text">{selected.feedback}</p>
+            </blockquote>
+          )}
+          {selected.status === "completed" && (
+            <p className="teaching-completed">
+              This assignment is complete. The student’s work and your feedback
+              are saved above.
+            </p>
+          )}
           {["assigned", "needs_revision", "submitted"].includes(
             selected.status,
           ) && (
@@ -364,7 +494,7 @@ export function Learning({
                 <>
                   <label>
                     Review
-                    <select name="status">
+                    <select name="status" disabled={busy}>
                       <option value="completed">Complete</option>
                       <option value="needs_revision">
                         Needs another attempt
@@ -373,7 +503,13 @@ export function Learning({
                   </label>
                   <label>
                     Feedback
-                    <textarea name="feedback" rows={4} />
+                    <textarea
+                      name="feedback"
+                      rows={4}
+                      maxLength={5000}
+                      disabled={busy}
+                      placeholder="Share what went well and the next step."
+                    />
                   </label>
                 </>
               ) : (
@@ -383,7 +519,14 @@ export function Learning({
                   </p>
                   <label>
                     Submission / work received
-                    <textarea name="submissionText" required rows={4} />
+                    <textarea
+                      name="submissionText"
+                      required
+                      rows={4}
+                      maxLength={10000}
+                      disabled={busy}
+                      placeholder="Summarize the work received, or paste the student’s answers."
+                    />
                   </label>
                 </>
               )}

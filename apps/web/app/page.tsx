@@ -2,6 +2,7 @@
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
   type CSSProperties,
   type FormEvent,
@@ -21,6 +22,8 @@ import {
   Users,
   Wallet,
   Bell,
+  Menu,
+  X,
 } from "lucide-react";
 import {
   createApi,
@@ -44,6 +47,43 @@ const icons: Record<string, any> = {
   notifications: Bell,
   integrations: Plug,
 };
+type ConnectorFilter = "all" | "calendars" | "crm";
+type WorkspaceRoute = { view: string; filter: ConnectorFilter };
+function readRoute(business: Business): WorkspaceRoute {
+  const params = new URLSearchParams(window.location.search);
+  const requested = params.get("view") ?? "overview";
+  const allowed =
+    requested === "overview" ||
+    requested === "settings" ||
+    featureRegistry.some(
+      (f) =>
+        f.id === requested && business.entitlements.includes(f.entitlement),
+    );
+  const filter = params.get("filter");
+  return {
+    view: allowed ? requested : "overview",
+    filter:
+      requested === "integrations" &&
+      (filter === "crm" || filter === "calendars")
+        ? filter
+        : "all",
+  };
+}
+function writeRoute(
+  business: Business,
+  route: WorkspaceRoute,
+  replace = false,
+) {
+  const url = new URL(window.location.href);
+  url.searchParams.set("business", business.id);
+  url.searchParams.set("view", route.view);
+  if (route.view === "integrations" && route.filter !== "all")
+    url.searchParams.set("filter", route.filter);
+  else url.searchParams.delete("filter");
+  if (url.href !== window.location.href) {
+    window.history[replace ? "replaceState" : "pushState"](null, "", url);
+  }
+}
 function theme(branding: Row): CSSProperties {
   const c = branding.primaryColor ?? defaultPalette.primaryColor;
   const light =
@@ -67,17 +107,47 @@ export default function Home() {
     [business, setBusiness] = useState<Business | null>(null),
     [loading, setLoading] = useState(true),
     [newBusiness, setNewBusiness] = useState(false),
+    [route, setRoute] = useState<WorkspaceRoute>({
+      view: "overview",
+      filter: "all",
+    }),
     [draftPalette, setDraftPalette] = useState<Row>(defaultPalette);
   async function loadBusinesses(preferred?: string) {
     const { items } = await platform("platform/v1/businesses");
     setBusinesses(items);
-    setBusiness(
-      (current) =>
-        items.find((b: Business) => b.id === (preferred ?? current?.id)) ??
-        items[0] ??
-        null,
+    const requestedId = new URLSearchParams(window.location.search).get(
+      "business",
     );
+    const selected =
+      items.find(
+        (b: Business) => b.id === (preferred ?? requestedId ?? business?.id),
+      ) ??
+      items[0] ??
+      null;
+    setBusiness(selected);
+    if (selected) {
+      const next =
+        preferred && preferred !== requestedId
+          ? { view: "overview", filter: "all" as const }
+          : readRoute(selected);
+      setRoute(next);
+      writeRoute(selected, next, true);
+    }
   }
+  useEffect(() => {
+    const restore = () => {
+      const id = new URLSearchParams(window.location.search).get("business");
+      const selected = businesses.find((b) => b.id === id) ?? businesses[0];
+      if (!selected) return;
+      const next = readRoute(selected);
+      setBusiness(selected);
+      setRoute(next);
+      setNewBusiness(false);
+      writeRoute(selected, next, true);
+    };
+    window.addEventListener("popstate", restore);
+    return () => window.removeEventListener("popstate", restore);
+  }, [businesses]);
   useEffect(() => {
     (async () => {
       try {
@@ -124,7 +194,17 @@ export default function Home() {
       business={business}
       businesses={businesses}
       user={session.user}
-      onSelect={setBusiness}
+      route={route}
+      onNavigate={(next) => {
+        writeRoute(business, next);
+        setRoute(next);
+      }}
+      onSelect={(selected) => {
+        const next = { view: "overview", filter: "all" as const };
+        writeRoute(selected, next);
+        setRoute(next);
+        setBusiness(selected);
+      }}
       onSaved={saved}
       onAddBusiness={() => setNewBusiness(true)}
       onSignOut={async () => {
@@ -132,6 +212,7 @@ export default function Home() {
         setSession(null);
         setBusiness(null);
         setBusinesses([]);
+        window.history.replaceState(null, "", window.location.pathname);
       }}
     />
   );
@@ -289,6 +370,8 @@ function Workspace({
   onSaved,
   onAddBusiness,
   onSignOut,
+  route,
+  onNavigate,
 }: {
   business: Business;
   businesses: Business[];
@@ -297,13 +380,29 @@ function Workspace({
   onSaved: (b: Business) => Promise<void>;
   onAddBusiness: () => void;
   onSignOut: () => Promise<void>;
+  route: WorkspaceRoute;
+  onNavigate: (route: WorkspaceRoute) => void;
 }) {
   const api = useMemo(() => createApi(business.id), [business.id]);
-  const [view, setView] = useState("overview"),
-    [filter, setFilter] = useState<"all" | "calendars" | "crm">("all"),
-    [preview, setPreview] = useState<Row | null>(null),
+  const { view, filter } = route;
+  const [preview, setPreview] = useState<Row | null>(null),
+    [menuOpen, setMenuOpen] = useState(false),
     [error, setError] = useState(""),
     [notice, setNotice] = useState("");
+  const content = useRef<HTMLElement>(null);
+  const menuButton = useRef<HTMLButtonElement>(null);
+  const previousView = useRef(view);
+  useEffect(() => {
+    setMenuOpen(false);
+    setPreview(null);
+    setError("");
+    setNotice("");
+    if (previousView.current !== view) {
+      content.current?.focus({ preventScroll: true });
+      window.scrollTo({ top: 0 });
+    }
+    previousView.current = view;
+  }, [view, filter]);
   const branding = {
     ...defaultPalette,
     ...business.settings?.branding,
@@ -314,15 +413,14 @@ function Workspace({
     business.entitlements.includes(f.entitlement),
   );
   function go(next: string) {
-    setView(next);
+    onNavigate({ view: next, filter: "all" });
+    setMenuOpen(false);
     setPreview(null);
     setError("");
     setNotice("");
-    if (next === "integrations") setFilter("all");
   }
   function connectors(type: "crm" | "calendars") {
-    go("integrations");
-    setFilter(type);
+    onNavigate({ view: "integrations", filter: type });
   }
   const title =
     view === "overview"
@@ -332,85 +430,118 @@ function Workspace({
         : featureRegistry.find((f) => f.id === view)?.label;
   return (
     <div className="shell" style={theme(branding)}>
-      <aside>
-        <div className="wordmark">
-          <GraduationCap />
-          tuts
-        </div>
-        <div className="business-picker">
-          {branding.logoDataUrl || branding.logoUrl ? (
-            <img
-              className="business-logo"
-              src={branding.logoDataUrl ?? branding.logoUrl}
-              alt=""
-            />
-          ) : (
-            <span className="avatar">{businessName[0]}</span>
-          )}
-          <select
-            aria-label="Business workspace"
-            value={business.id}
-            onChange={(e) =>
-              onSelect(businesses.find((b) => b.id === e.target.value)!)
-            }
-          >
-            {businesses.map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.settings?.branding?.displayName ?? b.name}
-              </option>
-            ))}
-          </select>
-          <ChevronDown size={14} />
-        </div>
-        <span className="nav-caption">WORKSPACE</span>
-        <nav>
-          <button
-            className={view === "overview" ? "active" : ""}
-            onClick={() => go("overview")}
-          >
-            <LayoutDashboard size={18} />
-            Overview
-          </button>
-          {enabled.map((f) => {
-            const Icon = icons[f.id];
-            return (
-              <button
-                key={f.id}
-                className={view === f.id ? "active" : ""}
-                onClick={() => go(f.id)}
-              >
-                <Icon size={18} />
-                {f.label}
-              </button>
-            );
-          })}
-        </nav>
-        <div className="sidebar-bottom">
-          <button
-            className={view === "settings" ? "active" : ""}
-            onClick={() => go("settings")}
-          >
-            <Settings2 size={18} />
-            Business profile
-          </button>
-          <button className="new-business" onClick={onAddBusiness}>
-            + Add a business
-          </button>
-          <div className="profile">
-            <span className="avatar pale">{user.name?.[0]}</span>
-            <div>
-              <strong>{user.name}</strong>
-              <small>{business.role}</small>
+      <a className="skip-link" href="#workspace-content">
+        Skip to workspace
+      </a>
+      <aside
+        onKeyDown={(e) => {
+          if (e.key === "Escape" && menuOpen) {
+            setMenuOpen(false);
+            menuButton.current?.focus();
+          }
+        }}
+      >
+        <div className="sidebar-heading">
+          <div>
+            <div className="wordmark">
+              <GraduationCap />
+              tuts
             </div>
-            <button
-              title="Sign out"
-              aria-label="Sign out"
-              onClick={() =>
-                void onSignOut().catch((e) => setError(errorMessage(e)))
+            <span className="mobile-business">{businessName}</span>
+          </div>
+          <button
+            ref={menuButton}
+            className="mobile-menu-toggle"
+            aria-expanded={menuOpen}
+            aria-controls="workspace-navigation"
+            onClick={() => setMenuOpen(!menuOpen)}
+          >
+            {menuOpen ? <X size={18} /> : <Menu size={18} />}{" "}
+            {menuOpen ? "Close" : "Menu"}
+          </button>
+        </div>
+        <div
+          id="workspace-navigation"
+          className={`sidebar-content${menuOpen ? " is-open" : ""}`}
+        >
+          <div className="business-picker">
+            {branding.logoDataUrl || branding.logoUrl ? (
+              <img
+                className="business-logo"
+                src={branding.logoDataUrl ?? branding.logoUrl}
+                alt=""
+              />
+            ) : (
+              <span className="avatar">{businessName[0]}</span>
+            )}
+            <select
+              aria-label="Business workspace"
+              value={business.id}
+              onChange={(e) =>
+                onSelect(businesses.find((b) => b.id === e.target.value)!)
               }
             >
-              <LogOut size={17} />
+              {businesses.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.settings?.branding?.displayName ?? b.name}
+                </option>
+              ))}
+            </select>
+            <ChevronDown size={14} />
+          </div>
+          <span className="nav-caption">WORKSPACE</span>
+          <nav aria-label="Workspace">
+            <button
+              className={view === "overview" ? "active" : ""}
+              aria-current={view === "overview" ? "page" : undefined}
+              onClick={() => go("overview")}
+            >
+              <LayoutDashboard size={18} />
+              Overview
             </button>
+            {enabled.map((f) => {
+              const Icon = icons[f.id];
+              return (
+                <button
+                  key={f.id}
+                  className={view === f.id ? "active" : ""}
+                  aria-current={view === f.id ? "page" : undefined}
+                  onClick={() => go(f.id)}
+                >
+                  <Icon size={18} />
+                  {f.label}
+                </button>
+              );
+            })}
+          </nav>
+          <div className="sidebar-bottom">
+            <button
+              className={view === "settings" ? "active" : ""}
+              aria-current={view === "settings" ? "page" : undefined}
+              onClick={() => go("settings")}
+            >
+              <Settings2 size={18} />
+              Business profile
+            </button>
+            <button className="new-business" onClick={onAddBusiness}>
+              + Add a business
+            </button>
+            <div className="profile">
+              <span className="avatar pale">{user.name?.[0]}</span>
+              <div>
+                <strong>{user.name}</strong>
+                <small>{business.role}</small>
+              </div>
+              <button
+                title="Sign out"
+                aria-label="Sign out"
+                onClick={() =>
+                  void onSignOut().catch((e) => setError(errorMessage(e)))
+                }
+              >
+                <LogOut size={17} />
+              </button>
+            </div>
           </div>
         </div>
       </aside>
@@ -423,7 +554,12 @@ function Workspace({
           </div>
           <span className="header-account">Your tutoring workspace</span>
         </header>
-        <main className="content">
+        <main
+          ref={content}
+          id="workspace-content"
+          className="content"
+          tabIndex={-1}
+        >
           <Notice error={error} message={notice} />
           {view === "overview" && (
             <Overview api={api} business={business} user={user} go={go} />
@@ -435,7 +571,11 @@ function Workspace({
             <Sessions api={api} onConnect={() => connectors("calendars")} />
           )}
           {view === "learning" && (
-            <Learning api={api} businessId={business.id} />
+            <Learning
+              api={api}
+              businessId={business.id}
+              onOpenClients={() => go("clients")}
+            />
           )}
           {view === "billing" && <Invoices api={api} business={business} />}
           {view === "payments" && <Payments api={api} />}

@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { date, errorMessage, gateway, type Api, type Row } from "../lib/api";
 import { Empty, Modal, Notice } from "../components/shared";
+import "./setup-ux.css";
 const names: Record<string, string> = {
   calendly: "Calendly",
   calcom: "Cal.com",
@@ -72,6 +73,7 @@ export function Connectors({
         : ["json_api", "form_webhook"].includes(p)),
   );
   async function load() {
+    setLoading(true);
     try {
       const data = await api("integrations/v1/connections");
       setConnections(data.items);
@@ -172,8 +174,13 @@ export function Connectors({
             information into your workspace.
           </p>
         </div>
-        <button aria-label="Refresh connectors" onClick={() => void load()}>
+        <button
+          aria-label="Refresh connectors"
+          disabled={loading || !!busy}
+          onClick={() => void load()}
+        >
           <RefreshCw size={17} />
+          {loading ? "Refreshing…" : "Refresh"}
         </button>
       </div>
       <Notice error={provider ? "" : error} message={message} />
@@ -240,6 +247,15 @@ export function Connectors({
             </div>
             <h3>{names[p]}</h3>
             <p className="muted">{descriptions[p]}</p>
+            <span className="setup-connector-requirement">
+              {p === "calendly"
+                ? "Personal access token required"
+                : p === "calcom"
+                  ? "API key required"
+                  : p === "json_api"
+                    ? "HTTPS contact endpoint required"
+                    : "Server-side webhook setup"}
+            </span>
             <button
               className="primary"
               disabled={!canManage}
@@ -330,6 +346,7 @@ export function Connectors({
                       className="icon-button"
                       disabled={!!busy}
                       title="Disconnect source"
+                      aria-label={`Disconnect ${c.displayName}`}
                       onClick={() => {
                         if (
                           window.confirm(
@@ -367,33 +384,47 @@ export function Connectors({
                 maxLength={100}
               />
             </label>
-            {provider === "calendly" && (
-              <p className="small-note">
-                Create a personal access token in{" "}
-                <a
-                  href="https://calendly.com/integrations/api_webhooks"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Calendly → Integrations → API & webhooks
-                </a>
-                . Give it access to your profile, scheduled events, and
-                invitees. This connector reads your calendar; bookings stay in
-                Calendly.
-              </p>
-            )}
-            {provider === "calcom" && (
-              <p className="small-note">
-                Create an API key in{" "}
-                <a
-                  href="https://app.cal.com/settings/developer/api-keys"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Cal.com → Settings → Developer → API keys
-                </a>
-                . This connector reads your bookings.
-              </p>
+            {["calendly", "calcom"].includes(provider) && (
+              <div className="setup-connector-guide">
+                <strong>Connect in two steps</strong>
+                <ol>
+                  <li>
+                    Open{" "}
+                    {provider === "calendly" ? (
+                      <a
+                        href="https://calendly.com/integrations/api_webhooks"
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Calendly API & webhooks <ArrowUpRight size={12} />
+                      </a>
+                    ) : (
+                      <a
+                        href="https://app.cal.com/settings/developer/api-keys"
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Cal.com API keys <ArrowUpRight size={12} />
+                      </a>
+                    )}{" "}
+                    and create{" "}
+                    {provider === "calendly"
+                      ? "a personal access token with access to your profile, scheduled events, and invitees"
+                      : "an API key"}
+                    .
+                  </li>
+                  <li>
+                    Paste it below. Tuts validates it before saving the
+                    connection.
+                  </li>
+                </ol>
+                <p>
+                  Credentials are stored encrypted. Recent and upcoming bookings
+                  sync every five minutes; imports start 90 days ago. You can
+                  also choose Sync now. Manage availability and rescheduling in{" "}
+                  {names[provider]}.
+                </p>
+              </div>
             )}
             {provider !== "form_webhook" && (
               <label>
@@ -407,6 +438,13 @@ export function Connectors({
                   type="password"
                   required={provider !== "json_api"}
                   autoComplete="off"
+                  placeholder={
+                    provider === "calcom"
+                      ? "Paste your Cal.com API key"
+                      : provider === "calendly"
+                        ? "Paste your Calendly personal access token"
+                        : "Bearer token, if your endpoint requires one"
+                  }
                 />
               </label>
             )}
@@ -422,6 +460,10 @@ export function Connectors({
                       : "https://cal.com/your-name"
                   }
                 />
+                <small className="small-note">
+                  Adds a shortcut to your booking page. The token above is
+                  required to import bookings.
+                </small>
               </label>
             )}
             {provider === "json_api" && (

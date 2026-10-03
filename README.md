@@ -103,6 +103,8 @@ Read the contracts before extending a service:
 
 These pages preserve the intended architecture and clearly scoped future requirements; they do not assert that every described capability is implemented. Check **What works today** above and each service README for current service behavior.
 
+The [live UI review](docs/ux-review.md) records usability fixes, manually exercised flows, and verification limits.
+
 ## Stack
 
 TypeScript, Next.js and React, eight NestJS service processes, PostgreSQL with a separate database and restricted role per service, RabbitMQ, and Docker Compose for local infrastructure. The local Compose environment shares one PostgreSQL server while keeping the service databases and credentials separate. Payment simulation is limited to the local development environment.

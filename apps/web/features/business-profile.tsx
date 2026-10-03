@@ -1,7 +1,15 @@
-import { useState, type FormEvent } from "react";
-import { ArrowLeft, ArrowRight, Upload } from "lucide-react";
+import { useRef, useState, type FormEvent } from "react";
+import { ArrowLeft, ArrowRight, Check, Upload } from "lucide-react";
 import { errorMessage, type Api, type Business, type Row } from "../lib/api";
 import { Notice } from "../components/shared";
+import "./setup-ux.css";
+const colorLabels = {
+  primaryColor: "Primary",
+  secondaryColor: "Secondary",
+  backgroundColor: "Background",
+  textColor: "Text",
+};
+const validColor = (value: string) => /^#[0-9a-f]{6}$/i.test(value);
 export const defaultPalette = {
   primaryColor: "#315d4d",
   secondaryColor: "#cbd8a3",
@@ -71,6 +79,7 @@ export function BusinessProfile({
   onPalette?: (value: Row) => void;
   onCancel?: () => void;
 }) {
+  const form = useRef<HTMLFormElement>(null);
   const [step, setStep] = useState(0),
     [name, setName] = useState(
       business?.settings?.branding?.displayName ?? business?.name ?? "",
@@ -79,6 +88,10 @@ export function BusinessProfile({
     business?.settings?.profile ?? {},
   );
   const [branding, setBranding] = useState<Row>({
+    ...defaultPalette,
+    ...business?.settings?.branding,
+  });
+  const [colorDrafts, setColorDrafts] = useState<Row>({
     ...defaultPalette,
     ...business?.settings?.branding,
   });
@@ -91,7 +104,17 @@ export function BusinessProfile({
   const changeBrand = (patch: Row) => {
     const next = { ...branding, ...patch };
     setBranding(next);
+    setColorDrafts((current: Row) => ({ ...current, ...patch }));
     onPalette?.(next);
+  };
+  const openAppearance = () => {
+    if (!name.trim()) {
+      setError("Give your business a name.");
+      return;
+    }
+    if (step === 0 && !form.current?.reportValidity()) return;
+    setError("");
+    setStep(1);
   };
   const profileField = (key: string, label: string, type = "text") => (
     <label>
@@ -122,6 +145,13 @@ export function BusinessProfile({
     if (!name.trim()) {
       setError("Give your business a name.");
       setStep(0);
+      return;
+    }
+    if (Object.keys(colorLabels).some((key) => !validColor(colorDrafts[key]))) {
+      setError(
+        "Use a six-digit hex color, such as #315d4d, for each palette color.",
+      );
+      setStep(1);
       return;
     }
     setBusy(true);
@@ -175,39 +205,42 @@ export function BusinessProfile({
         </div>
       </div>
       <Notice error={error} />
-      {!business && (
-        <div className="step-tabs">
-          <button
-            className={step === 0 ? "active" : ""}
-            onClick={() => setStep(0)}
-          >
-            1 · Business details
-          </button>
-          <button
-            className={step === 1 ? "active" : ""}
-            onClick={() => {
-              if (name.trim()) setStep(1);
-              else setError("Enter your business name first.");
-            }}
-          >
-            2 · Make it yours
-          </button>
-        </div>
-      )}
+      <div className="step-tabs" aria-label="Business profile sections">
+        <button
+          className={step === 0 ? "active" : ""}
+          aria-pressed={step === 0}
+          disabled={busy}
+          onClick={() => setStep(0)}
+        >
+          {business ? "Business details" : "1 · Business details"}
+        </button>
+        <button
+          className={step === 1 ? "active" : ""}
+          aria-pressed={step === 1}
+          disabled={busy}
+          onClick={openAppearance}
+        >
+          {business ? "Logo & colors" : "2 · Logo & colors"}
+        </button>
+      </div>
       <form
+        ref={form}
         onSubmit={
           business || step === 1
             ? save
             : (e) => {
                 e.preventDefault();
-                setError("");
-                setStep(1);
+                openAppearance();
               }
         }
       >
-        {(business || step === 0) && (
+        {step === 0 && (
           <>
             <h3>Business details</h3>
+            <p className="small-note">
+              Only your business name is required. Add invoice details whenever
+              you’re ready.
+            </p>
             <div className="form-grid">
               <label>
                 Business name
@@ -224,7 +257,9 @@ export function BusinessProfile({
               {profileField("website", "Website", "url")}
               {profileField("taxId", "Tax / registration number")}
             </div>
-            <h3 className="form-section-title">Business address</h3>
+            <h3 className="form-section-title">
+              Business address <span className="setup-optional">Optional</span>
+            </h3>
             <div className="form-grid">
               {addressField("line1", "Street address")}
               {addressField("line2", "Apartment / suite")}
@@ -240,9 +275,39 @@ export function BusinessProfile({
                 />
               </label>
             </div>
+            <section
+              className="setup-invoice-preview"
+              aria-label="Invoice sender preview"
+            >
+              <span className="eyebrow">INVOICE SENDER PREVIEW</span>
+              <strong>
+                {profile.legalName || name || "Your business name"}
+              </strong>
+              {profile.address &&
+                Object.values(profile.address).some(Boolean) && (
+                  <p>
+                    {[
+                      profile.address.line1,
+                      profile.address.line2,
+                      [
+                        profile.address.city,
+                        profile.address.region,
+                        profile.address.postalCode,
+                      ]
+                        .filter(Boolean)
+                        .join(", "),
+                      profile.address.country,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </p>
+                )}
+              {profile.email && <p>{profile.email}</p>}
+              <small>Saved details and your logo appear on new invoices.</small>
+            </section>
           </>
         )}
-        {(business || step === 1) && (
+        {step === 1 && (
           <>
             <h3 className="form-section-title">Your logo</h3>
             <div className="logo-upload">
@@ -278,7 +343,7 @@ export function BusinessProfile({
                   />
                 </label>
                 <p className="small-note">
-                  PNG, JPG, or WebP. We resize it for you.
+                  PNG, JPG, or WebP, under 5 MB. We resize it for you.
                 </p>
                 {(branding.logoDataUrl || branding.logoUrl) && (
                   <button
@@ -295,13 +360,18 @@ export function BusinessProfile({
             </div>
             <h3 className="form-section-title">Workspace palette</h3>
             <p className="muted">
-              Applies to your workspace, navigation, cards, and buttons.
+              Applies to your workspace, navigation, cards, and buttons. Pick a
+              color or enter its six-digit hex value. Save your profile to keep
+              changes.
             </p>
             <div className="palette-presets">
               {palettes.map((p) => (
                 <button
                   type="button"
                   key={p.name}
+                  aria-pressed={Object.keys(colorLabels).every(
+                    (key) => branding[key] === p[key as keyof typeof p],
+                  )}
                   onClick={() => {
                     const { name: _, ...colors } = p;
                     changeBrand(colors);
@@ -310,25 +380,49 @@ export function BusinessProfile({
                   <span style={{ background: p.primaryColor }} />
                   <span style={{ background: p.secondaryColor }} />
                   {p.name}
+                  {Object.keys(colorLabels).every(
+                    (key) => branding[key] === p[key as keyof typeof p],
+                  ) && <Check size={14} />}
                 </button>
               ))}
             </div>
             <div className="palette-fields">
-              {Object.entries({
-                primaryColor: "Primary",
-                secondaryColor: "Secondary",
-                backgroundColor: "Background",
-                textColor: "Text",
-              }).map(([key, label]) => (
-                <label key={key}>
-                  {label}
+              {Object.entries(colorLabels).map(([key, label]) => (
+                <div className="setup-color-field" key={key}>
+                  <label>
+                    {label}
+                    <input
+                      type="color"
+                      aria-label={`${label} color picker`}
+                      value={branding[key]}
+                      onChange={(e) => changeBrand({ [key]: e.target.value })}
+                    />
+                  </label>
                   <input
-                    type="color"
-                    value={branding[key]}
-                    onChange={(e) => changeBrand({ [key]: e.target.value })}
+                    aria-label={`${label} hex color`}
+                    value={colorDrafts[key]}
+                    spellCheck={false}
+                    maxLength={7}
+                    pattern="#[0-9a-fA-F]{6}"
+                    required
+                    title="Six-digit hex color, such as #315d4d"
+                    aria-invalid={!validColor(colorDrafts[key])}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setColorDrafts((current: Row) => ({
+                        ...current,
+                        [key]: value,
+                      }));
+                      if (validColor(value))
+                        changeBrand({ [key]: value.toLowerCase() });
+                    }}
                   />
-                  <code>{branding[key]}</code>
-                </label>
+                  {!validColor(colorDrafts[key]) && (
+                    <small className="inline-error">
+                      Use # plus six hex digits.
+                    </small>
+                  )}
+                </div>
               ))}
             </div>
             <div
@@ -374,7 +468,7 @@ export function BusinessProfile({
           )}
           {!business && step === 0 && (
             <button type="button" disabled={busy} onClick={() => void save()}>
-              Skip optional details
+              Create with defaults
             </button>
           )}
           <button className="primary" disabled={busy}>

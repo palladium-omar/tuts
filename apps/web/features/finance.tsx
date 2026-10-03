@@ -1,24 +1,34 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Plus, Printer, Wallet } from "lucide-react";
+import { FileText, Plus, Printer, Wallet } from "lucide-react";
 import {
   errorMessage,
+  date,
   money,
   type Api,
   type Business,
   type Row,
 } from "../lib/api";
 import { Empty, Modal, Notice } from "../components/shared";
+import "./teaching-ux.css";
 export function Invoices({ api, business }: { api: Api; business: Business }) {
   const [rows, setRows] = useState<Row[]>([]),
     [creating, setCreating] = useState(false),
     [invoice, setInvoice] = useState<Row | null>(null),
+    [currency, setCurrency] = useState("USD"),
+    [price, setPrice] = useState(""),
     [busy, setBusy] = useState(false),
+    [loading, setLoading] = useState(true),
+    [message, setMessage] = useState(""),
     [error, setError] = useState("");
   async function load() {
+    setLoading(true);
     try {
       setRows((await api("billing/v1/invoices")).items);
+      setError("");
     } catch (e) {
       setError(errorMessage(e));
+    } finally {
+      setLoading(false);
     }
   }
   useEffect(() => {
@@ -27,7 +37,17 @@ export function Invoices({ api, business }: { api: Api; business: Business }) {
   async function create(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
-    const [whole, fraction = ""] = String(f.get("price")).split(".");
+    const value = String(f.get("price"));
+    if (!/^\d+(\.\d{1,2})?$/.test(value)) {
+      setError("Enter an amount with up to two decimal places, such as 90.50.");
+      return;
+    }
+    const [whole, fraction = ""] = value.split(".");
+    const amountMinor = Number(whole) * 100 + Number(fraction.padEnd(2, "0"));
+    if (!Number.isSafeInteger(amountMinor) || amountMinor <= 0) {
+      setError("Enter a positive amount within the supported range.");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
@@ -38,14 +58,14 @@ export function Invoices({ api, business }: { api: Api; business: Business }) {
           {
             description: f.get("description"),
             quantity: 1,
-            unitPriceMinor:
-              Number(whole) * 100 + Number(fraction.padEnd(2, "0")),
+            unitPriceMinor: amountMinor,
           },
         ],
       });
       setCreating(false);
       setInvoice(result.item);
       await load();
+      setMessage("Draft invoice saved.");
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -59,6 +79,7 @@ export function Invoices({ api, business }: { api: Api; business: Business }) {
       const result = await api(`billing/v1/invoices/${id}/issue`, "POST", {});
       setInvoice(result.item);
       await load();
+      setMessage("Invoice issued. It is ready to print or save as a PDF.");
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -88,6 +109,9 @@ export function Invoices({ api, business }: { api: Api; business: Business }) {
           className="primary"
           onClick={() => {
             setError("");
+            setMessage("");
+            setPrice("");
+            setCurrency("USD");
             setCreating(true);
           }}
         >
@@ -95,16 +119,42 @@ export function Invoices({ api, business }: { api: Api; business: Business }) {
           New invoice
         </button>
       </div>
-      <Notice error={!creating && !invoice ? error : ""} />
+      <Notice
+        error={!creating && !invoice ? error : ""}
+        message={!invoice ? message : ""}
+      />
       <section className="panel">
-        {!rows.length ? (
-          <Empty>Create your first invoice to get started.</Empty>
+        <div className="panel-title">
+          <h3>Your invoices</h3>
+          <span className="tag">
+            {rows.length} {rows.length === 1 ? "invoice" : "invoices"}
+          </span>
+        </div>
+        {loading ? (
+          <Empty>Loading invoices…</Empty>
+        ) : !rows.length ? (
+          <Empty>
+            <FileText size={30} />
+            <h3>Your first invoice starts here.</h3>
+            <p>
+              Create a draft, review the details, then issue it when it is
+              ready.
+            </p>
+          </Empty>
         ) : (
           <div className="record-list">
             {rows.map((row) => (
               <div className="record" key={row.id}>
                 <div className="record-main">
                   <strong>{row.payerName}</strong>
+                  <small>
+                    {row.status === "draft"
+                      ? "Draft"
+                      : row.issuedAt
+                        ? `Issued ${date(row.issuedAt)}`
+                        : "Invoice"}{" "}
+                    · {row.id.slice(0, 8).toUpperCase()}
+                  </small>
                   <small>
                     {row.items?.map((item: Row) => item.description).join(", ")}
                   </small>
@@ -114,6 +164,7 @@ export function Invoices({ api, business }: { api: Api; business: Business }) {
                 <button
                   onClick={() => {
                     setError("");
+                    setMessage("");
                     setInvoice(row);
                   }}
                 >
@@ -132,15 +183,29 @@ export function Invoices({ api, business }: { api: Api; business: Business }) {
           }}
         >
           <Notice error={error} />
+          <p className="muted">
+            Start with a draft. You’ll review it before issuing.
+          </p>
           <form onSubmit={create}>
             <div className="form-grid">
               <label>
                 Bill to
-                <input name="payerName" required maxLength={200} />
+                <input
+                  name="payerName"
+                  required
+                  maxLength={200}
+                  disabled={busy}
+                  placeholder="Student, family, or payer name"
+                />
               </label>
               <label>
                 Currency
-                <select name="currency">
+                <select
+                  name="currency"
+                  value={currency}
+                  onChange={(e) => setCurrency(e.target.value)}
+                  disabled={busy}
+                >
                   <option>USD</option>
                   <option>EUR</option>
                   <option>GBP</option>
@@ -149,24 +214,52 @@ export function Invoices({ api, business }: { api: Api; business: Business }) {
               </label>
               <label>
                 Description
-                <input name="description" required maxLength={500} />
+                <input
+                  name="description"
+                  required
+                  maxLength={500}
+                  disabled={busy}
+                  placeholder="For example: Two algebra tutoring sessions"
+                />
               </label>
               <label>
-                Amount
+                Amount ({currency})
                 <input
                   name="price"
                   type="number"
                   min="0.01"
                   step="0.01"
                   required
+                  value={price}
+                  onChange={(e) => setPrice(e.target.value)}
+                  disabled={busy}
+                  placeholder="0.00"
                 />
               </label>
+            </div>
+            <div className="invoice-preview-total" aria-live="polite">
+              <span>Draft total</span>
+              <strong>
+                {money(
+                  Number.isFinite(Number(price))
+                    ? Math.round(Number(price) * 100)
+                    : 0,
+                  currency,
+                )}
+              </strong>
             </div>
             <p className="small-note">
               Seller details come from Business profile. Issued invoices keep
               the identity saved at the time of issue.
             </p>
             <div className="form-actions">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => setCreating(false)}
+              >
+                Cancel
+              </button>
               <button className="primary" disabled={busy}>
                 {busy ? "Creating…" : "Create draft"}
               </button>
@@ -176,12 +269,21 @@ export function Invoices({ api, business }: { api: Api; business: Business }) {
       )}
       {invoice && (
         <Modal
-          title="Invoice"
+          title={
+            invoice.status === "draft" ? "Review draft invoice" : "Invoice"
+          }
           onClose={() => {
             if (!busy) setInvoice(null);
           }}
         >
-          <Notice error={error} />
+          <Notice error={error} message={message} />
+          {invoice.status === "draft" && (
+            <p className="invoice-draft-note">
+              Review the payer, amount, and seller details below. Issue invoice
+              saves your business identity on this invoice and makes it ready
+              for payment.
+            </p>
+          )}
           <article className="invoice-sheet">
             <div className="invoice-heading">
               <div>
@@ -216,6 +318,12 @@ export function Invoices({ api, business }: { api: Api; business: Business }) {
                   {invoice.status}
                 </span>
                 <small>{invoice.id.slice(0, 8).toUpperCase()}</small>
+                {(invoice.issuedAt || invoice.createdAt) && (
+                  <small className="invoice-date">
+                    {invoice.issuedAt ? "Issued" : "Created"}{" "}
+                    {date(invoice.issuedAt || invoice.createdAt)}
+                  </small>
+                )}
               </div>
             </div>
             <div className="invoice-recipient">
@@ -252,6 +360,15 @@ export function Invoices({ api, business }: { api: Api; business: Business }) {
             <div className="invoice-total">
               <span>Paid</span>
               <span>{money(invoice.paidMinor, invoice.currency)}</span>
+            </div>
+            <div className="invoice-total">
+              <span>Balance due</span>
+              <strong>
+                {money(
+                  invoice.totalMinor - invoice.paidMinor,
+                  invoice.currency,
+                )}
+              </strong>
             </div>
           </article>
           <div className="form-actions">
