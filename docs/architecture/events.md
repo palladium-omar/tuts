@@ -1,5 +1,7 @@
 # Events and consistency
 
+> **Contract scope:** Tuts includes RabbitMQ transport, per-service databases, transactional outbox/inbox support, and durable queues. This page also specifies the consistency guarantees and event catalogue expected as workflows are extended; catalogue entries and optional consumers are not a blanket claim that every producer/consumer flow is currently active. Check the [repository status](../../README.md#what-works-today) and service READMEs for shipped handlers.
+
 RabbitMQ topic exchange: `palladium.events`. Each consuming service has its own durable queue, binding declared event names. Messages are persistent. Publishing uses publisher confirms; consumers use manual acknowledgements and bounded retry/dead-letter handling. Delivery is at least once and consumers must tolerate duplicates and reordering.
 
 ## Envelope

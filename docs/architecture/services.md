@@ -1,5 +1,7 @@
 # Service boundaries and plugging features into the app
 
+> **Contract scope:** This page defines how Tuts features are composed and how future services should be added. It is not a claim that every feature or workflow below is shipped. See the [repository status](../../README.md#what-works-today) for implemented scope; student/parent portal access, for example, is not implemented.
+
 Each service is an independently built Docker image and Node process, exposes `/health` and `/openapi.json`, and owns a PostgreSQL database. Local Compose may place the databases on one PostgreSQL server, but grants restrict each service role to its database. A database is never a shared integration surface.
 
 ## Composition
@@ -8,13 +10,15 @@ The gateway maps `/api/platform`, `/api/clients`, `/api/scheduling`, `/api/learn
 
 The frontend feature registry declares `id`, `label`, `path`, `entitlement`, and API prefix. Business configuration determines which entries appear. Services independently enforce entitlements, so hiding a navigation item is not access control. Provider selection and custom forms are data loaded through APIs.
 
-To add a feature:
+### Add a feature
 
 1. Define its data ownership, required core capabilities and versioned HTTP/event contracts.
 2. Create a service package, database, migrations, image and health endpoint.
 3. Register its URL at the gateway and its entitlement in platform.
 4. Register its frontend entry and optional event subscriptions.
 5. Demonstrate the feature through HTTP with unrelated services stopped or disabled.
+
+These steps are the feature plugging workflow: establish ownership and contracts, build an independently runnable service, connect gateway access, then compose its UI and optional event subscriptions. The web registry alone does not deliver a feature or grant access. Start here when planning a new feature, then use the [implementation contract](implementation.md), [HTTP contract](http.md), and [event contract](events.md) for the required interfaces.
 
 ## Dependencies
 

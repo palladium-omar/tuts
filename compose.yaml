@@ -1,0 +1,360 @@
+{
+  "name": "palladium-tutor-platform",
+  "services": {
+    "postgres": {
+      "image": "postgres:17-alpine",
+      "environment": {
+        "POSTGRES_USER": "postgres",
+        "POSTGRES_PASSWORD": "${POSTGRES_PASSWORD}",
+        "PLATFORM_DB_PASSWORD": "${PLATFORM_DB_PASSWORD}",
+        "CLIENTS_DB_PASSWORD": "${CLIENTS_DB_PASSWORD}",
+        "SCHEDULING_DB_PASSWORD": "${SCHEDULING_DB_PASSWORD}",
+        "LEARNING_DB_PASSWORD": "${LEARNING_DB_PASSWORD}",
+        "BILLING_DB_PASSWORD": "${BILLING_DB_PASSWORD}",
+        "PAYMENTS_DB_PASSWORD": "${PAYMENTS_DB_PASSWORD}",
+        "NOTIFICATIONS_DB_PASSWORD": "${NOTIFICATIONS_DB_PASSWORD}"
+      },
+      "ports": [
+        "127.0.0.1:5434:5432"
+      ],
+      "volumes": [
+        "postgres-data:/var/lib/postgresql/data",
+        "./infra/init-databases.sh:/tmp/palladium-init.sh:ro"
+      ],
+      "healthcheck": {
+        "test": [
+          "CMD-SHELL",
+          "pg_isready -U postgres"
+        ],
+        "interval": "3s",
+        "timeout": "3s",
+        "retries": 30
+      },
+      "entrypoint": [
+        "sh",
+        "-c",
+        "cat /tmp/palladium-init.sh > /docker-entrypoint-initdb.d/01-services.sh && chmod 644 /docker-entrypoint-initdb.d/01-services.sh && exec docker-entrypoint.sh postgres"
+      ]
+    },
+    "rabbitmq": {
+      "image": "rabbitmq:4-management-alpine",
+      "environment": {
+        "RABBITMQ_DEFAULT_USER": "${RABBITMQ_USER}",
+        "RABBITMQ_DEFAULT_PASS": "${RABBITMQ_PASSWORD}"
+      },
+      "ports": [
+        "127.0.0.1:5673:5672",
+        "127.0.0.1:15673:15672"
+      ],
+      "volumes": [
+        "rabbitmq-data:/var/lib/rabbitmq"
+      ],
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "rabbitmq-diagnostics",
+          "-q",
+          "ping"
+        ],
+        "interval": "5s",
+        "timeout": "5s",
+        "retries": 30
+      }
+    },
+    "platform": {
+      "build": {
+        "context": ".",
+        "args": {
+          "SERVICE": "platform"
+        }
+      },
+      "environment": {
+        "NODE_ENV": "development",
+        "PORT": "4001",
+        "DATABASE_URL": "postgresql://platform:${PLATFORM_DB_PASSWORD}@postgres:5432/platform",
+        "RABBITMQ_URL": "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672",
+        "CONTEXT_PUBLIC_KEY": "${CONTEXT_PUBLIC_KEY}",
+        "PLATFORM_INTERNAL_SECRET": "${PLATFORM_INTERNAL_SECRET}",
+        "BETTER_AUTH_SECRET": "${BETTER_AUTH_SECRET}",
+        "PUBLIC_APP_URL": "${PUBLIC_APP_URL}",
+        "PUBLIC_GATEWAY_URL": "${PUBLIC_GATEWAY_URL}"
+      },
+      "depends_on": {
+        "postgres": {
+          "condition": "service_healthy"
+        },
+        "rabbitmq": {
+          "condition": "service_healthy"
+        }
+      },
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://localhost:4001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+        ],
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": 10
+      }
+    },
+    "clients": {
+      "build": {
+        "context": ".",
+        "args": {
+          "SERVICE": "clients"
+        }
+      },
+      "environment": {
+        "NODE_ENV": "development",
+        "PORT": "4002",
+        "DATABASE_URL": "postgresql://clients:${CLIENTS_DB_PASSWORD}@postgres:5432/clients",
+        "RABBITMQ_URL": "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672",
+        "CONTEXT_PUBLIC_KEY": "${CONTEXT_PUBLIC_KEY}"
+      },
+      "depends_on": {
+        "postgres": {
+          "condition": "service_healthy"
+        },
+        "rabbitmq": {
+          "condition": "service_healthy"
+        }
+      },
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://localhost:4002/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+        ],
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": 10
+      }
+    },
+    "scheduling": {
+      "build": {
+        "context": ".",
+        "args": {
+          "SERVICE": "scheduling"
+        }
+      },
+      "environment": {
+        "NODE_ENV": "development",
+        "PORT": "4003",
+        "DATABASE_URL": "postgresql://scheduling:${SCHEDULING_DB_PASSWORD}@postgres:5432/scheduling",
+        "RABBITMQ_URL": "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672",
+        "CONTEXT_PUBLIC_KEY": "${CONTEXT_PUBLIC_KEY}"
+      },
+      "depends_on": {
+        "postgres": {
+          "condition": "service_healthy"
+        },
+        "rabbitmq": {
+          "condition": "service_healthy"
+        }
+      },
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://localhost:4003/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+        ],
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": 10
+      }
+    },
+    "learning": {
+      "build": {
+        "context": ".",
+        "args": {
+          "SERVICE": "learning"
+        }
+      },
+      "environment": {
+        "NODE_ENV": "development",
+        "PORT": "4004",
+        "DATABASE_URL": "postgresql://learning:${LEARNING_DB_PASSWORD}@postgres:5432/learning",
+        "RABBITMQ_URL": "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672",
+        "CONTEXT_PUBLIC_KEY": "${CONTEXT_PUBLIC_KEY}"
+      },
+      "depends_on": {
+        "postgres": {
+          "condition": "service_healthy"
+        },
+        "rabbitmq": {
+          "condition": "service_healthy"
+        }
+      },
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://localhost:4004/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+        ],
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": 10
+      }
+    },
+    "billing": {
+      "build": {
+        "context": ".",
+        "args": {
+          "SERVICE": "billing"
+        }
+      },
+      "environment": {
+        "NODE_ENV": "development",
+        "PORT": "4005",
+        "DATABASE_URL": "postgresql://billing:${BILLING_DB_PASSWORD}@postgres:5432/billing",
+        "RABBITMQ_URL": "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672",
+        "CONTEXT_PUBLIC_KEY": "${CONTEXT_PUBLIC_KEY}"
+      },
+      "depends_on": {
+        "postgres": {
+          "condition": "service_healthy"
+        },
+        "rabbitmq": {
+          "condition": "service_healthy"
+        }
+      },
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://localhost:4005/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+        ],
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": 10
+      }
+    },
+    "payments": {
+      "build": {
+        "context": ".",
+        "args": {
+          "SERVICE": "payments"
+        }
+      },
+      "environment": {
+        "NODE_ENV": "development",
+        "PORT": "4006",
+        "DATABASE_URL": "postgresql://payments:${PAYMENTS_DB_PASSWORD}@postgres:5432/payments",
+        "RABBITMQ_URL": "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672",
+        "CONTEXT_PUBLIC_KEY": "${CONTEXT_PUBLIC_KEY}",
+        "PAYMENT_ENCRYPTION_KEY": "${PAYMENT_ENCRYPTION_KEY}",
+        "ALLOW_SANDBOX_PAYMENTS": "${ALLOW_SANDBOX_PAYMENTS}"
+      },
+      "depends_on": {
+        "postgres": {
+          "condition": "service_healthy"
+        },
+        "rabbitmq": {
+          "condition": "service_healthy"
+        }
+      },
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://localhost:4006/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+        ],
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": 10
+      }
+    },
+    "notifications": {
+      "build": {
+        "context": ".",
+        "args": {
+          "SERVICE": "notifications"
+        }
+      },
+      "environment": {
+        "NODE_ENV": "development",
+        "PORT": "4007",
+        "DATABASE_URL": "postgresql://notifications:${NOTIFICATIONS_DB_PASSWORD}@postgres:5432/notifications",
+        "RABBITMQ_URL": "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672",
+        "CONTEXT_PUBLIC_KEY": "${CONTEXT_PUBLIC_KEY}"
+      },
+      "depends_on": {
+        "postgres": {
+          "condition": "service_healthy"
+        },
+        "rabbitmq": {
+          "condition": "service_healthy"
+        }
+      },
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://localhost:4007/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+        ],
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": 10
+      }
+    },
+    "gateway": {
+      "build": {
+        "context": ".",
+        "args": {
+          "SERVICE": "gateway"
+        }
+      },
+      "ports": [
+        "127.0.0.1:8080:8080"
+      ],
+      "environment": {
+        "PORT": "8080",
+        "CONTEXT_PRIVATE_KEY": "${CONTEXT_PRIVATE_KEY}",
+        "PLATFORM_INTERNAL_SECRET": "${PLATFORM_INTERNAL_SECRET}",
+        "PUBLIC_APP_URL": "${PUBLIC_APP_URL}",
+        "PUBLIC_GATEWAY_URL": "${PUBLIC_GATEWAY_URL}",
+        "PLATFORM_URL": "http://platform:4001",
+        "CLIENTS_URL": "http://clients:4002",
+        "SCHEDULING_URL": "http://scheduling:4003",
+        "LEARNING_URL": "http://learning:4004",
+        "BILLING_URL": "http://billing:4005",
+        "PAYMENTS_URL": "http://payments:4006",
+        "NOTIFICATIONS_URL": "http://notifications:4007"
+      },
+      "depends_on": {
+        "platform": {
+          "condition": "service_healthy"
+        }
+      }
+    },
+    "web": {
+      "build": {
+        "context": ".",
+        "args": {
+          "SERVICE": "web"
+        }
+      },
+      "ports": [
+        "127.0.0.1:3000:3000"
+      ],
+      "environment": {
+        "NEXT_PUBLIC_GATEWAY_URL": "http://localhost:8080"
+      },
+      "depends_on": [
+        "gateway"
+      ]
+    }
+  },
+  "volumes": {
+    "postgres-data": {},
+    "rabbitmq-data": {}
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "name": "tuts",
+  "private": true,
+  "packageManager": "pnpm@10.28.2",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r --if-present test",
+    "check:boundaries": "node scripts/check-boundaries.mjs",
+    "dev": "node scripts/dev.mjs",
+    "infra:up": "docker compose up -d --wait postgres rabbitmq",
+    "infra:down": "docker compose down",
+    "setup:local": "node scripts/setup.mjs"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "tsx": "^4.20.6",
+    "@types/node": "^22.18.0",
+    "@types/pg": "^8.15.5",
+    "@types/express": "^5.0.3",
+    "@types/amqplib": "^0.10.7"
+  }
+}

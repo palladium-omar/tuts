@@ -1,5 +1,7 @@
 # Business isolation, permissions and customization
 
+> **Contract scope:** The repository implements tenant-scoped databases and row-level security, and services validate signed gateway context. The role and customization model here includes intended future behavior; student/parent portal relationships and production paid-entitlement provisioning are not implemented. See the [repository status](../../README.md#what-works-today).
+
 A user can belong to multiple businesses with a different role in each. Roles begin as `owner`, `admin`, `tutor`, `student` and `parent`. Staff roles do not imply access across businesses. A parent/payer and a student are distinct records; one parent may pay for several students. Student/parent portal authorization additionally requires an explicit resource relationship, not merely business membership.
 
 Domain tables carry `business_id`. PostgreSQL row-level policies compare that column with transaction-local `app.business_id`. `withTenant` sets the value inside each transaction, so pooled connections do not retain another tenant's context. Runtime roles are not superusers and have no BYPASSRLS; tenant tables use FORCE ROW LEVEL SECURITY. Constraints and unique keys include business scope where appropriate.

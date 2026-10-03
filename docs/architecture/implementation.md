@@ -1,5 +1,7 @@
 # Shared implementation contract
 
+> **Contract scope:** This document describes the shared target interfaces and contributor requirements. The contracts and some runtime helpers are implemented, but a listed interface does not mean every feature that could use it is shipped. See the [repository status](../../README.md#what-works-today) and individual service READMEs for current behavior. Student/parent portal authorization and resource uploads remain future work.
+
 This document fixes the common interface used by independently implemented services. Ask the coordinating agent before changing shared packages or these interfaces.
 
 ## Repository layout

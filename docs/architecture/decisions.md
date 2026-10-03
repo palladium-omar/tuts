@@ -1,5 +1,7 @@
 # Architecture decisions
 
+These decisions define Tuts' architecture and extension constraints. They do not assert that production deployment or every described business workflow is already delivered; see the [repository status](../../README.md#what-works-today).
+
 ## ADR-001: Separate deployable services
 
 Accepted: user explicitly requires decoupled services. Each domain runs in a separate process/image with a private database. The monorepo coordinates contracts and builds; it is not a modular monolith. This adds network failures, eventual consistency and deployment overhead, which the gateway, outbox/inbox and contract checks must address.

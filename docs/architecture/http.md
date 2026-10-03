@@ -1,5 +1,7 @@
 # HTTP contract
 
+> **Contract scope:** This describes the shared gateway and service API contract. Signed JWT context and staff authorization are implemented. Student/parent portal routes and relationship-based resource authorization are not yet shipped. The contract may also describe routes for future extensions; consult the [repository status](../../README.md#what-works-today) and service OpenAPI documents for current endpoints.
+
 External prefix: `/api/{service}/v1/...`. Gateway removes `/api/{service}` before forwarding. Platform authentication is exposed at `/api/platform/auth/*`; platform session/business endpoints are under `/v1`. APIs return JSON. Document endpoints in each service's generated OpenAPI document.
 
 ## Authentication and tenant context

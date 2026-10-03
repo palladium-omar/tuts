@@ -1,5 +1,7 @@
 # Payment providers and business-owned collection
 
+> **Current status:** The shipped payment adapter is a clearly labeled local sandbox with simulated confirmation. Stripe, PayPal, and bank providers are returned as unavailable; no real funds move. This page defines the provider ownership and adapter contract for future integrations. See the [repository status](../../README.md#what-works-today).
+
 Each business receives client payments through its own connected merchant account. Our SaaS subscription charges are a different product/accounting flow. A business may enable several providers concurrently. The paying client selects among the methods allowed for that invoice and supported by the business's connections.
 
 ## Ownership
@@ -21,4 +23,4 @@ Every adapter reports capabilities and implements supported operations: `createC
 
 Persist the attempt before calling a provider. Use its ID as the provider idempotency key, retry safely, and reconcile unknown outcomes instead of creating another charge. Verify webhook signatures against raw request bodies or the provider's verification API before accepting an event. Persist the provider event and payment transition before acknowledging it. Only verified confirmation emits `payments.payment-confirmed.v1`. Retries cannot allocate the same payment twice.
 
-Availability varies by country, currency and connected-account capabilities. The initial scaffold can demonstrate the full flow with sandbox; live adapters are considered complete only after provider sandbox verification, account authorization and operational reconciliation have been implemented.
+Availability varies by country, currency and connected-account capabilities. The local sandbox demonstrates a simulated flow. Live adapters are future work and are considered complete only after provider sandbox verification, account authorization and operational reconciliation have been implemented.
