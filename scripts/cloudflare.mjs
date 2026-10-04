@@ -1,6 +1,6 @@
 import { generateKeyPairSync, randomBytes, createPublicKey } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { chmod, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
@@ -25,8 +25,12 @@ async function save(path, value, privateFile = false) {
   if (privateFile) await chmod(path, 0o600);
 }
 export function validateDeployment(input, remote = false) {
-  const config = { prefix: 'tuts', accountId: '', ...input };
+  const config = { prefix: 'tuts', accountId: '', ingress: 'worker', ...input };
   if (!/^[a-z][a-z0-9-]{0,29}$/.test(config.prefix)) fail('prefix must be a lowercase resource name, at most 30 characters');
+  if (!['worker', 'pages'].includes(config.ingress)) fail('ingress must be worker or pages');
+  if (config.ingress === 'pages') {
+    if (typeof config.pagesProject !== 'string' || !/^[a-z\d](?:[a-z\d-]{0,56}[a-z\d])?$/.test(config.pagesProject)) fail('pagesProject must be a lowercase Pages project name, at most 58 characters');
+  }
   if (config.accountId && !/^[a-f\d]{32}$/i.test(config.accountId)) fail('accountId must be a Cloudflare account ID');
   if (remote && !config.accountId) fail('Set accountId in .cloudflare/deployment.json before remote commands');
   let url;
@@ -36,8 +40,8 @@ export function validateDeployment(input, remote = false) {
   if (config.customDomain) {
     if (!/^[a-z\d](?:[a-z\d.-]*[a-z\d])?$/.test(config.customDomain) || !config.customDomain.includes('.')) fail('customDomain must be a DNS hostname');
     if (url.hostname !== config.customDomain) fail('publicUrl must match customDomain when customDomain is configured');
-  } else if (!url.hostname.endsWith('.workers.dev')) {
-    fail('Without customDomain, publicUrl must be the gateway workers.dev origin');
+  } else if (!url.hostname.endsWith(config.ingress === 'pages' ? '.pages.dev' : '.workers.dev')) {
+    fail(`Without customDomain, publicUrl must be the ${config.ingress === 'pages' ? 'Pages pages.dev' : 'gateway workers.dev'} origin`);
   }
   return config;
 }
@@ -105,12 +109,23 @@ export function createConfigs(configInput, subscriptions, projectRoot = root) {
     };
   }
   output.gateway = {
-    ...common, name: `${config.prefix}-gateway`, main: join(projectRoot, 'apps/gateway/dist/worker.js'), workers_dev: true,
+    ...common, name: `${config.prefix}-gateway`, main: join(projectRoot, 'apps/gateway/dist/worker.js'), workers_dev: config.ingress === 'worker',
     assets: { directory: join(projectRoot, 'apps/web/out'), binding: 'ASSETS', run_worker_first: true },
     services: serviceNames.map(name => ({ binding: name.toUpperCase(), service: `${config.prefix}-${name}` })),
     triggers: { crons: ['*/15 * * * *'] },
-    ...(config.customDomain ? { routes: [{ pattern: config.customDomain, custom_domain: true }] } : {}),
+    ...(config.customDomain && config.ingress === 'worker' ? { routes: [{ pattern: config.customDomain, custom_domain: true }] } : {}),
   };
+  if (config.ingress === 'pages') {
+    // Pages has its own supported config fields and takes the account from the
+    // deployment environment. It receives no database, queue or secret bindings.
+    output.pages = {
+      name: config.pagesProject,
+      pages_build_output_dir: join(projectRoot, '.cloudflare/generated/pages/dist'),
+      compatibility_date: common.compatibility_date,
+      send_metrics: false,
+      services: [{ binding: 'GATEWAY', service: `${config.prefix}-gateway` }],
+    };
+  }
   return output;
 }
 async function contracts() {
@@ -121,6 +136,12 @@ async function generate(config) {
   const { eventConsumerSubscriptions } = await contracts();
   const configs = createConfigs(config, eventConsumerSubscriptions);
   for (const [name, value] of Object.entries(configs)) await save(join(directory, 'generated', name, 'wrangler.json'), value);
+  if (configs.pages) {
+    const outputDirectory = configs.pages.pages_build_output_dir;
+    await mkdir(outputDirectory, { recursive: true });
+    for (const name of ['_worker.js', '_routes.json'])
+      await copyFile(join(root, 'infra/cloudflare/pages-proxy', name), join(outputDirectory, name));
+  }
   return configs;
 }
 function configPath(name) { return join(directory, 'generated', name, 'wrangler.json'); }
@@ -173,6 +194,39 @@ async function bundle(config) {
     console.log(`Bundling ${name} (local dry run)`);
     await wrangler(['deploy', '--config', configPath(name), '--dry-run', '--outdir', join(directory, 'bundles', name)]);
   }
+  if (config.ingress === 'pages') {
+    console.log('Bundling Pages ingress (local compilation)');
+    await wrangler(['pages', 'functions', 'build',
+      '--build-output-directory', join(directory, 'generated/pages/dist'),
+      '--outdir', join(directory, 'bundles/pages'), '--compatibility-date', '2026-10-04']);
+  }
+}
+async function ensurePagesProject(config, secrets) {
+  const options = { quiet: true, secrets, env: { CLOUDFLARE_ACCOUNT_ID: config.accountId } };
+  // Pages commands discover their config from --cwd; --config is unsupported.
+  const pagesDirectory = join(directory, 'generated/pages');
+  const findProject = async () => {
+    const output = await wrangler(['pages', 'project', 'list', '--json', '--cwd', pagesDirectory], options);
+    let projects;
+    try { projects = JSON.parse(output); } catch { fail('Could not read Pages projects; verify account access'); }
+    if (!Array.isArray(projects)) fail('Could not read Pages projects; verify account access');
+    return projects.find(project => (project['Project Name'] ?? project.name) === config.pagesProject);
+  };
+  let project = await findProject();
+  if (!project) {
+    // Wrangler can automatically delegate new Pages projects to Workers. This
+    // ingress explicitly requires Pages' support for externally hosted DNS.
+    await wrangler(['pages', 'project', 'create', config.pagesProject,
+      '--production-branch', 'main', '--force', '--cwd', pagesDirectory], options);
+    project = await findProject();
+  }
+  if (!project) fail('Pages project was not found after creation; verify account access');
+  const domains = project.domains ?? String(project['Project Domains'] ?? '').split(',').map(domain => domain.trim());
+  const stagingDomain = Array.isArray(domains) && domains.find(domain => typeof domain === 'string' && /^[a-z\d-]+\.pages\.dev$/.test(domain));
+  if (!config.customDomain && stagingDomain && config.publicUrl !== `https://${stagingDomain}`)
+    fail(`Pages staging origin differs; set publicUrl to https://${stagingDomain} and regenerate configuration before deploying`);
+  if (stagingDomain) console.log(`Pages staging origin: https://${stagingDomain}`);
+  console.log('Pages ingress project ready; existing projects must use main as their production branch');
 }
 async function ensureResource(args, config, secrets, label) {
   try { await wrangler([...args, '--config', configPath('platform')], { quiet: true, secrets, env: { CLOUDFLARE_ACCOUNT_ID: config.accountId } }); }
@@ -199,6 +253,7 @@ async function provision(config, secrets) {
   // the queues' one-day retention; PostgreSQL keeps authoritative recovery JSON.
   await wrangler(['r2', 'bucket', 'lifecycle', 'set', `${config.prefix}-event-payloads`, '--file', join(root, 'infra/cloudflare/event-payload-lifecycle.json'), '--force', '--config', configPath('platform')], { quiet: true, secrets, env: { CLOUDFLARE_ACCOUNT_ID: config.accountId } });
   console.log('Private event payload expiration configured for seven days');
+  if (config.ingress === 'pages') await ensurePagesProject(config, secrets);
 }
 function quotedIdentifier(name) {
   if (!/^[a-z][a-z_\d]*$/.test(name)) fail('Invalid SQL identifier');
@@ -299,13 +354,22 @@ async function deploy(config, secrets) {
   await generate(config);
   // Validate every credential before changing any remote Worker.
   for (const name of deployOrder) secretsFor(name, secrets);
+  if (config.ingress === 'pages') await ensurePagesProject(config, secrets);
   for (const name of deployOrder) {
     console.log(`Publishing ${name}`);
     await wrangler(['secret', 'bulk', '--config', configPath(name)], { input: JSON.stringify(secretsFor(name, secrets)), quiet: true, secrets, env: { CLOUDFLARE_ACCOUNT_ID: config.accountId } });
     await wrangler(['deploy', '--config', configPath(name)], { quiet: true, secrets, env: { CLOUDFLARE_ACCOUNT_ID: config.accountId } });
     console.log(`${name} deployed`);
   }
-  console.log(`Gateway deployed at ${config.publicUrl}; verify health, registration and tenant isolation before reporting completion`);
+  if (config.ingress === 'pages') {
+    console.log('Publishing Pages ingress');
+    await wrangler(['pages', 'deploy', '--project-name', config.pagesProject,
+      '--branch', 'main', '--force', '--cwd', join(directory, 'generated/pages')],
+      { quiet: true, secrets, env: { CLOUDFLARE_ACCOUNT_ID: config.accountId } });
+    console.log(`Pages ingress published for ${config.publicUrl}; associate its custom domain and verify DNS, health, registration and tenant isolation before reporting completion`);
+  } else {
+    console.log(`Gateway deployed at ${config.publicUrl}; verify health, registration and tenant isolation before reporting completion`);
+  }
 }
 function parseArguments(args) {
   const result = {};
@@ -315,7 +379,7 @@ function parseArguments(args) {
     const [name, inline] = argument.slice(2).split('=', 2);
     const value = inline ?? args.shift();
     if (!value || value.startsWith('--')) fail(`Missing value for --${name}`);
-    if (!['public-url', 'account-id', 'prefix', 'custom-domain'].includes(name)) fail(`Unknown option --${name}`);
+    if (!['public-url', 'account-id', 'prefix', 'custom-domain', 'ingress', 'pages-project'].includes(name)) fail(`Unknown option --${name}`);
     result[name] = value;
   }
   return result;
@@ -324,8 +388,11 @@ export async function main(argv = process.argv.slice(2)) {
   const [command, ...args] = argv;
   if (command === 'init') {
     const options = parseArguments(args), existing = await json(deploymentPath, {});
-    const fields = { 'public-url': 'publicUrl', 'account-id': 'accountId', prefix: 'prefix', 'custom-domain': 'customDomain' };
-    for (const [name, value] of Object.entries(options)) existing[fields[name]] = value;
+    const fields = { 'public-url': 'publicUrl', 'account-id': 'accountId', prefix: 'prefix', 'custom-domain': 'customDomain', ingress: 'ingress', 'pages-project': 'pagesProject' };
+    for (const [name, value] of Object.entries(options)) {
+      if (name === 'custom-domain' && value === 'none') delete existing.customDomain;
+      else existing[fields[name]] = value;
+    }
     const config = validateDeployment(existing);
     await mkdir(directory, { recursive: true, mode: 0o700 });
     await save(deploymentPath, config);
@@ -333,10 +400,10 @@ export async function main(argv = process.argv.slice(2)) {
     console.log('Cloudflare deployment settings initialized; existing credentials preserved. Fill accountId and adminDatabaseUrl before remote commands.');
     return;
   }
-  if (!['config', 'build', 'bundle', 'provision', 'migrate', 'deploy'].includes(command)) fail('Usage: node scripts/cloudflare.mjs init --public-url HTTPS_ORIGIN [--account-id ID] [--prefix tuts] [--custom-domain HOST] | config | build | bundle | provision | migrate | deploy');
+  if (!['config', 'build', 'bundle', 'provision', 'migrate', 'deploy'].includes(command)) fail('Usage: node scripts/cloudflare.mjs init --public-url HTTPS_ORIGIN [--account-id ID] [--prefix tuts] [--custom-domain HOST] [--ingress worker|pages] [--pages-project NAME] | config | build | bundle | provision | migrate | deploy');
   if (args.length) fail('Only init accepts options; edit .cloudflare/deployment.json for subsequent commands');
   const { config, secrets } = await settings(['provision', 'deploy'].includes(command));
-  if (command === 'config') { await generate(config); console.log('Nine Wrangler configurations generated without secrets'); }
+  if (command === 'config') { const configs = await generate(config); console.log(`${Object.keys(configs).length} Wrangler configurations generated without secrets`); }
   if (command === 'build') await build();
   if (command === 'bundle') await bundle(config);
   if (command === 'provision') await provision(config, secrets);

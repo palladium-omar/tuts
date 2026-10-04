@@ -2,14 +2,15 @@
 
 This deployment keeps Tuts' eight independent domain services and their PostgreSQL databases. Cloudflare supplies the request runtime, private service calls, event queues, scheduled invocations, static assets, and private upload storage. Neon supplies PostgreSQL. The existing Node/container deployment remains available through the normal `main.ts` entrypoints.
 
-As of October 4, 2026, all nine Wrangler bundles, the Next.js static export, and local workerd integration checks have passed. Local checks exercised successful password signup/sign-in, gateway service bindings, tenant-scoped CRM requests, R2 upload/download byte equality, and queue consumption into a notification intent. Synthetic fixtures were removed afterward. A free Neon project has been created in London. Cloudflare signup, deployment credentials, cloud resources, remote migrations, deployment, live provider requests, and public browser verification are still pending. Local execution does not establish deployed CPU-limit compliance or a working hosted app.
+As of October 4, 2026, all nine Wrangler bundles, the Next.js static export, and local workerd integration checks have passed. Local checks exercised successful password signup/sign-in, gateway service bindings, tenant-scoped CRM requests, R2 upload/download byte equality, and queue consumption into a notification intent. Synthetic fixtures were removed afterward. A free Neon project has been created in London, and the Cloudflare account dashboard is accessible. Deployment CLI authorization, cloud resources, remote migrations, deployment, live provider requests, and public browser verification are still pending. The Pages ingress has compiled locally but has not been deployed. Local execution does not establish deployed CPU-limit compliance or a working hosted app.
 
 ## Service and data boundaries
 
 | Component | Cloudflare deployment | Data and access |
 | --- | --- | --- |
 | Browser app | Next.js static export in the gateway's `ASSETS` binding | Browser sessions and API calls use the gateway origin |
-| Gateway | One public Fetch Worker | Verifies browser Origin, resolves platform membership, and issues short-lived signed context |
+| Gateway | Fetch Worker, public in Worker ingress mode and private in Pages ingress mode | Verifies browser Origin, resolves platform membership, and issues short-lived signed context |
+| Optional Pages ingress | Thin public Pages Function bound to the gateway | Forwards requests unchanged; supports a custom subdomain with externally hosted DNS |
 | Platform | Private Worker | Own PostgreSQL database; identity, sessions, businesses, memberships |
 | Clients | Private Worker | Own PostgreSQL database; CRM and contact projections |
 | Scheduling | Private Worker | Own PostgreSQL database; classes and connected-calendar projections |
@@ -20,7 +21,7 @@ As of October 4, 2026, all nine Wrangler bundles, the Next.js static export, and
 | Integrations | Private Worker | Own PostgreSQL database; connector credentials, polling, intake |
 | Scheduled jobs | One cron trigger on the gateway Worker | Calls each service's authenticated runtime tick every 15 minutes |
 
-Only the gateway receives public HTTP traffic. Disable `workers.dev`, preview URLs, and public routes on domain services. Service calls use explicit bindings named `PLATFORM`, `CLIENTS`, `SCHEDULING`, `LEARNING`, `BILLING`, `PAYMENTS`, `NOTIFICATIONS`, and `INTEGRATIONS`. A binding does not grant tenant permission: the existing signed-context and resource authorization checks still apply.
+Worker ingress publishes the gateway directly. Pages ingress publishes a thin proxy with a single `GATEWAY` service binding and disables direct gateway `workers.dev`/custom-domain routes. All application requests reach the same gateway checks, and its `ASSETS` binding and cron remain in place. Disable `workers.dev`, preview URLs, and public routes on domain services. Service calls use explicit bindings named `PLATFORM`, `CLIENTS`, `SCHEDULING`, `LEARNING`, `BILLING`, `PAYMENTS`, `NOTIFICATIONS`, and `INTEGRATIONS`. A binding does not grant tenant permission: the existing signed-context and resource authorization checks still apply.
 
 The gateway rejects public `/internal` and `/__runtime` paths, including encoded variants. Ordinary API forwarding removes client-supplied authorization, internal secrets, identity/role/tenant context headers, and forwarding headers, then overwrites `x-real-ip` from Cloudflare's client IP. Non-platform business requests obtain membership and entitlements through the private platform context endpoint before receiving a JWT. Browser mutations require a trusted Origin. Platform owns session cookies; the gateway preserves separate `Set-Cookie` values and their security attributes.
 
@@ -62,9 +63,9 @@ The Worker runtime sets `NODE_ENV=production`. The current Stripe test connector
 
 ## Deployment files and sequence
 
-The deployment interface is `node scripts/cloudflare.mjs <command>`, with `init`, `config`, `build`, `bundle`, `provision`, `migrate`, and `deploy`. Its manifest, secret scoping, queue topology, database isolation checks, and deployment ordering have focused local checks. Remote commands have not yet been exercised against the hosting accounts.
+The deployment interface is `node scripts/cloudflare.mjs <command>`, with `init`, `config`, `build`, `bundle`, `provision`, `migrate`, and `deploy`. Worker-mode manifest, secret scoping, queue topology, database isolation checks, and deployment ordering have focused local checks. Pages ingress is an additional deployment path; remote commands for that mode have not yet been exercised against the hosting accounts.
 
-Local deployment metadata belongs in ignored `.cloudflare/deployment.json`, with `prefix`, `accountId`, `publicUrl`, and optional `customDomain` fields. Generated Wrangler files live under `.cloudflare/generated/<service>/wrangler.json`; the gateway configuration binds `apps/web/out` as `ASSETS` with `run_worker_first: true` so API/private-path checks take precedence over asset serving.
+Local deployment metadata belongs in ignored `.cloudflare/deployment.json`, with `prefix`, `accountId`, `publicUrl`, `ingress` (`worker` by default, or `pages`), optional `customDomain`, and a required `pagesProject` for Pages ingress. Generated Wrangler files live under `.cloudflare/generated/<service>/wrangler.json`; the gateway configuration binds `apps/web/out` as `ASSETS` with `run_worker_first: true` so API/private-path checks take precedence over asset serving. Pages mode also generates `.cloudflare/generated/pages/wrangler.json` and `dist/_worker.js`/`dist/_routes.json`. The proxy sends every request to the gateway and returns its response directly, preserving the streamed body and separate session cookies. It has no application secrets or database/queue/storage bindings.
 
 Ignored `.cloudflare/secrets.json` contains the top-level `CONTEXT_PRIVATE_KEY`, `CONTEXT_PUBLIC_KEY`, `PLATFORM_INTERNAL_SECRET`, `INTERNAL_RUNTIME_SECRET`, `BETTER_AUTH_SECRET`, `PAYMENT_ENCRYPTION_KEY`, `INTEGRATIONS_ENCRYPTION_KEY`, and `COMMUNICATIONS_ENCRYPTION_KEY`. Its `databasePasswords` and `databaseUrls` maps each have the eight lowercase service names as keys; `adminDatabaseUrl` holds the Neon administration connection used for provisioning databases/roles. Keep both JSON files out of Git and shared artifacts. Stable encryption keys must survive redeployments or stored connector credentials become unreadable. Deployment uploads only the required secrets to each Worker; the administration credential must remain local and the static browser bundle must contain no secrets.
 
@@ -78,7 +79,7 @@ node scripts/cloudflare.mjs build
 node scripts/cloudflare.mjs bundle
 ```
 
-`init` also accepts `--account-id`, `--prefix`, and `--custom-domain`. Configure the intended account, service/resource names, public URLs, and stable secrets using the generated files. Create or select a Neon project and store its administration URL as `adminDatabaseUrl` before running `migrate`; the generated per-service passwords are used to create the restricted service roles. Start with the gateway's HTTPS `workers.dev` address for both `PUBLIC_APP_URL` and `PUBLIC_GATEWAY_URL`. The `bundle` step reports each deployable Worker's size and local compatibility errors before a release is uploaded; actual edge startup/CPU acceptance still needs deployment and measurement.
+`init` also accepts `--account-id`, `--prefix`, `--custom-domain`, `--ingress`, and `--pages-project`. `--custom-domain none` clears a previous custom-domain setting when returning to staging. It preserves existing signing/encryption keys, database passwords, and account metadata except for explicitly supplied options. Configure the intended account, service/resource names, public URLs, and stable secrets using the generated files. Create or select a Neon project and store its administration URL as `adminDatabaseUrl` before running `migrate`; the generated per-service passwords are used to create the restricted service roles. Worker mode starts with the gateway's HTTPS `workers.dev` address for both `PUBLIC_APP_URL` and `PUBLIC_GATEWAY_URL`. The `bundle` step reports each deployable Worker's size and local compatibility errors, and also compiles the thin Pages proxy in Pages mode; actual edge startup/CPU acceptance still needs deployment and measurement.
 
 The static browser build can also be run directly:
 
@@ -97,7 +98,35 @@ node scripts/cloudflare.mjs migrate
 node scripts/cloudflare.mjs deploy
 ```
 
-`provision` creates Cloudflare queues/dead-letter queues, the private upload bucket, and the private event payload bucket with its seven-day lifecycle policy. Generated bindings use resource names. `migrate` uses the local Neon administration URL to create separate databases and restricted roles, then applies each service's migrations as its own role and records its connection URL in `databaseUrls`. `deploy` uploads each Worker's required secrets and deploys private domain Workers in dependency order before exposing the public gateway with its cron trigger. Confirm the final script's behavior before using these commands against an account: provisioning and deployment create remote resources, and migration changes remote schemas.
+`provision` creates Cloudflare queues/dead-letter queues, the private upload bucket, and the private event payload bucket with its seven-day lifecycle policy. In Pages mode it also creates the named Pages project if absent, with `main` as its production branch. An existing project must already use `main` as its production branch; the script does not change its branch settings. Generated bindings use resource names. `migrate` uses the local Neon administration URL to create separate databases and restricted roles, then applies each service's migrations as its own role and records its connection URL in `databaseUrls`. `deploy` uploads each Worker's required secrets and deploys domain Workers in dependency order followed by the gateway with its cron trigger. In Pages mode it publishes the Pages proxy after the gateway; its CLI invocation discovers configuration through `--cwd` and forces Pages to avoid automatic migration to Workers. Custom-domain association and DNS updates remain separate steps. Confirm the final script's behavior before using these commands against an account: provisioning and deployment create remote resources, and migration changes remote schemas.
+
+## Pages ingress with GoDaddy DNS
+
+For `tuts.palladiumscholars.com`, Pages supports a custom subdomain while GoDaddy remains the authoritative DNS provider. The proxy's `GATEWAY` service binding calls the existing Worker; the gateway continues to own routing, auth, assets, and scheduled jobs. [Pages custom subdomains](https://developers.cloudflare.com/pages/configuration/custom-domains/#add-a-custom-subdomain), [Pages service bindings](https://developers.cloudflare.com/pages/functions/bindings/#service-bindings).
+
+Stage on the project's production `pages.dev` hostname first. The example project name must be available; if Pages returns a different hostname, update `publicUrl` to that actual HTTPS origin and regenerate/deploy before browser verification.
+
+```sh
+node scripts/cloudflare.mjs init --ingress pages --pages-project tuts-palladium --custom-domain none --public-url 'https://tuts-palladium.pages.dev'
+node scripts/cloudflare.mjs config
+node scripts/cloudflare.mjs build
+node scripts/cloudflare.mjs bundle
+node scripts/cloudflare.mjs provision
+node scripts/cloudflare.mjs migrate
+node scripts/cloudflare.mjs deploy
+```
+
+These commands reuse the existing ignored secret file. The script's deploy uses `main`, so check that branch setting when selecting an existing Pages project. After staging works, associate `tuts.palladiumscholars.com` in the Pages project's **Custom domains** settings. Then add a GoDaddy CNAME with name `tuts` and target the actual project's `*.pages.dev` hostname. Registering the hostname with Pages before adding the CNAME is required; the CNAME alone can return a 522. This subdomain path requires no whole-zone nameserver change. Preserve the Firebase apex/www records and Google mail MX/verification/SPF/DKIM/DMARC records. [External-DNS CNAME setup](https://developers.cloudflare.com/pages/configuration/custom-domains/#add-a-custom-cname-record).
+
+Set the production browser/API origin and redeploy after the hostname association and DNS are ready:
+
+```sh
+node scripts/cloudflare.mjs init --ingress pages --pages-project tuts-palladium --custom-domain tuts.palladiumscholars.com --public-url 'https://tuts.palladiumscholars.com'
+node scripts/cloudflare.mjs config
+node scripts/cloudflare.mjs deploy
+```
+
+The custom-domain setting in Pages mode configures the trusted application origin; it does not create a Worker route or modify DNS. Repeat signup/sign-in/session/sign-out, browser Origin, private-route, and tenant checks through the final hostname. Pages Function requests share the Workers quota; this proxy does not remove backend CPU or connection limits. [Pages pricing](https://developers.cloudflare.com/pages/functions/pricing/).
 
 ## Cost target and limits
 
@@ -113,8 +142,8 @@ Queues Free includes 10,000 operations/day; fanout and retries multiply operatio
 
 ## Public verification and custom domain
 
-First deploy and verify the gateway's `workers.dev` URL. Required hosted checks include loading the ordinary browser app, signup/sign-in/session/sign-out cookies, tenant isolation, feature denial, blocked internal paths, event retry/deduplication, scheduled recovery, private upload/download isolation, and provider capability errors. Use synthetic data. Record live results separately from local checks.
+First deploy and verify the selected staging origin: the gateway's `workers.dev` URL for Worker mode or the project's production `pages.dev` URL for Pages mode. Required hosted checks include loading the ordinary browser app, signup/sign-in/session/sign-out cookies, tenant isolation, feature denial, blocked internal paths, event retry/deduplication, scheduled recovery, private upload/download isolation, and provider capability errors. Use synthetic data. Record live results separately from local checks.
 
-The intended custom domain is `tuts.palladiumscholars.com`. A Worker Custom Domain requires control of the applicable Cloudflare zone; an existing CNAME on that hostname must be resolved before attaching it. Cloudflare account authentication alone does not establish zone control. [Custom Domains](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/).
+The intended custom domain is `tuts.palladiumscholars.com`. In Worker ingress mode, a Worker Custom Domain requires control of the applicable Cloudflare zone; an existing CNAME on that hostname must be resolved before attaching it. Cloudflare account authentication alone does not establish zone control. Pages ingress uses the external-DNS subdomain procedure above. [Worker Custom Domains](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/).
 
 Before changing nameservers or DNS records, export and compare the existing zone. Preserve the existing Firebase website records, Google mail MX records, and related verification/SPF/DKIM/DMARC records. Add only the Tuts hostname after the staged app works and zone control is verified. Change the platform/gateway public URLs to the custom HTTPS origin, regenerate configuration, redeploy, and repeat cookie/Origin/browser checks. DNS cutover and custom-domain verification have not been performed.
