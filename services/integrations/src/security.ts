@@ -183,10 +183,22 @@ export async function cloudflareJsonGet(input: string, headers: Record<string, s
   const url = new URL(input);
   if (url.username || url.password || url.hash || !["https://api.cal.com", "https://api.calendly.com"].includes(url.origin))
     throw new ConnectorError("Custom endpoint pulls are unavailable on this runtime; a DNS-pinned egress adapter is required");
+  const started = Date.now();
+  const signal = AbortSignal.timeout(15000);
+  let stage: "request" | "response" = "request";
   try {
-    const response = await transport(url.toString(), { headers: { Accept: "application/json", ...headers }, redirect: "error", signal: AbortSignal.timeout(15000) });
+    // workerd supports manual/follow only. Inspect every redirect without following it.
+    const response = await transport(url.toString(), { headers: { Accept: "application/json", ...headers }, redirect: "manual", signal });
+    stage = "response";
     if (!response.ok) {
-      await response.body?.cancel();
+      // Cleanup failures must not hide the known provider HTTP status.
+      try { await response.body?.cancel(); } catch {}
+      if (response.status === 401)
+        throw new ConnectorError("The provider rejected this API key (HTTP 401). Check that it has not expired or been revoked.");
+      if (response.status === 403)
+        throw new ConnectorError("The provider denied access (HTTP 403). Check the API key's permissions.");
+      if (response.status === 429)
+        throw new ConnectorError("The provider's request limit was reached (HTTP 429). Try again shortly.");
       throw new ConnectorError(response.status >= 300 && response.status < 400 ? "Endpoint redirects are not allowed" : `Provider request failed (HTTP ${response.status})`);
     }
     if (!response.body) throw new ConnectorError("Provider returned invalid JSON");
@@ -205,6 +217,16 @@ export async function cloudflareJsonGet(input: string, headers: Record<string, s
     catch { throw new ConnectorError("Provider returned invalid JSON"); }
   } catch (error) {
     if (error instanceof ConnectorError) throw error;
-    throw new ConnectorError("Provider connection failed or timed out");
+    const name = error instanceof Error ? error.name : "UnknownError";
+    const timedOut = signal.aborted || name === "TimeoutError" || name === "AbortError";
+    // Log static classifications only; native messages can contain URLs or credentials.
+    console.warn(JSON.stringify({
+      event: "integration_provider_request_failed",
+      provider: url.hostname === "api.cal.com" ? "calcom" : "calendly",
+      stage,
+      elapsedMs: Date.now() - started,
+      errorKind: timedOut ? "timeout" : stage === "response" ? "response_interrupted" : "connection_failed",
+    }));
+    throw new ConnectorError(timedOut ? "Provider request timed out" : stage === "response" ? "Provider response was interrupted" : "Provider connection failed");
   }
 }

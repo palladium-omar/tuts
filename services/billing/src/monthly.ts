@@ -330,7 +330,7 @@ export class MonthlyService implements OnModuleInit, OnApplicationShutdown {
       response = await serviceFetch("scheduling", `/v1/class-ledger?${query}`, {
         headers: { authorization },
         signal: AbortSignal.timeout(30000),
-        redirect: "error",
+        redirect: "manual",
       });
     } catch {
       throw new ServiceUnavailableException(

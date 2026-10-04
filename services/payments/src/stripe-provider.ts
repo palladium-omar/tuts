@@ -295,7 +295,7 @@ export async function cloudflareStripeRequest(method: "GET" | "POST", path: stri
   try {
     const response = await transport(`https://api.stripe.com${path}`, {
       method, headers: { Authorization: `Bearer ${secretKey}`, Accept: "application/json", ...(method === "POST" ? { "Content-Type": "application/x-www-form-urlencoded", "Idempotency-Key": idempotencyKey! } : {}) },
-      ...(method === "POST" ? { body: data } : {}), redirect: "error", signal: AbortSignal.timeout(15000),
+      ...(method === "POST" ? { body: data } : {}), redirect: "manual", signal: AbortSignal.timeout(15000),
     });
     if (!response.ok) {
       await response.body?.cancel();

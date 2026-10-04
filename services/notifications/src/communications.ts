@@ -209,7 +209,7 @@ export async function resolveRecipients(
         "Content-Type": "application/json",
       },
       body: JSON.stringify(selection),
-      redirect: "error",
+      redirect: "manual",
       signal: AbortSignal.timeout(10000),
     });
     if (!response.ok)

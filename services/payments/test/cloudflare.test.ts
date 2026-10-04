@@ -8,7 +8,7 @@ test("Worker Stripe transport preserves fixed origin, idempotency and test restr
   try {
     const transport: typeof fetch = async (input, init) => {
       assert.equal(input, "https://api.stripe.com/v1/checkout/sessions");
-      assert.equal(init?.redirect, "error");
+      assert.equal(init?.redirect, "manual");
       assert.equal((init?.headers as any)["Idempotency-Key"], "synthetic-retry-key");
       return Response.json({ id: "cs_test_synthetic" });
     };

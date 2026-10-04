@@ -77,7 +77,7 @@ export class ResendAuthMailProvider implements AuthMailProvider {
             "If you did not request this, you can ignore this email.",
           ].join("\n"),
         }),
-        redirect: "error",
+        redirect: "manual",
         signal: AbortSignal.any([deadline, AbortSignal.timeout(providerTimeoutMs)]),
       });
       if (!response.ok || !response.body) {

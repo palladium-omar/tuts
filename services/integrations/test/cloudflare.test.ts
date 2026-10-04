@@ -8,7 +8,7 @@ test("fixed calendar origin uses bounded no-redirect Worker fetch", async () => 
   const transport: typeof fetch = async (input, init) => {
     called = true;
     assert.equal(input, "https://api.cal.com/v2/me");
-    assert.equal(init?.redirect, "error");
+    assert.equal(init?.redirect, "manual");
     assert.equal((init?.headers as any).Authorization, "Bearer synthetic");
     assert.ok(init?.signal);
     return Response.json({ data: { id: 123 } });

@@ -235,7 +235,7 @@ export async function cloudflareJsonPost(input: string, body: unknown, headers: 
   const data = JSON.stringify(body);
   if (Buffer.byteLength(data) > 128 * 1024) throw new CommunicationError("Provider request exceeded limit");
   try {
-    const response = await transport(url.toString(), { method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json", ...headers }, body: data, redirect: "error", signal: AbortSignal.timeout(15000) });
+    const response = await transport(url.toString(), { method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json", ...headers }, body: data, redirect: "manual", signal: AbortSignal.timeout(15000) });
     if (!response.ok) {
       await response.body?.cancel();
       throw new CommunicationError(`Provider rejected request (HTTP ${response.status})`, response.status >= 500 || response.status === 408);

@@ -6,7 +6,7 @@ import { cloudflareJsonPost, CommunicationError } from "../src/communication-sec
 test("Meta adapter fixes origin/path, rejects redirects and carries auth", async () => {
   const transport: typeof fetch = async (input, init) => {
     assert.equal(input, "https://graph.facebook.com/v22.0/123456/messages");
-    assert.equal(init?.redirect, "error");
+    assert.equal(init?.redirect, "manual");
     assert.equal(init?.method, "POST");
     assert.equal((init?.headers as any).Authorization, "Bearer synthetic");
     return Response.json({ messages: [{ id: "synthetic" }] });
