@@ -15,7 +15,7 @@ do not authenticate an account or grant deployment access.
 | Neon MCP | Pinned to existing project `divine-poetry-44729356` with selected tool categories | No OAuth grant completed |
 | Neon CLI | Available through the local npm cache; its default profile has no saved account credentials | Unauthenticated |
 | Neon PostgreSQL | Existing project connection saved only in ignored private deployment settings | All eight service databases migrated with verified TLS and restricted roles; cross-service database access denied |
-| Deployment | All nine Workers and Pages deployed at `tuts-palladium.pages.dev` | Homepage, gateway health, and unauthenticated session endpoint return HTTP 200; custom hostname awaits GoDaddy DNS |
+| Deployment | All nine Workers and Pages deployed; primary origin `tuts.palladiumscholars.com` | Custom hostname homepage, `/health`, and unauthenticated session endpoint return HTTP 200 with valid TLS; HTML request for `/?view=scheduling` redirects canonically to the custom hostname; signup/sign-in and authenticated flows remain unverified |
 
 An existing signed-in provider dashboard is a separate browser session; it does
 not establish CLI or MCP authentication. Confirm access through the specific
@@ -88,10 +88,10 @@ XDG_CONFIG_HOME="$PWD/.cloudflare/cli-config" pnpm exec wrangler whoami
 XDG_CONFIG_HOME="$PWD/.cloudflare/cli-config" node scripts/cloudflare.mjs provision
 ```
 
-R2 activation is a separate subscription step. The owner approved its displayed
-free allowance and usage-based overage terms and completed the required billing
-checkout. Both private buckets are provisioned; public bucket access is disabled
-and transport payloads expire after seven days. The Workers plan was not upgraded.
+R2 is active. The owner approved its displayed free allowance and usage-based
+overage terms and completed the required billing checkout. Both private buckets
+are provisioned; public bucket access is disabled and transport payloads expire
+after seven days. The Workers plan was not upgraded.
 
 For CLI access, follow [Wrangler authentication](https://developers.cloudflare.com/workers/wrangler/commands/#login)
 or use a purpose-scoped API token stored in the environment. Token setup is
