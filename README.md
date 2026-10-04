@@ -2,7 +2,7 @@
 
 Tuts is a composable tutoring-business workspace. Its local preview brings together eight independently running domain services, each with its own API, migrations, and PostgreSQL database. PostgreSQL row-level security, signed gateway context, and RabbitMQ provide the service and tenant boundaries.
 
-The current product is a staff web app with a local preview, a container deployment configuration, and a Cloudflare runtime adapter. Cloudflare is the selected hosting target; account setup and public deployment are still pending. See the [Cloudflare deployment guide](docs/cloudflare-deployment.md). Architecture documents describe the contracts and extension workflow for this system; they include planned capabilities as well as implemented ones. The status list below is the source of truth for what is delivered today.
+The current product is a staff web app with a local preview, a container deployment configuration, and a Cloudflare runtime adapter. Cloudflare is the selected hosting target; account setup and public deployment are still pending. See the [Cloudflare deployment guide](docs/cloudflare-deployment.md) and [agent tooling setup](docs/agent-setup.md). Architecture documents describe the contracts and extension workflow for this system; they include planned capabilities as well as implemented ones. The status list below is the source of truth for what is delivered today.
 
 ## What works today
 
