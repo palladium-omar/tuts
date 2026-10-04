@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import { chmod, copyFile, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { checkServerIdentity } from 'node:tls';
 import pg from 'pg';
 
 export const root = fileURLToPath(new URL('../', import.meta.url));
@@ -170,7 +171,11 @@ async function run(executable, args, options = {}) {
     child.stdin.end(options.input ?? '');
   });
 }
-function wrangler(args, options = {}) { return run('pnpm', ['exec', 'wrangler', ...args], options); }
+function wrangler(args, options = {}) {
+  // Wrangler's explicit info log level suppresses machine-readable --json output.
+  const env = { ...(args.includes('--json') ? { WRANGLER_LOG: undefined } : {}), ...options.env };
+  return run('pnpm', ['exec', 'wrangler', ...args], { ...options, env });
+}
 
 export function secretsFor(name, secrets) {
   if (name === 'gateway') return Object.fromEntries(['CONTEXT_PRIVATE_KEY', 'PLATFORM_INTERNAL_SECRET', 'INTERNAL_RUNTIME_SECRET'].map(key => [key, secrets[key]]));
@@ -232,16 +237,76 @@ async function ensureResource(args, config, secrets, label) {
   try { await wrangler([...args, '--config', configPath('platform')], { quiet: true, secrets, env: { CLOUDFLARE_ACCOUNT_ID: config.accountId } }); }
   catch (error) {
     // Only an explicit already-existing resource permits an idempotent continuation.
-    if (!/already exists|already been created|already have.*bucket/i.test(error.output ?? '')) {
+    const existingQueue = args[0] === 'queues' && args[1] === 'create' && /Queue name '[^']+' is already taken[\s\S]*code: 11009/.test(error.output ?? '');
+    if (!existingQueue && !/already exists|already been created|already have.*bucket/i.test(error.output ?? '')) {
       console.error(redact(error.output ?? '', secrets));
       throw new Error(`${label} could not be provisioned; verify account access and service enablement`);
     }
   }
   console.log(`${label} ready`);
 }
+// Account namespace registration is required by queue consumers even when every
+// Worker disables public workers.dev and preview routes. Preserve existing names.
+// https://developers.cloudflare.com/api/resources/workers/subresources/subdomains/
+export async function ensureWorkersSubdomain(config) {
+  const auth = await new Promise((resolveAuth, reject) => {
+    const child = spawn('pnpm', ['exec', 'wrangler', 'auth', 'token', '--json'], {
+      cwd: root,
+      env: { ...process.env, CI: 'true', CLOUDFLARE_ACCOUNT_ID: config.accountId, WRANGLER_LOG: undefined, WRANGLER_LOG_SANITIZE: 'true', WRANGLER_SEND_METRICS: 'false' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    // Authentication output is secret: never echo, persist, or include it in errors.
+    let output = '';
+    child.stdout.on('data', chunk => { output += chunk; });
+    child.stderr.resume();
+    child.on('error', () => reject(new Error('Could not capture authorized Wrangler authentication')));
+    child.on('close', code => {
+      if (code !== 0) { reject(new Error('Could not capture authorized Wrangler authentication')); return; }
+      try {
+        const value = JSON.parse(output);
+        if (!['oauth', 'api_token'].includes(value.type) || typeof value.token !== 'string' || !value.token) throw new Error();
+        resolveAuth(value);
+      } catch { reject(new Error('Wrangler bearer authorization is required for account namespace setup')); }
+    });
+  });
+  const endpoint = `https://api.cloudflare.com/client/v4/accounts/${config.accountId}/workers/subdomain`;
+  async function request(method, payload) {
+    const response = await fetch(endpoint, {
+      method, headers: { authorization: `Bearer ${auth.token}`, ...(payload ? { 'content-type': 'application/json' } : {}) },
+      ...(payload ? { body: JSON.stringify(payload) } : {}), signal: AbortSignal.timeout(30000),
+    });
+    const body = await response.json();
+    return { ok: response.ok && body.success === true, status: response.status, subdomain: body.result?.subdomain, codes: (body.errors ?? []).map(error => error.code) };
+  }
+  const existing = await request('GET');
+  if (existing.ok && typeof existing.subdomain === 'string' && existing.subdomain) {
+    console.log(`Account Workers namespace ready: ${existing.subdomain}.workers.dev`);
+    return existing.subdomain;
+  }
+  if (existing.status !== 404 || !existing.codes.includes(10007)) fail(`Could not read account Workers namespace (HTTP ${existing.status}; codes ${existing.codes.join(',')})`);
+  const candidates = [...new Set([config.pagesProject ?? `${config.prefix}-palladium`, `${config.prefix}-${config.accountId.slice(0, 8)}`])];
+  for (const candidate of candidates) {
+    if (!/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(candidate)) fail('Invalid account Workers namespace candidate');
+    // Re-read before registering to preserve a namespace created concurrently.
+    const current = await request('GET');
+    if (current.ok && current.subdomain) return current.subdomain;
+    if (current.status !== 404 || !current.codes.includes(10007)) fail('Account Workers namespace state changed; refusing to overwrite it');
+    const created = await request('PUT', { subdomain: candidate });
+    if (!created.ok) {
+      if (created.codes.includes(10031)) continue; // This candidate is unavailable.
+      fail(`Could not register account Workers namespace (HTTP ${created.status}; codes ${created.codes.join(',')})`);
+    }
+    const confirmed = await request('GET');
+    if (!confirmed.ok || confirmed.subdomain !== candidate) fail('Account Workers namespace registration was not confirmed');
+    console.log(`Account Workers namespace ready: ${candidate}.workers.dev`);
+    return candidate;
+  }
+  fail('Account Workers namespace candidates are unavailable; choose an available account namespace');
+}
 async function provision(config, secrets) {
   await generate(config);
   await wrangler(['whoami'], { quiet: true, secrets, env: { CLOUDFLARE_ACCOUNT_ID: config.accountId } });
+  await ensureWorkersSubdomain(config);
   const { eventConsumerSubscriptions } = await contracts();
   for (const { consumer } of eventConsumerSubscriptions) {
     await ensureResource(['queues', 'create', queueName(config, consumer), '--message-retention-period-secs', '86400'], config, secrets, `${consumer} event queue`);
@@ -287,46 +352,88 @@ async function migrationTables(tx, migrationsDirectory) {
     await tx.query('INSERT INTO service_migrations(name) VALUES($1)', [name]);
   }
 }
+function migrationClient(connectionString) {
+  const url = new URL(connectionString);
+  url.searchParams.set('sslmode', 'verify-full');
+  const client = new pg.Client({ connectionString: url.toString(), connectionTimeoutMillis: 15000 });
+  // pg parses URL SSL options before constructing its connection. Harden that
+  // shared options object afterward, so URL parsing cannot override validation.
+  Object.assign(client.connectionParameters.ssl, { rejectUnauthorized: true, checkServerIdentity });
+  return client;
+}
+function verifyConnectionTls(client, label) {
+  const stream = client.connection.stream;
+  // Neon terminates client TLS at its proxy; pg_stat_ssl describes the proxy's
+  // backend connection, not this client's encrypted and authenticated socket.
+  if (stream.encrypted !== true || stream.authorized !== true || stream.authorizationError
+    || typeof stream.getPeerCertificate !== 'function'
+    || checkServerIdentity(client.connectionParameters.host, stream.getPeerCertificate()))
+    fail(`${label} PostgreSQL connection requires verified TLS and a matching hostname`);
+}
 async function migrate(config, secrets) {
   if (!secrets.adminDatabaseUrl) fail('Set adminDatabaseUrl in .cloudflare/secrets.json before migrating');
   const adminUrl = new URL(secrets.adminDatabaseUrl);
   if (!['postgres:', 'postgresql:'].includes(adminUrl.protocol) || !['require', 'verify-ca', 'verify-full'].includes(adminUrl.searchParams.get('sslmode'))) fail('adminDatabaseUrl must require PostgreSQL TLS');
-  const admin = new pg.Client({ connectionString: secrets.adminDatabaseUrl, connectionTimeoutMillis: 15000 });
+  const admin = migrationClient(secrets.adminDatabaseUrl);
+  if (admin.connectionParameters.host.includes('-pooler')) fail('Administrative PostgreSQL migrations require a direct endpoint');
+  let phase = 'administrative connection';
   try {
     await admin.connect();
-    const tls = await admin.query('SELECT ssl FROM pg_stat_ssl WHERE pid=pg_backend_pid()');
-    if (!tls.rows[0]?.ssl) fail('Administrative PostgreSQL connection is not encrypted');
+    verifyConnectionTls(admin, 'Administrative');
     for (const name of serviceNames) {
       const role = sqlName(config, name), quoted = quotedIdentifier(role);
+      phase = `${name} role creation`;
       if (!(await admin.query('SELECT 1 FROM pg_roles WHERE rolname=$1', [role])).rowCount) {
         // Passwords are generated hex, never supplied on argv or emitted in logs.
         await admin.query(`CREATE ROLE ${quoted} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD '${secrets.databasePasswords[name]}'`);
       }
+      phase = `${name} role verification`;
       await verifyRole(admin, role);
+      phase = `${name} database inspection`;
       const database = await admin.query('SELECT pg_get_userbyid(datdba) AS owner FROM pg_database WHERE datname=$1', [role]);
-      if (!database.rowCount) await admin.query(`CREATE DATABASE ${quoted} OWNER ${quoted}`);
-      else if (database.rows[0].owner !== role) fail(`${role} database has a different owner; refusing to change ownership`);
-      await admin.query(`REVOKE CONNECT ON DATABASE ${quoted} FROM PUBLIC`);
-      for (const other of serviceNames.filter(service => service !== name)) {
-        const otherRole = sqlName(config, other);
-        if ((await admin.query('SELECT 1 FROM pg_roles WHERE rolname=$1', [otherRole])).rowCount) await admin.query(`REVOKE CONNECT ON DATABASE ${quoted} FROM ${quotedIdentifier(otherRole)}`);
+      if (!database.rowCount) {
+        // PostgreSQL requires SET ROLE ability to create a database for another
+        // owner. Grant the service role to the administrator, never the reverse.
+        phase = `${name} administrator owner permission`;
+        const permission = await admin.query("SELECT pg_has_role(current_user,$1,'SET') AS allowed", [role]);
+        if (!permission.rows[0]?.allowed) await admin.query(`GRANT ${quoted} TO CURRENT_USER WITH INHERIT FALSE, SET TRUE`);
+        phase = `${name} database creation`;
+        await admin.query(`CREATE DATABASE ${quoted} OWNER ${quoted}`);
       }
-      await admin.query(`GRANT CONNECT ON DATABASE ${quoted} TO ${quoted}`);
+      else if (database.rows[0].owner !== role) fail(`${role} database has a different owner; refusing to change ownership`);
+      phase = `${name} database access isolation`;
+      // Administrator membership deliberately does not inherit owner rights.
+      // Apply ACLs as the owner; otherwise PostgreSQL may only emit a warning.
+      await admin.query(`SET ROLE ${quoted}`);
+      try {
+        await admin.query(`REVOKE CONNECT ON DATABASE ${quoted} FROM PUBLIC`);
+        for (const other of serviceNames.filter(service => service !== name)) {
+          const otherRole = sqlName(config, other);
+          if ((await admin.query('SELECT 1 FROM pg_roles WHERE rolname=$1', [otherRole])).rowCount) await admin.query(`REVOKE CONNECT ON DATABASE ${quoted} FROM ${quotedIdentifier(otherRole)}`);
+        }
+        await admin.query(`GRANT CONNECT ON DATABASE ${quoted} TO ${quoted}`);
+      } finally { await admin.query('RESET ROLE'); }
       secrets.databaseUrls[name] = databaseUrl(secrets.adminDatabaseUrl, config, name, secrets.databasePasswords[name]);
       // Persist progress before using the new role, so interrupted setup is repeatable.
+      phase = `${name} credential persistence`;
       await save(secretsPath, secrets, true);
     }
     for (const name of serviceNames) {
       const role = sqlName(config, name);
-      const client = new pg.Client({ connectionString: secrets.databaseUrls[name], connectionTimeoutMillis: 15000 });
+      const client = migrationClient(secrets.databaseUrls[name]);
       try {
+        phase = `${name} service connection`;
         await client.connect();
+        verifyConnectionTls(client, 'Service');
+        phase = `${name} service role verification`;
         await verifyRole(client, role);
+        phase = `${name} schema migration`;
         await client.query('BEGIN');
         try {
           await migrationTables(client, join(root, 'services', name, 'migrations'));
           await client.query('COMMIT');
         } catch (error) { await client.query('ROLLBACK'); throw error; }
+        phase = `${name} database access verification`;
         for (const other of serviceNames.filter(service => service !== name)) {
           const check = await client.query('SELECT has_database_privilege(current_user,$1,\'CONNECT\') AS allowed', [sqlName(config, other)]);
           if (check.rows[0].allowed) fail(`${role} can connect to another service database`);
@@ -336,8 +443,8 @@ async function migrate(config, secrets) {
     }
   } catch (error) {
     // PostgreSQL diagnostics can include SQL/password fragments. Only safe controlled messages survive.
-    if (/^(Unsafe database|Administrative PostgreSQL|[a-z_]+ (?:has inherited|database has|can connect))/.test(error.message ?? '')) throw error;
-    throw new Error(`Database setup failed${error.code ? ` (PostgreSQL ${error.code})` : ''}; check admin access, role passwords, ownership and migration requirements`);
+    if (/^(Unsafe database|(?:Administrative|Service) PostgreSQL|[a-z_]+ (?:has inherited|database has|can connect))/.test(error.message ?? '')) throw error;
+    throw new Error(`Database setup failed during ${phase}${error.code ? ` (PostgreSQL ${error.code})` : ''}; check admin access, role passwords, ownership and migration requirements`);
   } finally { await admin.end(); }
 }
 export function validateServiceDatabaseUrls(config, secrets) {

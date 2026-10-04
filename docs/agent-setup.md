@@ -11,9 +11,11 @@ do not authenticate an account or grant deployment access.
 | Cloudflare skills | 16 skills installed globally under `~/.agents/skills/` from the official Cloudflare repository | Skills need no account credentials |
 | Neon skills | `neon` and `neon-postgres` installed locally under `.agents/skills/` using the requested `npx` setup | Skills need no account credentials |
 | Cloudflare MCP | Main API, documentation, bindings, builds, and observability servers | No OAuth grant completed |
+| Wrangler CLI | Project-local credentials under `.cloudflare/cli-config/` | Authenticated; all 12 event queues and the Pages project were created through the CLI |
 | Neon MCP | Pinned to existing project `divine-poetry-44729356` with selected tool categories | No OAuth grant completed |
 | Neon CLI | Available through the local npm cache; its default profile has no saved account credentials | Unauthenticated |
-| Deployment | Local builds and runtime checks are documented in the deployment guide | No cloud deployment completed |
+| Neon PostgreSQL | Existing project connection saved only in ignored private deployment settings | All eight service databases migrated with verified TLS and restricted roles; cross-service database access denied |
+| Deployment | All nine Workers and Pages deployed at `tuts-palladium.pages.dev` | Homepage, gateway health, and unauthenticated session endpoint return HTTP 200; custom hostname awaits GoDaddy DNS |
 
 An existing signed-in provider dashboard is a separate browser session; it does
 not establish CLI or MCP authentication. Confirm access through the specific
@@ -73,10 +75,23 @@ and the capabilities needed for this deployment. A completed MCP grant and
 Wrangler CLI authentication are separate credentials and must be checked
 separately.
 
-Automatic approval review also blocked restarting Wrangler OAuth until the
-account owner explicitly approves its requested persistent deployment access.
-No grant was completed. Resume only after that approval; registration of the
-MCP endpoints is not a substitute for it.
+Wrangler authorization completed in Codex's isolated browser after the account
+owner signed in and instructed continuation through the CLI. Keep all provider
+browser work in that isolated browser so it does not interrupt personal Chrome
+browsing. The successful grant includes account/user read, Workers and script
+write, Worker tail read, Pages write, Queues write, and background access.
+
+Use the project-local credential directory for deployment commands:
+
+```sh
+XDG_CONFIG_HOME="$PWD/.cloudflare/cli-config" pnpm exec wrangler whoami
+XDG_CONFIG_HOME="$PWD/.cloudflare/cli-config" node scripts/cloudflare.mjs provision
+```
+
+R2 activation is a separate subscription step. The owner approved its displayed
+free allowance and usage-based overage terms and completed the required billing
+checkout. Both private buckets are provisioned; public bucket access is disabled
+and transport payloads expire after seven days. The Workers plan was not upgraded.
 
 For CLI access, follow [Wrangler authentication](https://developers.cloudflare.com/workers/wrangler/commands/#login)
 or use a purpose-scoped API token stored in the environment. Token setup is
@@ -87,7 +102,13 @@ its result does not authenticate any MCP server.
 
 ### Neon: scope access to the existing project
 
-The preferred independent CLI credential is a **project-scoped API key** for
+For the current deployment, the existing direct PostgreSQL connection was
+retrieved from the authenticated Console and saved privately in
+`.cloudflare/secrets.json`. It is sufficient for the deployment script's SQL
+migrations; account API access is not required for those operations. Do not
+print, commit, or place this administration connection in Worker configuration.
+
+If account API operations are needed later, prefer a **project-scoped API key** for
 `divine-poetry-44729356`. In the already authenticated Neon Console, use the
 organization's **Settings → API keys → Create new → Project-scoped**, then select
 that project. These keys have Editor access within the chosen project. They can
