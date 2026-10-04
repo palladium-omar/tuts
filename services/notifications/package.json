@@ -10,16 +10,20 @@
     "test": "tsx --test test/*.test.ts"
   },
   "dependencies": {
-    "@palladium/contracts": "workspace:*",
-    "@palladium/service-kit": "workspace:*",
     "@nestjs/common": "^11.1.0",
     "@nestjs/core": "^11.1.0",
     "@nestjs/platform-express": "^11.1.0",
     "@nestjs/swagger": "^11.2.0",
+    "@palladium/contracts": "workspace:*",
+    "@palladium/service-kit": "workspace:*",
+    "nodemailer": "^10.0.14",
+    "pg": "^8.16.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
-    "pg": "^8.16.0",
     "zod": "^4.1.0"
   },
-  "type": "module"
+  "type": "module",
+  "devDependencies": {
+    "@types/nodemailer": "^8.0.2"
+  }
 }

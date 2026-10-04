@@ -1,0 +1,148 @@
+.comm-connections {
+  margin-top: 24px;
+}
+.comm-connections .panel-title p {
+  margin: 6px 0 0;
+}
+.comm-provider-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin: 20px 0;
+}
+.comm-provider-grid > button {
+  display: flex;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 10px;
+  text-align: left;
+  padding: 18px;
+  white-space: normal;
+  min-height: 150px;
+}
+.comm-provider-grid > button > span {
+  color: var(--brand-primary, #305b4c);
+}
+.comm-provider-grid small,
+.comm-form small {
+  line-height: 1.5;
+}
+.comm-form {
+  display: grid;
+  gap: 18px;
+}
+.comm-form label {
+  display: grid;
+  gap: 8px;
+}
+.comm-info {
+  padding: 14px 16px;
+  background: var(--brand-surface, #f1f4e8);
+  border-radius: 12px;
+  line-height: 1.6;
+  margin: 12px 0;
+}
+.comm-preview-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin: 20px 0;
+}
+.comm-preview-stats > div {
+  padding: 16px;
+  border: 1px solid var(--border, #ddd);
+  border-radius: 12px;
+}
+.comm-preview-stats strong {
+  font-size: 28px;
+  display: block;
+}
+.comm-preview-stats small {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted, #69716d);
+}
+.comm-recipient-list {
+  max-height: 360px;
+  overflow: auto;
+  border: 1px solid var(--border, #ddd);
+  border-radius: 12px;
+}
+.comm-recipient-list details {
+  padding: 14px;
+  border-bottom: 1px solid var(--border, #ddd);
+}
+.comm-recipient-list summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+}
+.comm-recipient-list small {
+  display: block;
+  margin-top: 10px;
+}
+.comm-message-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.comm-ai,
+.comm-history {
+  border-top: 1px solid var(--border, #ddd);
+  padding-top: 16px;
+  margin-top: 16px;
+}
+.comm-ai summary,
+.comm-history summary {
+  cursor: pointer;
+  margin-bottom: 12px;
+}
+.comm-ai label {
+  margin: 12px 0;
+}
+.comm-ai small {
+  display: block;
+  margin-top: 10px;
+}
+.comm-history > button {
+  display: flex;
+  width: 100%;
+  justify-content: space-between;
+  gap: 12px;
+  text-align: left;
+  margin: 8px 0;
+}
+.comm-history small {
+  display: block;
+  margin-top: 4px;
+}
+.comm-connections .record-main small {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 760px) {
+  .comm-provider-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .comm-preview-stats {
+    gap: 6px;
+  }
+  .comm-preview-stats > div {
+    padding: 12px;
+  }
+  .comm-recipient-list summary {
+    font-size: 13px;
+  }
+}
+@media (max-width: 400px) {
+  .comm-provider-grid {
+    grid-template-columns: 1fr;
+  }
+  .comm-preview-stats {
+    grid-template-columns: 1fr;
+  }
+  .comm-preview-stats strong {
+    font-size: 22px;
+  }
+}

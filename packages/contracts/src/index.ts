@@ -44,6 +44,7 @@ export const eventConsumerSubscriptions = [
     types: [
       "payments.payment-confirmed.v1",
       "platform.business-profile-updated.v1",
+      "scheduling.class-updated.v1",
     ],
   },
   { consumer: "integrations", types: ["clients.source-synced.v1"] },
@@ -66,6 +67,7 @@ export const eventConsumerSubscriptions = [
     consumer: "notifications",
     types: [
       "clients.client-created.v1",
+      "clients.client-updated.v1",
       "scheduling.session-created.v1",
       "scheduling.session-completed.v1",
       "learning.assignment-created.v1",

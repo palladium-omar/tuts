@@ -1,0 +1,153 @@
+.date-picker {
+  position: relative;
+  min-width: 0;
+}
+.date-picker-label {
+  display: block;
+  font-size: 12px;
+  margin-bottom: 7px;
+  font-weight: 500;
+}
+.date-picker-trigger {
+  width: 100%;
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 12px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: left;
+}
+.date-picker-trigger.has-value {
+  color: var(--ink);
+}
+.date-picker-trigger span {
+  flex: 1;
+}
+.date-picker-panel {
+  margin-top: 8px;
+  width: min(100%, 350px);
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 8px 26px #0000000a;
+}
+.date-picker-shortcuts {
+  display: flex;
+  gap: 6px;
+  padding-bottom: 12px;
+}
+.date-picker-shortcuts button {
+  flex: 1;
+  padding: 7px 5px;
+  font-size: 11px;
+}
+.date-picker-navigation {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 12px;
+}
+.date-picker-navigation button {
+  padding: 7px;
+}
+.date-picker-navigation select {
+  min-width: 0;
+  font-size: 12px;
+  padding: 8px 5px;
+}
+.date-picker-navigation select:first-of-type {
+  flex: 1;
+}
+.date-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 3px;
+}
+.date-picker-weekday {
+  text-align: center;
+  font-size: 10px;
+  color: var(--muted);
+  padding: 4px 0 8px;
+}
+.date-picker-day {
+  display: grid;
+  place-items: center;
+  height: 32px;
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  font-size: 12px;
+  border-radius: 7px;
+}
+.date-picker-day[aria-current="date"] {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.date-picker-day.selected {
+  color: var(--on-accent);
+  background: var(--accent);
+}
+.date-picker-day:focus-visible {
+  outline-offset: 1px;
+}
+.date-picker-time {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding-top: 14px;
+  margin-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.date-picker-time > span {
+  margin-right: auto;
+  font-size: 12px;
+}
+.date-picker-time label {
+  margin: 0;
+  font-size: 10px;
+}
+.date-picker-time select {
+  margin-top: 4px;
+  min-width: 65px;
+  font-size: 13px;
+  padding: 7px 8px;
+}
+.date-picker-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+  margin-top: 14px;
+}
+.date-picker-actions button {
+  font-size: 11px;
+  padding: 7px 10px;
+}
+.date-picker-actions button:first-child:not(.primary) {
+  margin-right: auto;
+}
+.date-picker-required {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.date-picker .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+/* Keep an expanded calendar clear of a modal's sticky submit controls. */
+.modal:has(.date-picker-panel) .form-actions {
+  position: static;
+}

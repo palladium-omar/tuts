@@ -1,0 +1,110 @@
+.payments-workspace {
+  display: grid;
+  gap: 20px;
+}
+.payments-workspace .section-heading {
+  margin-bottom: 0;
+}
+.payments-test-banner {
+  margin: 0;
+}
+.payments-test-banner > .tag {
+  margin-left: auto;
+  white-space: nowrap;
+}
+.payments-account {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 0;
+  border-top: 1px solid var(--line);
+}
+.payments-account small {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 6px;
+}
+.payments-sandbox {
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+  margin-top: 12px;
+}
+.payments-sandbox summary {
+  cursor: pointer;
+  font-weight: 500;
+  font-size: 13px;
+}
+.payments-next-step {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 12px 16px;
+  border-radius: 8px;
+  background: var(--tint);
+}
+.payments-next-step p {
+  margin: 0;
+  font-size: 13px;
+}
+.payments-attempt {
+  border-top: 1px solid var(--line);
+  padding: 20px 0;
+}
+.payments-attempt:last-child {
+  padding-bottom: 0;
+}
+.payments-attempt-heading {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.payments-attempt-heading > div {
+  margin-right: auto;
+}
+.payments-attempt-heading small {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 6px;
+}
+.payments-attempt-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+.payments-attempt-actions small {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+}
+.payments-attempt-actions button,
+.payments-attempt-actions a {
+  font-size: 12px;
+  padding: 8px 10px;
+}
+.payments-attempt-error {
+  padding: 10px 12px;
+  background: var(--tint);
+  border-radius: 8px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 640px) {
+  .payments-test-banner,
+  .payments-attempt-heading,
+  .payments-account {
+    flex-wrap: wrap;
+  }
+  .payments-connections .panel-title {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .payments-attempt-actions small {
+    width: 100%;
+    margin-left: 0;
+  }
+}

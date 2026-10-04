@@ -6,16 +6,16 @@ The current product is a local development preview with a staff web app. Archite
 
 ## What works today
 
-| Area | Delivered | Not delivered yet |
-| --- | --- | --- |
-| Platform | Sign-in, business workspaces, an owner membership created with each workspace, editable business profile and address, logo, four-color workspace palette | Inviting or adding other staff, student/parent portal, production subscription administration |
-| Clients | Tenant-scoped student and payer records; mapped CSV and `.xlsx` import with preview/commit; connected-source contact intake | Student/parent portal access |
-| Scheduling | Month and week calendars with synced Calendly/Cal.com bookings, date navigation, daily agenda, and booking details; legacy local session APIs remain | UI-based local session creation/editing and provider booking actions; student self-service booking |
-| Learning | Staff assignments, progress records, and private persistent-disk resource uploads up to 20 MiB | Student/parent portal access and cloud object storage |
-| Billing | Staff invoice creation, issue, and payment allocation; invoice snapshots include business seller profile and logo | Automatic invoicing from completed sessions and recurring billing |
-| Payments | Explicitly labeled local sandbox attempts and simulated confirmations | Live Stripe, PayPal, or bank integrations; no real money is moved |
-| Notifications | Durable in-app/email notification intents with `queue_only` delivery status | Sending email or SMS, delivery confirmation, and student-facing notifications |
-| Integrations | Token-based Calendly/Cal.com polling, HTTPS JSON contact pulls, authenticated form webhooks, durable CRM/session sync | OAuth app connections; businesses must supply credentials and verify their own connection before use |
+| Area          | Delivered                                                                                                                                                                               | Not delivered yet                                                                                            |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Platform      | Sign-in, business workspaces, an owner membership created with each workspace, editable business profile and address, logo, four-color workspace palette                                | Inviting or adding other staff, student/parent portal, production subscription administration                |
+| Clients       | Tenant-scoped student/payer CRM; custom typed columns, filters, sorting and bulk selection; mapped CSV/`.xlsx` import; connected-source intake and email/WhatsApp permissions           | Student/parent portal access                                                                                 |
+| Scheduling    | Month and week calendars with synced Calendly/Cal.com bookings, date navigation, daily agenda, and booking details; legacy local session APIs remain                                    | UI-based local session creation/editing and provider booking actions; student self-service booking           |
+| Learning      | Calendar/date-time picker; staff assignments, progress records, and private persistent-disk resource uploads up to 20 MiB                                                               | Student/parent portal access and cloud object storage                                                        |
+| Billing       | Monthly arrears drafts from completed classes, student rates, optional draft automation, revenue/class dashboard; staff invoice creation, issue and allocation with seller profile/logo | Automatic issuance/charging, fixed packages, taxes and hourly pricing                                        |
+| Payments      | Stripe test-account connections, hosted test payment links, verified server reconciliation; local sandbox simulation                                                                    | Production Stripe Connect/OAuth, PayPal, bank providers and signed external webhooks; no real money is moved |
+| Notifications | Email (SMTP/Resend), WhatsApp template and AI drafting connections; recipient previews, permission checks, approved durable campaigns; local delivery disabled                          | Provider delivery/read receipts, SMS, student portal; actual outbound delivery not exercised                 |
+| Integrations  | Token-based Calendly/Cal.com polling, HTTPS JSON contact pulls, authenticated form webhooks, durable CRM/session sync                                                                   | OAuth app connections; businesses must supply credentials and verify their own connection before use         |
 
 There is no cloud deployment configuration or production operation in this repository. OAuth app connections, production payment providers, country-specific bank integrations, student/parent portal access, production entitlement setup, and deployment are future work. The real provider integrations are implemented, but require each business to supply its own credentials; their live behavior has not been verified as part of this implementation. See [connector protocols](docs/architecture/connectors.md), [payment provider contracts](docs/architecture/payments.md), and the [service status list](#what-works-today).
 
@@ -44,12 +44,17 @@ flowchart TB
   Billing -. events .-> Rabbit
   Payments -. events .-> Rabbit
   Notifications -. consumes .-> Rabbit
-  Payments -. sandbox only today .-> Sandbox[Simulated payment provider]
+  Payments -. test account .-> Stripe[Business-owned Stripe test account]
+  Payments -. local simulation .-> Sandbox[Simulated payment provider]
+  Notifications -. signed recipient lookup .-> Clients
+  Notifications -. approved delivery .-> Messaging[SMTP / Resend / WhatsApp]
+  Notifications -. draft only .-> Agent[Business AI endpoint]
+  Billing -. signed monthly reconciliation .-> Scheduling
   Integrations -. user supplied tokens .-> Booking[Calendly / Cal.com]
   Integrations -. HTTPS .-> ContactSource[Contact APIs and forms]
 ```
 
-Each service owns its database, migrations, and API. PostgreSQL row-level security and signed gateway JWTs scope business requests. RabbitMQ carries cross-domain events. The integrations service polls connected calendars and receives contacts, then the CRM and scheduling services own their projections. Payments still uses only the local sandbox.
+Each service owns its database, migrations, and API. PostgreSQL row-level security and signed gateway JWTs scope business requests. RabbitMQ carries cross-domain events. The integrations service polls connected calendars and receives contacts, then the CRM and scheduling services own their projections. Payments creates test links in each business’s own Stripe test account; verified reconciliation flows into Billing through events. Notifications resolves selected CRM recipients over signed HTTP and owns its campaign queue.
 
 ## Quickstart
 
@@ -78,6 +83,8 @@ pnpm build
 pnpm dev
 ```
 
+Messaging needs `COMMUNICATIONS_ENCRYPTION_KEY` and defaults to `ALLOW_OUTBOUND_DELIVERY=false`; preview/approval and provider wiring are documented in [communications](docs/architecture/crm-communications.md). Keep its encryption key stable.
+
 The integrations service needs `INTEGRATIONS_ENCRYPTION_KEY`, generated by `pnpm setup:local` as canonical base64 for 32 random bytes. Keep the key stable; changing it requires reconnecting providers whose credentials it encrypted.
 
 - Web app: [http://localhost:3000](http://localhost:3000)
@@ -100,6 +107,8 @@ Read the contracts before extending a service:
 6. [Contributor implementation contract](docs/architecture/implementation.md)
 7. [Architecture decisions](docs/architecture/decisions.md)
 8. [Connector protocols, sync APIs, and event flow](docs/architecture/connectors.md)
+9. [CRM columns and communications](docs/architecture/crm-communications.md)
+10. [Monthly billing and dashboard](docs/architecture/monthly-billing.md)
 
 These pages preserve the intended architecture and clearly scoped future requirements; they do not assert that every described capability is implemented. Check **What works today** above and each service README for current service behavior.
 

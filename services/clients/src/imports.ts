@@ -1,4 +1,9 @@
 import { z } from "zod";
+import {
+  loadFields,
+  validateCustomValue,
+  type FieldRow,
+} from "./custom-fields.js";
 import type { PoolClient } from "pg";
 import {
   contactFields,
@@ -50,6 +55,16 @@ export function normalizeContact(raw: Record<string, unknown>): {
           .filter(Boolean),
       ),
     ];
+  for (const field of ["emailOptIn", "whatsappOptIn"]) {
+    const value = nonblank[field];
+    if (typeof value === "string") {
+      const normalized = value.toLowerCase();
+      if (["true", "yes", "1"].includes(normalized)) nonblank[field] = true;
+      else if (["false", "no", "0"].includes(normalized))
+        nonblank[field] = false;
+    }
+  }
+  if (raw.customFields !== undefined) nonblank.customFields = raw.customFields;
   const parsed = incomingSchema.safeParse(nonblank);
   if (!parsed.success)
     return {
@@ -74,13 +89,45 @@ export type ImportSummary = {
   errors: number;
 };
 export async function previewImport(tx: PoolClient, input: ImportInput) {
+  const definitions = new Map<string, FieldRow>(
+    Object.keys(input.mapping).some((key) => key.startsWith("custom:"))
+      ? (await loadFields(tx)).map((field) => [field.id, field])
+      : [],
+  );
   const mapped = input.rows.map((raw, index): ImportPreviewRow => {
     const values: Record<string, unknown> = {};
     const errors: string[] = [];
     for (const [field, header] of Object.entries(input.mapping)) {
       if (!(header in raw))
         errors.push(`${field}: mapped column '${header}' is missing`);
-      else values[field] = raw[header];
+      else if (field.startsWith("custom:")) {
+        const id = field.slice(7),
+          definition = definitions.get(id),
+          rawValue = raw[header]!.trim();
+        if (!definition) {
+          errors.push(`${field}: unknown CRM field`);
+          continue;
+        }
+        if (!rawValue) continue;
+        let value: unknown = rawValue;
+        if (definition.type === "number") value = Number(rawValue);
+        if (definition.type === "boolean") {
+          if (["true", "yes", "1"].includes(rawValue.toLowerCase()))
+            value = true;
+          else if (["false", "no", "0"].includes(rawValue.toLowerCase()))
+            value = false;
+        }
+        try {
+          validateCustomValue(definition, value);
+        } catch (error) {
+          errors.push(`${field}: ${(error as Error).message}`);
+          continue;
+        }
+        const custom = values.customFields as
+          | Record<string, unknown>
+          | undefined;
+        values.customFields = { ...custom, [id]: value };
+      } else values[field] = raw[header];
     }
     const normalized = normalizeContact(values);
     return {

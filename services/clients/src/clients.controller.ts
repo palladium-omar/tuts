@@ -27,6 +27,8 @@ import {
   updateClientSchema,
 } from "./schemas.js";
 
+import { buildClientQuery } from "./client-query.js";
+
 import {
   createContact,
   item,
@@ -47,23 +49,17 @@ export class ClientsController {
     summary: "List student/payer records, bounded to 100 items; staff only",
   })
   async list(@CurrentContext() ctx: RequestContext, @Query() query: unknown) {
-    const { kind, status, search, limit, offset } = parseBody(
-      listClientsSchema,
-      query,
-    );
+    const input = parseBody(listClientsSchema, query);
+    const { limit, offset } = input;
     return this.db.withTenant(ctx.businessId, async (tx) => {
-      const pattern = search ? `%${search.replace(/[\\%_]/g, "\\$&")}%` : null;
-      const filter = `($1::text IS NULL OR kind=$1) AND ($2::text IS NULL OR status=$2)
-        AND ($3::text IS NULL OR display_name ILIKE $3 OR first_name ILIKE $3 OR last_name ILIKE $3
-          OR email ILIKE $3 OR phone ILIKE $3 OR array_to_string(tags,', ') ILIKE $3)`;
-      const values = [kind ?? null, status ?? null, pattern];
-      const result = await tx.query<ClientRow>(
-        `SELECT * FROM clients WHERE ${filter} ORDER BY created_at DESC,id LIMIT $4 OFFSET $5`,
-        [...values, limit, offset],
-      );
+      const filter = await buildClientQuery(tx, input);
       const count = await tx.query<{ total: string }>(
-        `SELECT count(*) AS total FROM clients WHERE ${filter}`,
-        values,
+        `SELECT count(*) AS total FROM clients WHERE ${filter.where}`,
+        filter.countValues,
+      );
+      const result = await tx.query<ClientRow>(
+        `SELECT * FROM clients WHERE ${filter.where} ORDER BY ${filter.order} LIMIT $${filter.values.length + 1} OFFSET $${filter.values.length + 2}`,
+        [...filter.values, limit, offset],
       );
       return {
         items: result.rows.map(item),

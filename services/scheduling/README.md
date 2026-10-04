@@ -19,3 +19,34 @@ The client reads pages of 200 for the visible range, up to 5,000 records. If mor
 External data has no local overlap exclusion constraint: real remote appointments are retained even if they overlap. Local `/v1/sessions` remains its existing API and is not merged automatically. Disconnect events delete that source's external appointments and retain a tombstone to suppress delayed sync deliveries. Synchronization never creates, cancels or edits a provider booking.
 
 Build: `pnpm --filter @palladium/scheduling build`. No tests were added or run under the current task instruction. Actual provider synchronization requires administrator supplied credentials.
+
+## Canonical class ledger and attendance reconciliation
+
+`GET /v1/class-ledger?month=YYYY-MM&timeZone=IANA` returns
+`{items,total,truncated:false,month,timeZone}` for at most 10,000 classes, rejecting
+a larger month explicitly. Items contain id/classId, source (internal/external),
+title, clientId (nullable), attendeeEmail (nullable), startsAt, endsAt, status,
+providerStatus (external source status), revision and updatedAt. Class start time
+in the requested zone defines month membership. Internal attendance is read from
+session state; external elapsed dates never imply completion. Historical source
+rows are backfilled transactionally with class snapshot outbox events.
+
+`PATCH /v1/class-ledger/:source/:id` accepts
+`{clientId?:uuid|null,status:'completed'|'cancelled'|'scheduled'}` for staff under
+the scheduling entitlement. Internal records require a student ID; switching back
+to scheduled enforces the original overlap constraints and returns 409 on conflict.
+External annotations persist in a separate forced-RLS table and override attendance
+without rewriting the provider's status. Stable ledger history remains available
+when a provider connection is disconnected, and its attendance can still be
+annotated. Existing provider sessions and effective annotations are kept separate.
+
+Ordinary session creates/edits/transitions, provider sync and ledger annotations
+publish transactional `scheduling.class-updated.v1` snapshots with
+`{classId,source,clientId,startsAt,endsAt,status,revision}`. Material changes increment
+a per-class revision; unchanged syncs do not create new revisions. Billing consumes
+these through its own projection. Internal completion via reconciliation also
+preserves `scheduling.session-completed.v1`. No cross-service SQL is used.
+
+With `SCHEDULING_TEST_DATABASE_URL`, synthetic PostgreSQL fixtures verify calendar
+month/timezone boundaries, explicit attendance, provider/effective status,
+revision ordering, tenant isolation, transactional backfill and overlap 409s.

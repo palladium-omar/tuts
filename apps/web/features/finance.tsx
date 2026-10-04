@@ -1,5 +1,13 @@
-import { useEffect, useState, type FormEvent } from "react";
-import { FileText, Plus, Printer, Wallet } from "lucide-react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import {
+  FileText,
+  Plus,
+  Printer,
+  Wallet,
+  Copy,
+  ExternalLink,
+  RefreshCw,
+} from "lucide-react";
 import {
   errorMessage,
   date,
@@ -10,6 +18,22 @@ import {
 } from "../lib/api";
 import { Empty, Modal, Notice } from "../components/shared";
 import "./teaching-ux.css";
+import "./payments-ux.css";
+function invoiceCycle(serviceMonth: string) {
+  const [year, month] = serviceMonth.split("-").map(Number);
+  return {
+    period: new Date(Date.UTC(year, month - 1, 2)).toLocaleDateString(
+      undefined,
+      { month: "long", year: "numeric", timeZone: "UTC" },
+    ),
+    due: new Date(Date.UTC(year, month, 1)).toLocaleDateString(undefined, {
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+      timeZone: "UTC",
+    }),
+  };
+}
 export function Invoices({ api, business }: { api: Api; business: Business }) {
   const [rows, setRows] = useState<Row[]>([]),
     [creating, setCreating] = useState(false),
@@ -158,6 +182,12 @@ export function Invoices({ api, business }: { api: Api; business: Business }) {
                   <small>
                     {row.items?.map((item: Row) => item.description).join(", ")}
                   </small>
+                  {row.serviceMonth && (
+                    <small>
+                      {invoiceCycle(row.serviceMonth).period} classes · Due{" "}
+                      {invoiceCycle(row.serviceMonth).due}
+                    </small>
+                  )}
                 </div>
                 <strong>{money(row.totalMinor, row.currency)}</strong>
                 <span className={`status ${row.status}`}>{row.status}</span>
@@ -318,6 +348,17 @@ export function Invoices({ api, business }: { api: Api; business: Business }) {
                   {invoice.status}
                 </span>
                 <small>{invoice.id.slice(0, 8).toUpperCase()}</small>
+                {invoice.serviceMonth && (
+                  <>
+                    <small className="invoice-date">
+                      Service period:{" "}
+                      {invoiceCycle(invoice.serviceMonth).period}
+                    </small>
+                    <small className="invoice-date">
+                      Due: {invoiceCycle(invoice.serviceMonth).due}
+                    </small>
+                  </>
+                )}
                 {(invoice.issuedAt || invoice.createdAt) && (
                   <small className="invoice-date">
                     {invoice.issuedAt ? "Issued" : "Created"}{" "}
@@ -391,162 +432,607 @@ export function Invoices({ api, business }: { api: Api; business: Business }) {
     </>
   );
 }
-export function Payments({ api }: { api: Api }) {
+export function Payments({
+  api,
+  role,
+  businessId,
+}: {
+  api: Api;
+  role?: string;
+  businessId?: string;
+}) {
   const [rows, setRows] = useState<Row[]>([]),
     [connections, setConnections] = useState<Row[]>([]),
     [invoices, setInvoices] = useState<Row[]>([]),
-    [creating, setCreating] = useState(false),
+    [providers, setProviders] = useState<Row[]>([]);
+  const [creating, setCreating] = useState(false),
+    [connecting, setConnecting] = useState(false),
     [error, setError] = useState(""),
-    [busy, setBusy] = useState(false);
-  async function load() {
+    [message, setMessage] = useState(""),
+    [busy, setBusy] = useState(false),
+    [loading, setLoading] = useState(true);
+  const keys = useRef(new Map<string, string>());
+  const canManage = role === "owner" || role === "admin";
+  const stripeAvailable = providers.some(
+    (provider) => provider.provider === "stripe" && provider.available,
+  );
+  const sandboxAvailable = providers.some(
+    (provider) => provider.provider === "sandbox" && provider.available,
+  );
+  const enabledConnections = connections.filter(
+    (connection) => connection.status === "enabled",
+  );
+  const eligibleInvoices = invoices.filter(
+    (invoice) =>
+      invoice.status === "issued" &&
+      Number(invoice.paidMinor ?? 0) === 0 &&
+      !rows.some((row) => row.invoiceId === invoice.id),
+  );
+  function safeCheckoutUrl(value: unknown) {
     try {
-      const results = await Promise.all([
-        api("payments/v1/checkouts"),
-        api("payments/v1/connections"),
-        api("billing/v1/invoices"),
-      ]);
-      setRows(results[0].items);
-      setConnections(results[1].items);
-      setInvoices(results[2].items);
-    } catch (e) {
-      setError(errorMessage(e));
+      const url = new URL(String(value));
+      return url.protocol === "https:" &&
+        url.hostname === "checkout.stripe.com" &&
+        !url.username &&
+        !url.password &&
+        !url.port
+        ? url.href
+        : null;
+    } catch {
+      return null;
     }
   }
+  function checkoutKey(invoiceId: string, connectionId: string) {
+    const key = `${businessId ?? "default"}:${invoiceId}:${connectionId}`;
+    if (!keys.current.has(key)) keys.current.set(key, crypto.randomUUID());
+    return keys.current.get(key)!;
+  }
+  async function load(active = () => true) {
+    const results = await Promise.allSettled([
+      api("payments/v1/checkouts"),
+      api("payments/v1/connections"),
+      api("billing/v1/invoices"),
+      api("payments/v1/providers"),
+    ]);
+    if (!active()) return;
+    const setters = [setRows, setConnections, setInvoices, setProviders];
+    results.forEach((result, index) => {
+      if (result.status === "fulfilled")
+        setters[index](result.value.items ?? []);
+    });
+    const failures = results.filter(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    );
+    setError(failures.map((result) => errorMessage(result.reason)).join(". "));
+    setLoading(false);
+  }
   useEffect(() => {
-    void load();
+    let active = true;
+    setLoading(true);
+    setRows([]);
+    setConnections([]);
+    setInvoices([]);
+    setProviders([]);
+    void load(() => active);
+    return () => {
+      active = false;
+    };
   }, [api]);
-  async function act(action: () => Promise<unknown>) {
+  async function act(
+    action: () => Promise<any>,
+    success: (result: any) => string,
+  ) {
     setBusy(true);
     setError("");
+    setMessage("");
     try {
-      await action();
+      const result = await action();
       setCreating(false);
+      setConnecting(false);
       await load();
+      setMessage(success(result));
     } catch (e) {
       setError(errorMessage(e));
     } finally {
       setBusy(false);
     }
   }
+  async function connect(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget),
+      secretKey = String(form.get("secretKey") ?? "").trim();
+    if (!/^(sk_test_|rk_test_).+/.test(secretKey)) {
+      setError(
+        "Use a Stripe test secret key beginning with sk_test_ or rk_test_.",
+      );
+      return;
+    }
+    await act(
+      () =>
+        api("payments/v1/connections", "POST", {
+          provider: "stripe",
+          displayName:
+            String(form.get("displayName") ?? "").trim() ||
+            "Stripe test account",
+          credentials: { secretKey },
+        }),
+      () =>
+        "Stripe test account connected. Verify the account when you are ready.",
+    );
+  }
+  async function create(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget),
+      invoiceId = String(form.get("invoiceId")),
+      connectionId = String(form.get("connectionId"));
+    await act(
+      () =>
+        api(
+          "payments/v1/checkouts",
+          "POST",
+          { invoiceId, connectionId },
+          checkoutKey(invoiceId, connectionId),
+        ),
+      (result) =>
+        result.item?.creationStatus === "unknown"
+          ? "Payment link creation is uncertain. Use the existing attempt's retry action to resolve it."
+          : result.item?.provider === "sandbox"
+            ? "Sandbox payment created. Confirm it only when you want to simulate a payment."
+            : result.item?.creationStatus === "failed"
+              ? "Payment link creation failed. Review the attempt below."
+              : "Stripe test payment link created.",
+    );
+  }
+  async function copyLink(url: string) {
+    try {
+      await navigator.clipboard.writeText(url);
+      setMessage("Test payment link copied.");
+    } catch {
+      setError("Could not copy the link. Open the test checkout to access it.");
+    }
+  }
   return (
-    <>
+    <div className="payments-workspace">
       <div className="section-heading">
         <div>
-          <h1>Payments to your business.</h1>
+          <h1>Collect payments from your invoices.</h1>
           <p className="muted">
-            Manage the payment methods your clients can use.
-          </p>
-        </div>
-        <button className="primary" onClick={() => setCreating(true)}>
-          <Plus size={16} />
-          New payment
-        </button>
-      </div>
-      <Notice error={error} />
-      <div className="payment-banner">
-        <Wallet size={25} />
-        <div>
-          <strong>Local payment sandbox</strong>
-          <p>
-            Live Stripe, PayPal, and bank payments are not available yet.
-            Sandbox confirmations do not move money.
+            Create a test checkout for an issued, unpaid invoice and check its
+            payment status.
           </p>
         </div>
         <button
-          disabled={busy || connections.some((c) => c.provider === "sandbox")}
-          onClick={() =>
-            void act(() =>
-              api("payments/v1/connections", "POST", {
-                provider: "sandbox",
-                displayName: "Local sandbox",
-              }),
-            )
+          className="primary"
+          disabled={
+            loading ||
+            busy ||
+            !eligibleInvoices.length ||
+            !enabledConnections.length
           }
+          onClick={() => {
+            setError("");
+            setMessage("");
+            setCreating(true);
+          }}
         >
-          {connections.some((c) => c.provider === "sandbox")
-            ? "Sandbox connected"
-            : "Enable sandbox"}
+          <Plus size={16} />
+          Create payment link
         </button>
       </div>
-      <section className="panel">
-        {!rows.length ? (
-          <Empty>No payment activity yet.</Empty>
-        ) : (
-          rows.map((row) => (
-            <div className="record" key={row.id}>
-              <div className="record-main">
-                <strong>Payment {row.id.slice(0, 8)}</strong>
-                <small>Sandbox · simulated</small>
+      <Notice error={!creating && !connecting ? error : ""} message={message} />
+      <div className="payment-banner payments-test-banner">
+        <Wallet size={25} />
+        <div>
+          <strong>Test mode</strong>
+          <p>
+            Stripe test checkouts and sandbox confirmations do not collect real
+            money. Payment status refresh is manual; webhooks are unavailable.
+          </p>
+        </div>
+        <span className="tag">No real charges</span>
+      </div>
+      <section className="panel payments-connections">
+        <div className="panel-title">
+          <h3>Payment accounts</h3>
+          {canManage && (
+            <button
+              disabled={busy || loading || !stripeAvailable}
+              onClick={() => {
+                setError("");
+                setConnecting(true);
+              }}
+            >
+              Connect Stripe test account
+            </button>
+          )}
+        </div>
+        {loading ? (
+          <p className="muted">Loading payment accounts…</p>
+        ) : connections.length ? (
+          connections.map((connection) => (
+            <div className="payments-account" key={connection.id}>
+              <div>
+                <strong>{connection.displayName}</strong>
+                <small>
+                  {connection.provider === "stripe"
+                    ? "Stripe · test mode"
+                    : "Local sandbox · simulated"}{" "}
+                  ·{" "}
+                  {connection.status === "enabled"
+                    ? "Connected"
+                    : connection.status}
+                </small>
+                {connection.provider === "stripe" && (
+                  <small>
+                    {connection.config?.verificationStatus === "verified"
+                      ? `Account verified${connection.verifiedAt ? ` ${date(connection.verifiedAt)}` : ""}`
+                      : "Account not yet verified"}
+                  </small>
+                )}
               </div>
-              <strong>{money(row.amountMinor, row.currency)}</strong>
-              <span className={`status ${row.status}`}>{row.status}</span>
-              {row.status === "pending" && row.simulated && (
+              {connection.provider === "stripe" && canManage && (
                 <button
-                  disabled={busy}
+                  disabled={busy || connection.status !== "enabled"}
                   onClick={() =>
-                    void act(() =>
-                      api(
-                        `payments/v1/checkouts/${row.id}/sandbox-confirm`,
-                        "POST",
-                        {},
-                      ),
+                    void act(
+                      () =>
+                        api(
+                          `payments/v1/connections/${connection.id}/verify`,
+                          "POST",
+                          {},
+                        ),
+                      () => "Stripe test account verified.",
                     )
                   }
                 >
-                  Simulate payment
+                  Verify account
                 </button>
               )}
             </div>
           ))
+        ) : (
+          <Empty>
+            <h3>Connect a payment account</h3>
+            <p>
+              Use an existing Stripe account's test key to create test payment
+              links.
+            </p>
+            {!canManage && <p>An owner or admin can connect the account.</p>}
+          </Empty>
+        )}
+        {!loading && !stripeAvailable && (
+          <p className="crm-helper">
+            Stripe test checkout is unavailable in this environment.
+          </p>
+        )}
+        {sandboxAvailable && (
+          <details className="payments-sandbox">
+            <summary>Local sandbox</summary>
+            <p className="muted">
+              Test the invoice workflow locally with an explicit simulated
+              confirmation.
+            </p>
+            <button
+              disabled={
+                busy ||
+                !canManage ||
+                connections.some(
+                  (connection) => connection.provider === "sandbox",
+                )
+              }
+              onClick={() =>
+                void act(
+                  () =>
+                    api("payments/v1/connections", "POST", {
+                      provider: "sandbox",
+                      displayName: "Local sandbox",
+                    }),
+                  () => "Local sandbox connected.",
+                )
+              }
+            >
+              {connections.some(
+                (connection) => connection.provider === "sandbox",
+              )
+                ? "Sandbox connected"
+                : "Enable sandbox"}
+            </button>
+          </details>
         )}
       </section>
-      {creating && (
-        <Modal title="Sandbox payment" onClose={() => setCreating(false)}>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              const f = new FormData(e.currentTarget);
-              void act(() =>
-                api("payments/v1/checkouts", "POST", {
-                  invoiceId: f.get("invoiceId"),
-                  connectionId: f.get("connectionId"),
-                }),
-              );
-            }}
-          >
+      {!loading && !eligibleInvoices.length && (
+        <div className="payments-next-step">
+          <FileText size={18} />
+          <p>
+            Issue an unpaid invoice in Invoices to create a payment link.
+            Invoices with an existing attempt are listed below.
+          </p>
+        </div>
+      )}
+      <section className="panel">
+        <div className="panel-title">
+          <h3>Payment activity</h3>
+          <span className="tag">Test / simulated</span>
+        </div>
+        {loading ? (
+          <Empty>Loading payment activity…</Empty>
+        ) : !rows.length ? (
+          <Empty>
+            No payment attempts yet. Connect a test account and choose an issued
+            invoice to begin.
+          </Empty>
+        ) : (
+          rows.map((row) => {
+            const invoice = invoices.find(
+                (invoice) => invoice.id === row.invoiceId,
+              ),
+              url = safeCheckoutUrl(row.checkoutUrl),
+              stripe = row.provider === "stripe",
+              stripeSession = /^cs_test_/.test(
+                String(row.providerReference ?? ""),
+              ),
+              canRetry =
+                stripe && !stripeSession && row.creationStatus === "unknown";
+            const status =
+              row.status === "confirmed"
+                ? "Confirmed"
+                : ((
+                    {
+                      unknown: "Needs reconciliation",
+                      failed: "Creation failed",
+                      expired: "Expired",
+                      creating: "Creating link",
+                    } as Record<string, string>
+                  )[row.creationStatus] ?? "Awaiting payment");
+            return (
+              <article className="payments-attempt" key={row.id}>
+                <div className="payments-attempt-heading">
+                  <div>
+                    <strong>
+                      {invoice?.payerName ??
+                        `Invoice ${row.invoiceId.slice(0, 8)}`}
+                    </strong>
+                    <small>
+                      {stripe
+                        ? "Stripe test mode"
+                        : "Local sandbox · simulated"}{" "}
+                      · {date(row.createdAt)}
+                    </small>
+                  </div>
+                  <strong>{money(row.amountMinor, row.currency)}</strong>
+                  <span className={`status ${row.status}`}>{status}</span>
+                </div>
+                {row.lastError && (
+                  <p className="payments-attempt-error">{row.lastError}</p>
+                )}
+                {row.creationStatus === "unknown" && (
+                  <p className="crm-helper">
+                    The provider outcome is uncertain. Resolve this existing
+                    attempt before creating another payment.
+                  </p>
+                )}
+                {row.creationStatus === "expired" && (
+                  <p className="crm-helper">
+                    This checkout expired. A replacement link is not supported
+                    yet.
+                  </p>
+                )}
+                <div className="payments-attempt-actions">
+                  {url &&
+                    row.creationStatus !== "expired" &&
+                    row.status !== "confirmed" && (
+                      <>
+                        <a
+                          className="button"
+                          href={url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          <ExternalLink size={14} />
+                          Open test checkout
+                        </a>
+                        <button onClick={() => void copyLink(url)}>
+                          <Copy size={14} />
+                          Copy link
+                        </button>
+                      </>
+                    )}
+                  {stripe && stripeSession && canManage && (
+                    <button
+                      disabled={busy}
+                      onClick={() =>
+                        void act(
+                          () =>
+                            api(
+                              `payments/v1/checkouts/${row.id}/refresh`,
+                              "POST",
+                              {},
+                            ),
+                          (result) =>
+                            result.item?.status === "confirmed"
+                              ? "Stripe confirmed the test payment. The invoice will update after processing."
+                              : "Payment status refreshed.",
+                        )
+                      }
+                    >
+                      <RefreshCw size={14} />
+                      Refresh status
+                    </button>
+                  )}
+                  {canRetry && canManage && (
+                    <button
+                      disabled={busy}
+                      onClick={() =>
+                        void act(
+                          () =>
+                            api(
+                              "payments/v1/checkouts",
+                              "POST",
+                              {
+                                invoiceId: row.invoiceId,
+                                connectionId: row.connectionId,
+                              },
+                              checkoutKey(row.invoiceId, row.connectionId),
+                            ),
+                          (result) =>
+                            result.item?.creationStatus === "ready"
+                              ? "Existing checkout resolved. Your test payment link is ready."
+                              : "Existing checkout retried. Review its current status.",
+                        )
+                      }
+                    >
+                      Retry link creation
+                    </button>
+                  )}
+                  {row.status === "pending" && row.provider === "sandbox" && (
+                    <button
+                      disabled={busy}
+                      onClick={() =>
+                        void act(
+                          () =>
+                            api(
+                              `payments/v1/checkouts/${row.id}/sandbox-confirm`,
+                              "POST",
+                              {},
+                            ),
+                          () =>
+                            "Sandbox payment simulated. No money was collected.",
+                        )
+                      }
+                    >
+                      Simulate payment
+                    </button>
+                  )}
+                  {row.lastRefreshedAt && (
+                    <small>Last checked {date(row.lastRefreshedAt)}</small>
+                  )}
+                </div>
+              </article>
+            );
+          })
+        )}
+      </section>
+      {connecting && (
+        <Modal
+          title="Connect Stripe test account"
+          onClose={() => {
+            if (!busy) {
+              setConnecting(false);
+              setError("");
+            }
+          }}
+        >
+          <Notice error={error} />
+          <p className="muted">
+            Use a test secret or restricted key from your existing Stripe
+            account. The key is encrypted and cannot be read back here.
+          </p>
+          <form onSubmit={connect}>
             <label>
-              Invoice
-              <select name="invoiceId" required>
-                <option value="">Choose issued invoice</option>
-                {invoices
-                  .filter((i) => i.status === "issued")
-                  .map((i) => (
-                    <option key={i.id} value={i.id}>
-                      {i.payerName} · {money(i.totalMinor, i.currency)}
-                    </option>
-                  ))}
-              </select>
+              Account label (optional)
+              <input
+                name="displayName"
+                maxLength={200}
+                placeholder="Stripe test account"
+                disabled={busy}
+              />
             </label>
             <label>
-              Connection
-              <select name="connectionId" required>
-                <option value="">Choose sandbox</option>
-                {connections.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.displayName}
-                  </option>
-                ))}
-              </select>
+              Stripe test secret key
+              <input
+                type="password"
+                name="secretKey"
+                required
+                pattern="(sk_test_|rk_test_).+"
+                autoComplete="off"
+                spellCheck={false}
+                maxLength={5000}
+                placeholder="sk_test_… or rk_test_…"
+                disabled={busy}
+              />
+              <span className="crm-helper">
+                Only test keys are accepted. Live keys cannot be connected.
+              </span>
             </label>
             <div className="form-actions">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => {
+                  setConnecting(false);
+                  setError("");
+                }}
+              >
+                Cancel
+              </button>
               <button className="primary" disabled={busy}>
-                Create sandbox payment
+                {busy ? "Connecting…" : "Connect test account"}
               </button>
             </div>
           </form>
         </Modal>
       )}
-    </>
+      {creating && (
+        <Modal
+          title="Create payment link"
+          onClose={() => {
+            if (!busy) {
+              setCreating(false);
+              setError("");
+            }
+          }}
+        >
+          <Notice error={error} />
+          <p className="muted">
+            The issued invoice determines the amount and currency. This checkout
+            runs in test mode.
+          </p>
+          <form onSubmit={create}>
+            <label>
+              Issued, unpaid invoice
+              <select name="invoiceId" required disabled={busy}>
+                <option value="">Choose invoice</option>
+                {eligibleInvoices.map((invoice) => (
+                  <option key={invoice.id} value={invoice.id}>
+                    {invoice.payerName} ·{" "}
+                    {money(invoice.totalMinor, invoice.currency)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Payment account
+              <select name="connectionId" required disabled={busy}>
+                <option value="">Choose test account</option>
+                {enabledConnections.map((connection) => (
+                  <option key={connection.id} value={connection.id}>
+                    {connection.displayName} ·{" "}
+                    {connection.provider === "stripe"
+                      ? "Stripe test"
+                      : "Local sandbox"}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="form-actions">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => {
+                  setCreating(false);
+                  setError("");
+                }}
+              >
+                Cancel
+              </button>
+              <button className="primary" disabled={busy}>
+                {busy ? "Creating…" : "Create test checkout"}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+    </div>
   );
 }
 export function Activity({ api }: { api: Api }) {

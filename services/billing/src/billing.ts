@@ -28,11 +28,12 @@ import {
   invoiceSchema,
   paymentSchema,
   totalMinor,
+  serviceMonthView,
 } from "./financial.js";
 import { sellerEventSchema } from "./seller.js";
 import { idempotent } from "./idempotency.js";
 const idSchema = z.string().uuid();
-function invoice(row: Record<string, any>) {
+export function invoice(row: Record<string, any>) {
   return {
     id: row.id,
     clientId: row.client_id,
@@ -45,6 +46,9 @@ function invoice(row: Record<string, any>) {
     createdAt: row.created_at,
     issuedAt: row.issued_at,
     sellerSnapshot: row.seller_snapshot ?? null,
+    serviceMonth: serviceMonthView(row.service_month),
+    dueAt: row.due_at ?? null,
+    classIds: row.class_ids ?? [],
   };
 }
 @Injectable()
@@ -87,7 +91,9 @@ export class BillingService implements OnModuleInit {
           row.invoice_id !== payment.invoiceId ||
           Number(row.amount_minor) !== payment.amountMinor ||
           row.currency !== payment.currency ||
-          row.provider !== payment.provider
+          row.provider !== payment.provider ||
+          (row.simulated ?? row.provider === "sandbox") !==
+            (payment.simulated || payment.provider === "sandbox")
         )
           throw new Error("payment_allocation_identity_conflict");
         return;
@@ -109,14 +115,16 @@ export class BillingService implements OnModuleInit {
           row.invoice_id !== payment.invoiceId ||
           Number(row.amount_minor) !== payment.amountMinor ||
           row.currency !== payment.currency ||
-          row.provider !== payment.provider
+          row.provider !== payment.provider ||
+          (row.simulated ?? row.provider === "sandbox") !==
+            (payment.simulated || payment.provider === "sandbox")
         )
           throw new Error("payment_allocation_identity_conflict");
         return;
       }
       const next = allocatePayment(current, payment);
       await tx.query(
-        "INSERT INTO payment_allocations (business_id,payment_id,invoice_id,amount_minor,currency,provider) VALUES ($1,$2,$3,$4,$5,$6)",
+        "INSERT INTO payment_allocations (business_id,payment_id,invoice_id,amount_minor,currency,provider,simulated) VALUES ($1,$2,$3,$4,$5,$6,$7)",
         [
           event.businessId,
           payment.paymentId,
@@ -124,6 +132,7 @@ export class BillingService implements OnModuleInit {
           payment.amountMinor,
           payment.currency,
           payment.provider,
+          payment.simulated || payment.provider === "sandbox",
         ],
       );
       await tx.query(

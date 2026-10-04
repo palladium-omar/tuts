@@ -1,3 +1,4 @@
+import { refreshClass } from "./class-ledger.js";
 import { randomUUID } from "node:crypto";
 import {
   BadRequestException,
@@ -131,6 +132,13 @@ export class SessionsService {
             startsAt: item.startsAt,
           },
         });
+        await refreshClass(
+          tx,
+          ctx.businessId,
+          "internal",
+          item.id,
+          ctx.requestId,
+        );
         return { item };
       });
     } catch (error) {
@@ -172,6 +180,7 @@ export class SessionsService {
             next.endsAt,
           ],
         );
+        await refreshClass(tx, ctx.businessId, "internal", id, ctx.requestId);
         return { item: sessionView(updated.rows[0]!) };
       });
     } catch (error) {
@@ -210,6 +219,13 @@ export class SessionsService {
           correlationId: ctx.requestId,
           data: { sessionId: item.id, clientId: item.clientId },
         });
+      await refreshClass(
+        tx,
+        ctx.businessId,
+        "internal",
+        item.id,
+        ctx.requestId,
+      );
       return { item };
     });
   }

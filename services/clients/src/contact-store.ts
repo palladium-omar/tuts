@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
 import { emitEvent } from "@palladium/service-kit";
 import type { ContactInput, ContactPatch } from "./schemas.js";
+import { validateCustomFields } from "./custom-fields.js";
 export type ClientRow = {
   id: string;
   kind: "student" | "payer";
@@ -15,6 +16,9 @@ export type ClientRow = {
   status: "lead" | "active" | "inactive";
   tags: string[];
   source: string | null;
+  custom_fields: Record<string, string | number | boolean | null>;
+  email_opt_in: boolean;
+  whatsapp_opt_in: boolean;
   created_at: Date;
   updated_at: Date;
 };
@@ -30,6 +34,9 @@ export const item = (r: ClientRow) => ({
   status: r.status,
   tags: r.tags,
   source: r.source,
+  customFields: r.custom_fields ?? {},
+  emailOptIn: r.email_opt_in ?? false,
+  whatsappOptIn: r.whatsapp_opt_in ?? false,
   createdAt: r.created_at,
   updatedAt: r.updated_at,
 });
@@ -57,6 +64,7 @@ export async function createContact(
   input: ContactInput,
   correlationId?: string,
 ) {
+  await validateCustomFields(tx, input.customFields ?? {});
   const id = randomUUID();
   const displayName =
     input.displayName ||
@@ -67,8 +75,8 @@ export async function createContact(
     );
   const result = await tx.query<ClientRow>(
     `INSERT INTO clients
-    (business_id,id,kind,display_name,first_name,last_name,email,phone,notes,status,tags,source)
-    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+    (business_id,id,kind,display_name,first_name,last_name,email,phone,notes,status,tags,source,custom_fields,email_opt_in,whatsapp_opt_in)
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14,$15) RETURNING *`,
     [
       businessId,
       id,
@@ -82,6 +90,9 @@ export async function createContact(
       input.status ?? "lead",
       [...new Set(input.tags ?? [])],
       input.source ?? null,
+      JSON.stringify(input.customFields ?? {}),
+      input.emailOptIn ?? false,
+      input.whatsappOptIn ?? false,
     ],
   );
   await emitEvent(tx, {
@@ -89,7 +100,11 @@ export async function createContact(
     producer: "clients",
     businessId,
     correlationId,
-    data: { clientId: id },
+    data: {
+      clientId: id,
+      emailOptIn: result.rows[0]!.email_opt_in ?? false,
+      whatsappOptIn: result.rows[0]!.whatsapp_opt_in ?? false,
+    },
   });
   return result.rows[0]!;
 }
@@ -103,6 +118,9 @@ const columns = {
   status: "status",
   tags: "tags",
   source: "source",
+  customFields: "custom_fields",
+  emailOptIn: "email_opt_in",
+  whatsappOptIn: "whatsapp_opt_in",
 } as const;
 export async function updateContact(
   tx: PoolClient,
@@ -112,6 +130,7 @@ export async function updateContact(
   correlationId?: string,
   composeName = true,
 ) {
+  await validateCustomFields(tx, input.customFields ?? {});
   const patch = { ...input };
   if (patch.email) patch.email = normalizeEmail(patch.email);
   if (patch.tags) patch.tags = [...new Set(patch.tags)];
@@ -138,8 +157,10 @@ export async function updateContact(
   const assignments = Object.entries(patch).map(([key, value]) => {
     const column = columns[key as keyof typeof columns];
     if (!column) throw new Error("Unsupported client field");
-    values.push(value);
-    return `${column}=$${values.length}`;
+    values.push(key === "customFields" ? JSON.stringify(value) : value);
+    return key === "customFields"
+      ? `custom_fields=custom_fields || $${values.length}::jsonb`
+      : `${column}=$${values.length}`;
   });
   if (!assignments.length) return requireClient(tx, id);
   const result = await tx.query<ClientRow>(
@@ -152,7 +173,11 @@ export async function updateContact(
     producer: "clients",
     businessId,
     correlationId,
-    data: { clientId: id },
+    data: {
+      clientId: id,
+      emailOptIn: result.rows[0]!.email_opt_in ?? false,
+      whatsappOptIn: result.rows[0]!.whatsapp_opt_in ?? false,
+    },
   });
   return result.rows[0];
 }

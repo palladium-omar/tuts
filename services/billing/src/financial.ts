@@ -40,6 +40,7 @@ export const paymentSchema = z.object({
   amountMinor: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   currency: currencySchema,
   provider: z.string().min(1).max(40),
+  simulated: z.boolean().default(false),
 });
 export function allocatePayment(
   invoice: {
@@ -61,4 +62,11 @@ export function allocatePayment(
     paidMinor: Number(paid),
     status: paid === BigInt(invoice.totalMinor) ? "settled" : "issued",
   };
+}
+
+export function serviceMonthView(value: unknown): string | null {
+  if (typeof value === "string") return value.slice(0, 7);
+  if (value instanceof Date)
+    return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}`;
+  return null;
 }

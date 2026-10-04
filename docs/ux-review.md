@@ -39,3 +39,20 @@ The shell owns `business`, `view`, and optional connector `filter` query paramet
 Build checks passed: `pnpm --filter @palladium/web typecheck`, `pnpm --filter @palladium/web build`, and `git diff --check`.
 
 No external calendar credentials were provided, so this pass does not establish successful synchronization with a live Calendly or Cal.com account. No payment was made. Attachment upload and display were confirmed, but the browser download-completion event timed out; download completion and printing remain unverified. No automated test suite was added or run in this UI review.
+
+## 4 October: CRM campaigns and monthly business dashboard
+
+The local preview now includes typed custom columns, persisted visibility/order preferences per business, numeric/choice/date filters, page and full-filter audience selection, communication connections, recipient review, and a calendar/time picker. Payments now exposes explicit Stripe test-account verification, payment-link creation, and server-side payment reconciliation. Overview composes Billing's financial aggregates with Scheduling's class ledger and Clients' student names.
+
+Manually observed in synthetic businesses:
+
+- Created and edited numeric, choice, and date CRM columns; saved values survived reload. Numeric greater-than and date equals filters returned the expected contact.
+- Uploaded a CSV with mapped custom values; Jessie imported with 4.25 practice hours and Physics. Existing XLSX support remains; custom-column XLSX import was not exercised in this pass.
+- Selected four contacts across the matching audience; a saved campaign preview showed one eligible recipient and three permission skips. Personalized text displayed Alex's first name. Delivery remained disabled and no messages were sent.
+- Assignment picker month/year/date navigation, quick choices, explicit time editing, optional clear, and Escape behavior. Saving Tomorrow produced a 23:59 deadline. Escape closed the picker while leaving the assignment dialog open.
+- September demo billing: two completed classes and one cancelled; a MAD200 class rate produced a MAD400 monthly draft due October1. Reopening the preview showed the existing MAD400 invoice and disabled duplicate draft creation.
+- Separate billed/collected/outstanding dashboard metrics, class counts, student-rate editing and monthly review were visible. Service period and due date appear on monthly invoice review/print layout.
+- Stripe catalog/account form and empty payment state rendered; no Stripe credential was entered and no provider request/payment was performed in browser.
+- Phone layouts at390px for CRM, date picker and Payments did not horizontally overflow; expanded calendars remained clear of sticky form actions. Root dashboard/campaign screenshots are stored outside the repository in the task's outputs directory.
+
+Full workspace typechecks/build and service-import boundary checks pass. Independently reviewed service checks covered RLS, financial calculations, retry/deduplication, consent suppression and uncertain provider outcomes using synthetic fixtures. Provider delivery, real Stripe credentials, signed Stripe webhooks, custom XLSX mapping, and selection across multiple live CRM pages remain unexercised or unavailable as documented by the owning service.

@@ -1,0 +1,130 @@
+.business-dashboard {
+  margin: 24px 0;
+}
+.dashboard-toolbar,
+.dashboard-month,
+.dashboard-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.dashboard-toolbar h2 {
+  margin: 0;
+}
+.dashboard-toolbar p {
+  margin: 8px 0 0;
+}
+.dashboard-month {
+  white-space: nowrap;
+}
+.dashboard-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.dashboard-currencies {
+  display: grid;
+  gap: 16px;
+  margin: 24px 0;
+}
+.dashboard-currencies > div {
+  padding: 22px;
+  border: 1px solid var(--border, #ddd);
+  border-radius: 16px;
+  background: white;
+}
+.dashboard-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 20px;
+  margin: 16px 0;
+}
+.dashboard-metrics strong {
+  display: block;
+  font-size: 25px;
+  margin-top: 10px;
+  overflow-wrap: anywhere;
+}
+.dashboard-metrics small {
+  color: var(--muted, #69716d);
+}
+.business-dashboard .panel-title {
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.dashboard-table-scroll {
+  overflow-x: auto;
+}
+.dashboard-table-scroll table {
+  min-width: 700px;
+}
+.dashboard-attendance {
+  border-top: 1px solid var(--border, #ddd);
+  padding-top: 20px;
+  margin-top: 20px;
+}
+.dashboard-attendance summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.dashboard-class {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(160px, 1fr) 130px auto;
+  gap: 12px;
+  align-items: center;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border, #ddd);
+}
+.dashboard-class small {
+  display: block;
+  margin-top: 6px;
+  overflow-wrap: anywhere;
+}
+.dashboard-class select {
+  width: 100%;
+}
+.checkbox-row {
+  display: flex !important;
+  align-items: center;
+  gap: 10px;
+}
+.checkbox-row input {
+  width: auto !important;
+}
+@media (max-width: 900px) {
+  .dashboard-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .dashboard-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .dashboard-class {
+    grid-template-columns: 1fr 1fr;
+  }
+  .dashboard-class > div {
+    grid-column: 1/-1;
+  }
+}
+@media (max-width: 480px) {
+  .dashboard-month {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .dashboard-class {
+    grid-template-columns: 1fr;
+  }
+  .dashboard-class > div {
+    grid-column: auto;
+  }
+  .dashboard-actions {
+    justify-content: flex-start;
+  }
+  .dashboard-currencies > div {
+    padding: 16px;
+  }
+  .dashboard-metrics strong {
+    font-size: 20px;
+  }
+}

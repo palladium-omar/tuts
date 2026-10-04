@@ -28,6 +28,8 @@ const defaults = {
   BETTER_AUTH_SECRET: token(),
   PAYMENT_ENCRYPTION_KEY: randomBytes(32).toString("base64"),
   INTEGRATIONS_ENCRYPTION_KEY: randomBytes(32).toString("base64"),
+  COMMUNICATIONS_ENCRYPTION_KEY: randomBytes(32).toString("base64"),
+  ALLOW_OUTBOUND_DELIVERY: "false",
   ALLOW_SANDBOX_PAYMENTS: "true",
 };
 for (const name of [

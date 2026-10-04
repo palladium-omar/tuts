@@ -218,7 +218,8 @@
         "PORT": "4005",
         "DATABASE_URL": "postgresql://billing:${BILLING_DB_PASSWORD}@postgres:5432/billing",
         "RABBITMQ_URL": "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672",
-        "CONTEXT_PUBLIC_KEY": "${CONTEXT_PUBLIC_KEY}"
+        "CONTEXT_PUBLIC_KEY": "${CONTEXT_PUBLIC_KEY}",
+        "SCHEDULING_URL": "http://scheduling:4003"
       },
       "depends_on": {
         "postgres": {
@@ -254,7 +255,8 @@
         "RABBITMQ_URL": "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672",
         "CONTEXT_PUBLIC_KEY": "${CONTEXT_PUBLIC_KEY}",
         "PAYMENT_ENCRYPTION_KEY": "${PAYMENT_ENCRYPTION_KEY}",
-        "ALLOW_SANDBOX_PAYMENTS": "${ALLOW_SANDBOX_PAYMENTS}"
+        "ALLOW_SANDBOX_PAYMENTS": "${ALLOW_SANDBOX_PAYMENTS}",
+        "PUBLIC_APP_URL": "${PUBLIC_APP_URL}"
       },
       "depends_on": {
         "postgres": {
@@ -288,7 +290,10 @@
         "PORT": "4007",
         "DATABASE_URL": "postgresql://notifications:${NOTIFICATIONS_DB_PASSWORD}@postgres:5432/notifications",
         "RABBITMQ_URL": "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672",
-        "CONTEXT_PUBLIC_KEY": "${CONTEXT_PUBLIC_KEY}"
+        "CONTEXT_PUBLIC_KEY": "${CONTEXT_PUBLIC_KEY}",
+        "COMMUNICATIONS_ENCRYPTION_KEY": "${COMMUNICATIONS_ENCRYPTION_KEY}",
+        "ALLOW_OUTBOUND_DELIVERY": "${ALLOW_OUTBOUND_DELIVERY:-false}",
+        "CLIENTS_URL": "http://clients:4002"
       },
       "depends_on": {
         "postgres": {

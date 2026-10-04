@@ -9,6 +9,7 @@ import {
 } from "../lib/api";
 import { Empty, Modal, Notice } from "../components/shared";
 import "./teaching-ux.css";
+import { DatePicker } from "../components/date-picker";
 
 const assignmentStatus: Record<string, string> = {
   assigned: "Assigned",
@@ -323,14 +324,19 @@ export function Learning({
                     placeholder="For example: Algebra practice"
                   />
                 </label>
-                <label>
-                  Due date (optional)
-                  <input name="dueAt" type="datetime-local" disabled={busy} />
+                <div>
+                  <DatePicker
+                    name="dueAt"
+                    label="Due date (optional)"
+                    withTime
+                    disabled={busy}
+                  />
                   <small className="field-hint">
                     Time is shown in{" "}
-                    {Intl.DateTimeFormat().resolvedOptions().timeZone}.
+                    {Intl.DateTimeFormat().resolvedOptions().timeZone}. New
+                    dates default to 23:59.
                   </small>
-                </label>
+                </div>
               </div>
               <label className="file-drop">
                 <Upload size={28} />

@@ -34,7 +34,13 @@ import {
 } from "../lib/api";
 import { Notice } from "../components/shared";
 import { BusinessProfile, defaultPalette } from "../features/business-profile";
+import { BusinessDashboard } from "../features/business-dashboard";
 import { CRM } from "../features/crm";
+import {
+  CampaignComposer,
+  CommunicationConnections,
+  type Audience,
+} from "../features/communications";
 import { Connectors } from "../features/connectors";
 import { Sessions } from "../features/sessions-calendar";
 import { Learning } from "../features/learning";
@@ -390,6 +396,7 @@ function Workspace({
     [menuOpen, setMenuOpen] = useState(false),
     [error, setError] = useState(""),
     [notice, setNotice] = useState("");
+  const [messageAudience, setMessageAudience] = useState<Audience | null>(null);
   const content = useRef<HTMLElement>(null);
   const menuButton = useRef<HTMLButtonElement>(null);
   const previousView = useRef(view);
@@ -566,7 +573,17 @@ function Workspace({
             <Overview api={api} business={business} user={user} go={go} />
           )}
           {view === "clients" && (
-            <CRM api={api} onConnect={() => connectors("crm")} />
+            <CRM
+              api={api}
+              businessId={business.id}
+              role={business.role}
+              onMessage={
+                business.entitlements.includes("notifications")
+                  ? setMessageAudience
+                  : undefined
+              }
+              onConnect={() => connectors("crm")}
+            />
           )}
           {view === "scheduling" && (
             <Sessions api={api} onConnect={() => connectors("calendars")} />
@@ -579,11 +596,26 @@ function Workspace({
             />
           )}
           {view === "billing" && <Invoices api={api} business={business} />}
-          {view === "payments" && <Payments api={api} />}
-          {view === "notifications" && <Activity api={api} />}
+          {view === "payments" && (
+            <Payments api={api} role={business.role} businessId={business.id} />
+          )}
+          {view === "notifications" && (
+            <>
+              <button onClick={() => setMessageAudience({ filter: {} })}>
+                Messages & campaign history
+              </button>
+              <Activity api={api} />
+            </>
+          )}
           {view === "integrations" &&
             (business.entitlements.includes("integrations") ? (
-              <Connectors api={api} role={business.role} filter={filter} />
+              <>
+                <Connectors api={api} role={business.role} filter={filter} />
+                {filter === "all" &&
+                  business.entitlements.includes("notifications") && (
+                    <CommunicationConnections api={api} role={business.role} />
+                  )}
+              </>
             ) : (
               <div className="panel">
                 Connectors are not enabled for this workspace.
@@ -602,6 +634,14 @@ function Workspace({
                   "Business profile saved. Your workspace now uses these details.",
                 );
               }}
+            />
+          )}
+          {messageAudience && (
+            <CampaignComposer
+              api={api}
+              role={business.role}
+              audience={messageAudience}
+              onClose={() => setMessageAudience(null)}
             />
           )}
           <footer>
@@ -689,6 +729,11 @@ function Overview({
           </button>
         </div>
       )}
+      <BusinessDashboard
+        api={api}
+        business={business}
+        onInvoices={() => go("billing")}
+      />
       <div className="stat-grid">
         {entries.map((e) => {
           const Icon = icons[e.id];

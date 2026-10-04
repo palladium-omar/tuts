@@ -8,10 +8,23 @@ import {
   Plug,
   X,
   FileSpreadsheet,
+  Columns3,
+  SlidersHorizontal,
 } from "lucide-react";
 import { errorMessage, type Api, type Row } from "../lib/api";
 import { Empty, Modal, Notice } from "../components/shared";
 import "./crm.css";
+import {
+  builtinColumns,
+  defaultColumns,
+  columnCell,
+  CustomFieldInputs,
+  customFieldValues,
+  ColumnsDialog,
+  FiltersDialog,
+  type CRMField,
+  type CRMFilter,
+} from "./crm-controls";
 const importFields: Record<string, string> = {
   firstName: "First name",
   lastName: "Last name",
@@ -23,6 +36,8 @@ const importFields: Record<string, string> = {
   tags: "Tags",
   notes: "Notes",
   source: "Source",
+  emailOptIn: "Email updates permitted",
+  whatsappOptIn: "WhatsApp updates permitted",
 };
 const aliases: Record<string, string[]> = {
   firstName: ["firstname", "givenname"],
@@ -48,7 +63,93 @@ const actionLabels: Record<string, string> = {
   skip: "Skip",
   error: "Fix row",
 };
-export function CRM({ api, onConnect }: { api: Api; onConnect: () => void }) {
+export function CRM({
+  api,
+  onConnect,
+  businessId,
+  role,
+  onMessage,
+}: {
+  api: Api;
+  onConnect: () => void;
+  businessId?: string;
+  role?: string;
+  onMessage?: (audience: {
+    clientIds?: string[];
+    filter?: Record<string, unknown>;
+  }) => void;
+}) {
+  const [fields, setFields] = useState<CRMField[]>([]),
+    [fieldError, setFieldError] = useState("");
+  const [columnsOpen, setColumnsOpen] = useState(false),
+    [filtersOpen, setFiltersOpen] = useState(false);
+  const [visible, setVisible] = useState<string[]>(defaultColumns),
+    [preferencesBusiness, setPreferencesBusiness] = useState<string | null>(
+      null,
+    );
+  const [kind, setKind] = useState(""),
+    [tag, setTag] = useState(""),
+    [source, setSource] = useState(""),
+    [hasEmail, setHasEmail] = useState(""),
+    [hasPhone, setHasPhone] = useState("");
+  const [filters, setFilters] = useState<CRMFilter[]>([]),
+    [sortBy, setSortBy] = useState("displayName"),
+    [sortDirection, setSortDirection] = useState("asc");
+  const [selected, setSelected] = useState<Set<string>>(new Set()),
+    [allMatching, setAllMatching] = useState(false);
+  const [selectionKey, setSelectionKey] = useState("");
+  const currentBusiness = businessId ?? "default";
+  const columns = [
+    ...builtinColumns,
+    ...fields.map((field) => ({
+      key: `custom:${field.id}`,
+      label: field.label,
+      sort: `custom:${field.id}`,
+    })),
+  ];
+  const displayedColumns = visible
+    .map((key) => columns.find((c) => c.key === key))
+    .filter((c): c is (typeof columns)[number] => !!c);
+  useEffect(() => {
+    let cancelled = false;
+    setFields([]);
+    setFieldError("");
+    api("clients/v1/fields")
+      .then((data) => {
+        if (!cancelled) setFields(data.items ?? []);
+      })
+      .catch((e) => {
+        if (!cancelled) setFieldError(errorMessage(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [api]);
+  useEffect(() => {
+    let keys = defaultColumns;
+    try {
+      const saved = JSON.parse(
+        localStorage.getItem(`tuts.crm.columns.${currentBusiness}`) ?? "null",
+      );
+      if (
+        Array.isArray(saved) &&
+        saved.length &&
+        saved.every((k) => typeof k === "string")
+      )
+        keys = [...new Set(saved)];
+    } catch {}
+    setVisible(keys);
+    setPreferencesBusiness(currentBusiness);
+  }, [currentBusiness]);
+  useEffect(() => {
+    if (preferencesBusiness === currentBusiness)
+      try {
+        localStorage.setItem(
+          `tuts.crm.columns.${currentBusiness}`,
+          JSON.stringify(visible),
+        );
+      } catch {}
+  }, [visible, preferencesBusiness, currentBusiness]);
   const [rows, setRows] = useState<Row[]>([]),
     [total, setTotal] = useState(0),
     [offset, setOffset] = useState(0),
@@ -61,13 +162,60 @@ export function CRM({ api, onConnect }: { api: Api; onConnect: () => void }) {
     [busy, setBusy] = useState(false),
     [loading, setLoading] = useState(true),
     [revision, setRevision] = useState(0);
+  const audienceFilter = {
+    ...(search ? { search } : {}),
+    ...(status ? { status } : {}),
+    ...(kind ? { kind } : {}),
+    ...(tag ? { tag } : {}),
+    ...(source ? { source } : {}),
+    ...(hasEmail ? { hasEmail } : {}),
+    ...(hasPhone ? { hasPhone } : {}),
+    ...(filters.length ? { filters } : {}),
+  };
+  const filterKey = JSON.stringify(audienceFilter);
+  useEffect(() => {
+    setSelected(new Set());
+    setAllMatching(false);
+    setSelectionKey(filterKey);
+    setOffset(0);
+  }, [filterKey, currentBusiness]);
+  const selectedCount =
+    selectionKey === filterKey ? (allMatching ? total : selected.size) : 0;
+  function toggleRow(id: string, checked: boolean) {
+    setAllMatching(false);
+    setSelected((previous) => {
+      const next = new Set(previous);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
+  function togglePage(checked: boolean) {
+    setAllMatching(false);
+    setSelected((previous) => {
+      const next = new Set(previous);
+      rows.forEach((row) => {
+        if (checked) next.add(row.id);
+        else next.delete(row.id);
+      });
+      return next;
+    });
+  }
+  function sort(key: string) {
+    setSortBy(key);
+    setSortDirection(
+      sortBy === key && sortDirection === "asc" ? "desc" : "asc",
+    );
+    setOffset(0);
+  }
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     const timer = setTimeout(
       () => {
         api(
-          `clients/v1/clients?limit=50&offset=${offset}&search=${encodeURIComponent(search)}${status ? `&status=${status}` : ""}`,
+          `clients/v1/clients?${new URLSearchParams({ limit: "50", offset: String(offset), sortBy, sortDirection, ...Object.fromEntries(Object.entries(audienceFilter).map(([key, value]) => [key, key === "filters" ? JSON.stringify(value) : String(value)])) })}`,
         )
           .then((data) => {
             if (!cancelled) {
@@ -89,7 +237,7 @@ export function CRM({ api, onConnect }: { api: Api; onConnect: () => void }) {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [api, search, status, offset, revision]);
+  }, [api, filterKey, sortBy, sortDirection, offset, revision]);
   async function save(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
@@ -116,6 +264,16 @@ export function CRM({ api, onConnect }: { api: Api; onConnect: () => void }) {
         {
           firstName,
           lastName,
+          ...(!fieldError
+            ? {
+                customFields: {
+                  ...editor?.customFields,
+                  ...customFieldValues(f, fields),
+                },
+              }
+            : {}),
+          emailOptIn: f.get("emailOptIn") === "on",
+          whatsappOptIn: f.get("whatsappOptIn") === "on",
           displayName,
           ...(!editor?.id ? { kind: f.get("kind") } : {}),
           email: String(f.get("email") ?? "").trim() || null,
@@ -138,10 +296,25 @@ export function CRM({ api, onConnect }: { api: Api; onConnect: () => void }) {
       setBusy(false);
     }
   }
-  const filtered = Boolean(search || status);
+  const filtered = Boolean(
+    search ||
+      status ||
+      kind ||
+      tag ||
+      source ||
+      hasEmail ||
+      hasPhone ||
+      filters.length,
+  );
   function clearFilters() {
     setSearch("");
     setStatus("");
+    setKind("");
+    setTag("");
+    setSource("");
+    setHasEmail("");
+    setHasPhone("");
+    setFilters([]);
     setOffset(0);
   }
   function addContact() {
@@ -174,7 +347,7 @@ export function CRM({ api, onConnect }: { api: Api; onConnect: () => void }) {
           </button>
         </div>
       </div>
-      <Notice error={!editor ? error : ""} message={message} />
+      <Notice error={!editor ? error || fieldError : ""} message={message} />
       <section className="panel">
         <div className="toolbar">
           <label className="search">
@@ -215,6 +388,26 @@ export function CRM({ api, onConnect }: { api: Api; onConnect: () => void }) {
             <option value="active">Active</option>
             <option value="inactive">Inactive</option>
           </select>
+          <select
+            aria-label="Filter contacts by relationship"
+            value={kind}
+            onChange={(e) => {
+              setKind(e.target.value);
+              setOffset(0);
+            }}
+          >
+            <option value="">All relationships</option>
+            <option value="student">Students</option>
+            <option value="payer">Parents / payers</option>
+          </select>
+          <button onClick={() => setFiltersOpen(true)}>
+            <SlidersHorizontal size={16} />
+            Filters{filters.length ? ` (${filters.length})` : ""}
+          </button>
+          <button onClick={() => setColumnsOpen(true)}>
+            <Columns3 size={16} />
+            Columns
+          </button>
           {filtered && <button onClick={clearFilters}>Clear filters</button>}
           <span className="tag" aria-live="polite">
             {loading
@@ -222,6 +415,91 @@ export function CRM({ api, onConnect }: { api: Api; onConnect: () => void }) {
               : `${total} ${filtered ? "matching " : ""}contact${total === 1 ? "" : "s"}`}
           </span>
         </div>
+        <details className="crm-extra-filters">
+          <summary>More contact filters</summary>
+          <div className="crm-filter-inline">
+            <label>
+              Tag
+              <input
+                maxLength={80}
+                value={tag}
+                onChange={(e) => setTag(e.target.value)}
+                placeholder="Exact tag"
+              />
+            </label>
+            <label>
+              Source
+              <input
+                maxLength={160}
+                value={source}
+                onChange={(e) => setSource(e.target.value)}
+                placeholder="Exact source"
+              />
+            </label>
+            <label>
+              Email
+              <select
+                value={hasEmail}
+                onChange={(e) => setHasEmail(e.target.value)}
+              >
+                <option value="">Any</option>
+                <option value="true">Has email</option>
+                <option value="false">No email</option>
+              </select>
+            </label>
+            <label>
+              Phone
+              <select
+                value={hasPhone}
+                onChange={(e) => setHasPhone(e.target.value)}
+              >
+                <option value="">Any</option>
+                <option value="true">Has phone</option>
+                <option value="false">No phone</option>
+              </select>
+            </label>
+          </div>
+        </details>
+        {selectedCount > 0 && (
+          <div className="crm-selection" role="status">
+            <strong>
+              {selectedCount} contact{selectedCount === 1 ? "" : "s"} selected
+              {allMatching ? " across all matching pages" : ""}
+            </strong>
+            {!allMatching && total > 0 && (
+              <button
+                disabled={loading}
+                onClick={() => {
+                  setAllMatching(true);
+                  setSelected(new Set());
+                }}
+              >
+                Select all {total} matching contacts
+              </button>
+            )}
+            <button
+              onClick={() => {
+                setSelected(new Set());
+                setAllMatching(false);
+              }}
+            >
+              Clear selection
+            </button>
+            <button
+              className="primary"
+              disabled={loading || !onMessage}
+              onClick={() =>
+                onMessage?.(
+                  allMatching
+                    ? { filter: audienceFilter }
+                    : { clientIds: [...selected] },
+                )
+              }
+            >
+              Message selected
+            </button>
+          </div>
+        )}
         {loading ? (
           <Empty>Loading contacts…</Empty>
         ) : rows.length === 0 ? (
@@ -253,47 +531,78 @@ export function CRM({ api, onConnect }: { api: Api; onConnect: () => void }) {
           </Empty>
         ) : (
           <div className="table-scroll">
+            <label className="crm-check crm-mobile-page-selection">
+              <input
+                type="checkbox"
+                checked={
+                  allMatching || rows.every((row) => selected.has(row.id))
+                }
+                onChange={(e) => togglePage(e.target.checked)}
+              />
+              Select contacts on this page
+            </label>
             <table className="crm-contacts-table">
               <thead>
                 <tr>
-                  <th>Contact</th>
-                  <th>Stage</th>
-                  <th>Email / phone</th>
-                  <th>Source / tags</th>
+                  <th className="crm-selection-cell">
+                    <input
+                      type="checkbox"
+                      aria-label="Select contacts on this page"
+                      checked={
+                        allMatching || rows.every((row) => selected.has(row.id))
+                      }
+                      onChange={(e) => togglePage(e.target.checked)}
+                    />
+                  </th>
+                  {displayedColumns.map((column) => (
+                    <th
+                      key={column.key}
+                      aria-sort={
+                        column.sort === sortBy
+                          ? sortDirection === "asc"
+                            ? "ascending"
+                            : "descending"
+                          : undefined
+                      }
+                    >
+                      {column.sort ? (
+                        <button
+                          className="crm-sort"
+                          onClick={() => sort(column.sort!)}
+                        >
+                          {column.label}
+                          {column.sort === sortBy
+                            ? sortDirection === "asc"
+                              ? " ↑"
+                              : " ↓"
+                            : ""}
+                        </button>
+                      ) : (
+                        column.label
+                      )}
+                    </th>
+                  ))}
                   <th />
                 </tr>
               </thead>
               <tbody>
                 {rows.map((row) => (
                   <tr key={row.id}>
-                    <td>
-                      <strong>{row.displayName}</strong>
-                      <small>
-                        {row.kind === "payer" ? "Parent / payer" : "Student"}
-                      </small>
+                    <td className="crm-selection-cell">
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${row.displayName}`}
+                        checked={allMatching || selected.has(row.id)}
+                        disabled={allMatching}
+                        onChange={(e) => toggleRow(row.id, e.target.checked)}
+                      />
                     </td>
-                    <td>
-                      <span className={`status ${row.status}`}>
-                        {row.status ?? "active"}
-                      </span>
-                    </td>
-                    <td>
-                      {row.email ?? "—"}
-                      <small>{row.phone}</small>
-                    </td>
-                    <td>
-                      {row.source === "file-import"
-                        ? "Spreadsheet import"
-                        : (row.source ?? "Added manually")}
-                      <div className="tag-list">
-                        {row.tags?.map((tag: string) => (
-                          <span className="tag" key={tag}>
-                            {tag}
-                          </span>
-                        ))}
-                      </div>
-                    </td>
-                    <td>
+                    {displayedColumns.map((column) => (
+                      <td key={column.key} data-label={column.label}>
+                        {columnCell(row, column, fields)}
+                      </td>
+                    ))}
+                    <td className="crm-edit-cell">
                       <button
                         aria-label={`Edit ${row.displayName}`}
                         onClick={() => {
@@ -439,6 +748,31 @@ export function CRM({ api, onConnect }: { api: Api; onConnect: () => void }) {
                 />
                 <span className="crm-helper">Separate tags with commas.</span>
               </label>
+              <CustomFieldInputs
+                fields={fields}
+                values={editor.customFields ?? {}}
+              />
+            </div>
+            <div className="crm-permissions">
+              <label className="crm-check">
+                <input
+                  type="checkbox"
+                  name="emailOptIn"
+                  defaultChecked={editor.emailOptIn === true}
+                />
+                Email updates permitted
+              </label>
+              <label className="crm-check">
+                <input
+                  type="checkbox"
+                  name="whatsappOptIn"
+                  defaultChecked={editor.whatsappOptIn === true}
+                />
+                WhatsApp updates permitted
+              </label>
+              <p className="crm-helper">
+                Record permission given by this contact before sending updates.
+              </p>
             </div>
             <label>
               Notes
@@ -467,9 +801,38 @@ export function CRM({ api, onConnect }: { api: Api; onConnect: () => void }) {
           </form>
         </Modal>
       )}
+      {columnsOpen && (
+        <ColumnsDialog
+          api={api}
+          columns={columns}
+          visible={visible}
+          fields={fields}
+          canManage={role === "owner" || role === "admin"}
+          onChange={setVisible}
+          onField={(field) => {
+            setFields((previous) => [
+              ...previous.filter((f) => f.id !== field.id),
+              field,
+            ]);
+            if (!visible.includes(`custom:${field.id}`))
+              setVisible((previous) => [...previous, `custom:${field.id}`]);
+            setFieldError("");
+          }}
+          onClose={() => setColumnsOpen(false)}
+        />
+      )}
+      {filtersOpen && (
+        <FiltersDialog
+          fields={fields}
+          filters={filters}
+          onApply={setFilters}
+          onClose={() => setFiltersOpen(false)}
+        />
+      )}
       {importing && (
         <ImportContacts
           api={api}
+          fields={fields}
           onClose={() => setImporting(false)}
           onImported={(summary) => {
             setImporting(false);
@@ -484,12 +847,14 @@ export function CRM({ api, onConnect }: { api: Api; onConnect: () => void }) {
 }
 function ImportContacts({
   api,
+  fields,
   onClose,
   onImported,
 }: {
   api: Api;
   onClose: () => void;
   onImported: (message: string) => void;
+  fields: CRMField[];
 }) {
   const content = useRef<HTMLDivElement>(null);
   const [sheet, setSheet] = useState<Row | null>(null),
@@ -527,6 +892,12 @@ function ImportContacts({
             options.includes(h.toLowerCase().replace(/[\s_\-]/g, "")),
           ) ?? "";
       }
+      for (const field of fields)
+        initial[`custom:${field.id}`] =
+          data.item.headers.find(
+            (h: string) =>
+              h.trim().toLowerCase() === field.label.trim().toLowerCase(),
+          ) ?? "";
       setMapping(initial);
     } catch (e) {
       setError(errorMessage(e));
@@ -678,7 +1049,12 @@ function ImportContacts({
                   its sample value.
                 </p>
                 <div className="form-grid mapping-grid">
-                  {Object.entries(importFields).map(([field, label]) => (
+                  {Object.entries({
+                    ...importFields,
+                    ...Object.fromEntries(
+                      fields.map((f) => [`custom:${f.id}`, f.label]),
+                    ),
+                  }).map(([field, label]) => (
                     <label key={field}>
                       {label}
                       <select

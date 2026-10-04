@@ -1,3 +1,4 @@
+import { refreshClass } from "./class-ledger.js";
 import { randomUUID } from "node:crypto";
 import { Controller, Get, Inject, Injectable, Query } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
@@ -67,7 +68,8 @@ const filter = z
         ctx.addIssue({
           code: "custom",
           path: ["to"],
-          message: "to must be after from and the range must not exceed 93 days",
+          message:
+            "to must be after from and the range must not exceed 93 days",
         });
     }
   });
@@ -92,9 +94,9 @@ export class ExternalSessionsService {
           [event.businessId, data.connectionId],
         );
         if (revoked.rowCount) return;
-        for (const item of data.sessions)
-          await tx.query(
-            `INSERT INTO external_sessions(id,business_id,connection_id,provider,external_id,owner_user_id,title,starts_at,ends_at,status,attendee_name,attendee_email,booking_url,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT(business_id,connection_id,external_id) DO UPDATE SET title=EXCLUDED.title,starts_at=EXCLUDED.starts_at,ends_at=EXCLUDED.ends_at,status=EXCLUDED.status,attendee_name=EXCLUDED.attendee_name,attendee_email=EXCLUDED.attendee_email,booking_url=EXCLUDED.booking_url,updated_at=EXCLUDED.updated_at WHERE external_sessions.updated_at<=EXCLUDED.updated_at`,
+        for (const item of data.sessions) {
+          const changed = await tx.query(
+            `INSERT INTO external_sessions(id,business_id,connection_id,provider,external_id,owner_user_id,title,starts_at,ends_at,status,attendee_name,attendee_email,booking_url,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT(business_id,connection_id,external_id) DO UPDATE SET title=EXCLUDED.title,starts_at=EXCLUDED.starts_at,ends_at=EXCLUDED.ends_at,status=EXCLUDED.status,attendee_name=EXCLUDED.attendee_name,attendee_email=EXCLUDED.attendee_email,booking_url=EXCLUDED.booking_url,updated_at=EXCLUDED.updated_at WHERE external_sessions.updated_at<=EXCLUDED.updated_at RETURNING id`,
             [
               randomUUID(),
               event.businessId,
@@ -112,6 +114,15 @@ export class ExternalSessionsService {
               event.occurredAt,
             ],
           );
+          if (changed.rows[0])
+            await refreshClass(
+              tx,
+              event.businessId,
+              "external",
+              changed.rows[0].id,
+              event.correlationId,
+            );
+        }
       },
     );
     this.events.subscribe(
