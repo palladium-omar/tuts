@@ -11,6 +11,21 @@ Set `PUBLIC_APP_URL=http://localhost:3000` and
 HTTPS public URLs. `DATABASE_URL` must use the platform database role; tenant
 businesses and memberships force RLS.
 
+For the production deployment, use `NODE_ENV=production` and set both
+`PUBLIC_APP_URL` and `PUBLIC_GATEWAY_URL` to
+`https://tuts.palladiumscholars.com`. These values are public origins, without an
+API path. TLS may terminate at the reverse proxy: the platform constructs auth
+requests using its configured HTTPS public URL, explicitly ignores forwarded
+host/protocol headers, and sets Secure, HttpOnly, host-only session cookies with
+`Path=/` and `SameSite=Lax`. The app and API should use the same public origin so
+browser cookie delivery does not depend on cross-site cookie support. Keep the
+gateway and platform ports private; expose only the ingress. The ingress must
+overwrite `X-Real-IP` with the actual client address and the gateway must preserve
+it. Better Auth uses that single trusted header for auth rate limiting and session
+IP tracking; untrusted client input must never reach it. For Caddy, configure
+`header_up X-Real-IP {remote_host}` on the gateway reverse proxy. Without a valid
+IP header, auth rate limiting uses a shared per-path bucket.
+
 ## Implemented HTTP API
 
 Gateway external prefix is `/api/platform`; it removes this prefix upstream.
@@ -33,10 +48,27 @@ reconstructs that path after gateway routing and preserves all Set-Cookie header
 Custom cookie-authenticated mutations require an Origin exactly matching either
 public URL. Native Better Auth checks trusted origins itself.
 
-New local/nonproduction businesses receive `clients`, `scheduling`, `learning`,
-`billing`, `payments`, `notifications`, `integrations`. At startup only when `NODE_ENV=development`, existing local businesses also receive `integrations` using tenant-scoped updates. Production businesses receive **no paid
-entitlements**. Production subscription/admin provisioning is not implemented,
-and there is no business self-service entitlement endpoint. The global identity
+Set `INITIAL_BUSINESS_ENTITLEMENTS` on the platform process to a comma-separated
+list of initial features for newly created businesses. The allowed values are
+`clients`, `scheduling`, `learning`, `billing`, `payments`, `notifications`, and
+`integrations`. The configuration is validated at startup: whitespace is trimmed,
+duplicates are removed, and unknown features or empty comma-separated entries
+prevent startup. An explicitly empty value grants zero features. For example:
+
+```sh
+INITIAL_BUSINESS_ENTITLEMENTS=clients,scheduling,learning,billing,payments,notifications,integrations
+```
+
+When this setting is absent, production businesses receive **zero entitlements**;
+local/nonproduction businesses retain the full starter set listed above. At
+startup only when `NODE_ENV=development`, existing local businesses also receive
+`integrations` using tenant-scoped updates. Deployment configuration applies only
+to business creation and never changes existing production businesses. Grants
+are persisted atomically with the business and owner membership. Business and
+settings browser payloads reject entitlement fields. This provisioning policy
+grants access to feature APIs; external integrations still require their own
+provider configuration. Production subscription/admin provisioning is not
+implemented, and there is no business self-service entitlement endpoint. The global identity
 business directory contains only user/business IDs for preselection discovery;
 role and entitlement reads always require tenant transactions and membership.
 No membership invitations, password recovery email transport, email verification

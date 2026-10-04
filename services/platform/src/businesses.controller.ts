@@ -21,7 +21,6 @@ import {
   businessSchema,
   internalContextSchema,
   settingsSchema,
-  starterEntitlements,
   mergeSettings,
 } from "./schemas.js";
 
@@ -105,7 +104,7 @@ export class BusinessesController {
   @Post("businesses")
   @ApiOperation({
     summary:
-      "Create a business and owner membership; development grants a starter feature set",
+      "Create a business and owner membership with deployment-configured initial features",
   })
   async create(@Req() req: Request, @Body() body: unknown) {
     const session = await this.identity.requireSession(req);
@@ -131,7 +130,12 @@ export class BusinessesController {
     return this.db.withTenant(id, async (tx) => {
       const result = await tx.query<BusinessRow>(
         "INSERT INTO businesses (business_id, name, entitlements, settings) VALUES ($1,$2,$3,$4) RETURNING *",
-        [id, input.name, starterEntitlements(), settings],
+        [
+          id,
+          input.name,
+          [...this.identity.initialBusinessEntitlements],
+          settings,
+        ],
       );
       await tx.query(
         "INSERT INTO memberships (business_id, user_id, role) VALUES ($1,$2,$3)",

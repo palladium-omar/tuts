@@ -1,0 +1,615 @@
+{
+  "name": "tuts-production",
+  "services":
+    {
+      "postgres":
+        {
+          "image": "postgres:17-alpine",
+          "environment":
+            {
+              "POSTGRES_USER": "postgres",
+              "POSTGRES_PASSWORD": "${POSTGRES_PASSWORD}",
+              "PLATFORM_DB_PASSWORD": "${PLATFORM_DB_PASSWORD}",
+              "CLIENTS_DB_PASSWORD": "${CLIENTS_DB_PASSWORD}",
+              "SCHEDULING_DB_PASSWORD": "${SCHEDULING_DB_PASSWORD}",
+              "LEARNING_DB_PASSWORD": "${LEARNING_DB_PASSWORD}",
+              "BILLING_DB_PASSWORD": "${BILLING_DB_PASSWORD}",
+              "PAYMENTS_DB_PASSWORD": "${PAYMENTS_DB_PASSWORD}",
+              "NOTIFICATIONS_DB_PASSWORD": "${NOTIFICATIONS_DB_PASSWORD}",
+              "INTEGRATIONS_DB_PASSWORD": "${INTEGRATIONS_DB_PASSWORD}",
+            },
+          "volumes":
+            [
+              "postgres-data:/var/lib/postgresql/data",
+              "./infra/init-databases.sh:/tmp/palladium-init.sh:ro",
+            ],
+          "healthcheck":
+            {
+              "test": ["CMD-SHELL", "pg_isready -U postgres"],
+              "interval": "3s",
+              "timeout": "3s",
+              "retries": 30,
+            },
+          "entrypoint":
+            [
+              "sh",
+              "-c",
+              "cat /tmp/palladium-init.sh > /docker-entrypoint-initdb.d/01-services.sh && chmod 644 /docker-entrypoint-initdb.d/01-services.sh && exec docker-entrypoint.sh postgres",
+            ],
+          "restart": "unless-stopped",
+          "logging":
+            {
+              "driver": "json-file",
+              "options": { "max-size": "10m", "max-file": "3" },
+            },
+          "networks": ["backend"],
+        },
+      "rabbitmq":
+        {
+          "image": "rabbitmq:4-management-alpine",
+          "environment":
+            {
+              "RABBITMQ_DEFAULT_USER": "${RABBITMQ_USER}",
+              "RABBITMQ_DEFAULT_PASS": "${RABBITMQ_PASSWORD}",
+            },
+          "volumes": ["rabbitmq-data:/var/lib/rabbitmq"],
+          "healthcheck":
+            {
+              "test": ["CMD", "rabbitmq-diagnostics", "-q", "ping"],
+              "interval": "5s",
+              "timeout": "5s",
+              "retries": 30,
+            },
+          "restart": "unless-stopped",
+          "logging":
+            {
+              "driver": "json-file",
+              "options": { "max-size": "10m", "max-file": "3" },
+            },
+          "networks": ["backend"],
+        },
+      "platform":
+        {
+          "build":
+            {
+              "context": ".",
+              "args": { "SERVICE": "platform" },
+              "dockerfile": "infra/production/Dockerfile",
+            },
+          "environment":
+            {
+              "NODE_ENV": "production",
+              "PORT": "4001",
+              "DATABASE_URL": "postgresql://platform:${PLATFORM_DB_PASSWORD}@postgres:5432/platform",
+              "RABBITMQ_URL": "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672",
+              "CONTEXT_PUBLIC_KEY": "${CONTEXT_PUBLIC_KEY}",
+              "PLATFORM_INTERNAL_SECRET": "${PLATFORM_INTERNAL_SECRET}",
+              "BETTER_AUTH_SECRET": "${BETTER_AUTH_SECRET}",
+              "PUBLIC_APP_URL": "${PUBLIC_APP_URL}",
+              "PUBLIC_GATEWAY_URL": "${PUBLIC_GATEWAY_URL}",
+              "INITIAL_BUSINESS_ENTITLEMENTS": "${INITIAL_BUSINESS_ENTITLEMENTS:-clients,scheduling,learning,billing,payments,notifications,integrations}",
+            },
+          "depends_on":
+            {
+              "postgres": { "condition": "service_healthy" },
+              "rabbitmq": { "condition": "service_healthy" },
+            },
+          "healthcheck":
+            {
+              "test":
+                [
+                  "CMD",
+                  "node",
+                  "-e",
+                  "fetch('http://localhost:4001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+                ],
+              "interval": "10s",
+              "timeout": "5s",
+              "retries": 10,
+            },
+          "restart": "unless-stopped",
+          "logging":
+            {
+              "driver": "json-file",
+              "options": { "max-size": "10m", "max-file": "3" },
+            },
+          "networks": ["backend"],
+          "image": "tuts/platform:${RELEASE_TAG:-latest}",
+          "init": true,
+          "security_opt": ["no-new-privileges:true"],
+          "cap_drop": ["ALL"],
+          "stop_grace_period": "30s",
+        },
+      "clients":
+        {
+          "build":
+            {
+              "context": ".",
+              "args": { "SERVICE": "clients" },
+              "dockerfile": "infra/production/Dockerfile",
+            },
+          "environment":
+            {
+              "NODE_ENV": "production",
+              "PORT": "4002",
+              "DATABASE_URL": "postgresql://clients:${CLIENTS_DB_PASSWORD}@postgres:5432/clients",
+              "RABBITMQ_URL": "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672",
+              "CONTEXT_PUBLIC_KEY": "${CONTEXT_PUBLIC_KEY}",
+            },
+          "depends_on":
+            {
+              "postgres": { "condition": "service_healthy" },
+              "rabbitmq": { "condition": "service_healthy" },
+            },
+          "healthcheck":
+            {
+              "test":
+                [
+                  "CMD",
+                  "node",
+                  "-e",
+                  "fetch('http://localhost:4002/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+                ],
+              "interval": "10s",
+              "timeout": "5s",
+              "retries": 10,
+            },
+          "restart": "unless-stopped",
+          "logging":
+            {
+              "driver": "json-file",
+              "options": { "max-size": "10m", "max-file": "3" },
+            },
+          "networks": ["backend"],
+          "image": "tuts/clients:${RELEASE_TAG:-latest}",
+          "init": true,
+          "security_opt": ["no-new-privileges:true"],
+          "cap_drop": ["ALL"],
+          "stop_grace_period": "30s",
+        },
+      "scheduling":
+        {
+          "build":
+            {
+              "context": ".",
+              "args": { "SERVICE": "scheduling" },
+              "dockerfile": "infra/production/Dockerfile",
+            },
+          "environment":
+            {
+              "NODE_ENV": "production",
+              "PORT": "4003",
+              "DATABASE_URL": "postgresql://scheduling:${SCHEDULING_DB_PASSWORD}@postgres:5432/scheduling",
+              "RABBITMQ_URL": "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672",
+              "CONTEXT_PUBLIC_KEY": "${CONTEXT_PUBLIC_KEY}",
+            },
+          "depends_on":
+            {
+              "postgres": { "condition": "service_healthy" },
+              "rabbitmq": { "condition": "service_healthy" },
+            },
+          "healthcheck":
+            {
+              "test":
+                [
+                  "CMD",
+                  "node",
+                  "-e",
+                  "fetch('http://localhost:4003/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+                ],
+              "interval": "10s",
+              "timeout": "5s",
+              "retries": 10,
+            },
+          "restart": "unless-stopped",
+          "logging":
+            {
+              "driver": "json-file",
+              "options": { "max-size": "10m", "max-file": "3" },
+            },
+          "networks": ["backend"],
+          "image": "tuts/scheduling:${RELEASE_TAG:-latest}",
+          "init": true,
+          "security_opt": ["no-new-privileges:true"],
+          "cap_drop": ["ALL"],
+          "stop_grace_period": "30s",
+        },
+      "learning":
+        {
+          "build":
+            {
+              "context": ".",
+              "args": { "SERVICE": "learning" },
+              "dockerfile": "infra/production/Dockerfile",
+            },
+          "environment":
+            {
+              "NODE_ENV": "production",
+              "PORT": "4004",
+              "DATABASE_URL": "postgresql://learning:${LEARNING_DB_PASSWORD}@postgres:5432/learning",
+              "RABBITMQ_URL": "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672",
+              "CONTEXT_PUBLIC_KEY": "${CONTEXT_PUBLIC_KEY}",
+              "UPLOAD_DIRECTORY": "/data/uploads",
+            },
+          "depends_on":
+            {
+              "postgres": { "condition": "service_healthy" },
+              "rabbitmq": { "condition": "service_healthy" },
+              "uploads-init": { "condition": "service_completed_successfully" },
+            },
+          "healthcheck":
+            {
+              "test":
+                [
+                  "CMD",
+                  "node",
+                  "-e",
+                  "fetch('http://localhost:4004/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+                ],
+              "interval": "10s",
+              "timeout": "5s",
+              "retries": 10,
+            },
+          "volumes": ["learning-uploads:/data/uploads"],
+          "restart": "unless-stopped",
+          "logging":
+            {
+              "driver": "json-file",
+              "options": { "max-size": "10m", "max-file": "3" },
+            },
+          "networks": ["backend"],
+          "image": "tuts/learning:${RELEASE_TAG:-latest}",
+          "init": true,
+          "security_opt": ["no-new-privileges:true"],
+          "cap_drop": ["ALL"],
+          "stop_grace_period": "30s",
+        },
+      "billing":
+        {
+          "build":
+            {
+              "context": ".",
+              "args": { "SERVICE": "billing" },
+              "dockerfile": "infra/production/Dockerfile",
+            },
+          "environment":
+            {
+              "NODE_ENV": "production",
+              "PORT": "4005",
+              "DATABASE_URL": "postgresql://billing:${BILLING_DB_PASSWORD}@postgres:5432/billing",
+              "RABBITMQ_URL": "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672",
+              "CONTEXT_PUBLIC_KEY": "${CONTEXT_PUBLIC_KEY}",
+              "SCHEDULING_URL": "http://scheduling:4003",
+            },
+          "depends_on":
+            {
+              "postgres": { "condition": "service_healthy" },
+              "rabbitmq": { "condition": "service_healthy" },
+            },
+          "healthcheck":
+            {
+              "test":
+                [
+                  "CMD",
+                  "node",
+                  "-e",
+                  "fetch('http://localhost:4005/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+                ],
+              "interval": "10s",
+              "timeout": "5s",
+              "retries": 10,
+            },
+          "restart": "unless-stopped",
+          "logging":
+            {
+              "driver": "json-file",
+              "options": { "max-size": "10m", "max-file": "3" },
+            },
+          "networks": ["backend"],
+          "image": "tuts/billing:${RELEASE_TAG:-latest}",
+          "init": true,
+          "security_opt": ["no-new-privileges:true"],
+          "cap_drop": ["ALL"],
+          "stop_grace_period": "30s",
+        },
+      "payments":
+        {
+          "build":
+            {
+              "context": ".",
+              "args": { "SERVICE": "payments" },
+              "dockerfile": "infra/production/Dockerfile",
+            },
+          "environment":
+            {
+              "NODE_ENV": "production",
+              "PORT": "4006",
+              "DATABASE_URL": "postgresql://payments:${PAYMENTS_DB_PASSWORD}@postgres:5432/payments",
+              "RABBITMQ_URL": "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672",
+              "CONTEXT_PUBLIC_KEY": "${CONTEXT_PUBLIC_KEY}",
+              "PAYMENT_ENCRYPTION_KEY": "${PAYMENT_ENCRYPTION_KEY}",
+              "PUBLIC_APP_URL": "${PUBLIC_APP_URL}",
+              "ALLOW_SANDBOX_PAYMENTS": "false",
+            },
+          "depends_on":
+            {
+              "postgres": { "condition": "service_healthy" },
+              "rabbitmq": { "condition": "service_healthy" },
+            },
+          "healthcheck":
+            {
+              "test":
+                [
+                  "CMD",
+                  "node",
+                  "-e",
+                  "fetch('http://localhost:4006/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+                ],
+              "interval": "10s",
+              "timeout": "5s",
+              "retries": 10,
+            },
+          "restart": "unless-stopped",
+          "logging":
+            {
+              "driver": "json-file",
+              "options": { "max-size": "10m", "max-file": "3" },
+            },
+          "networks": ["backend", "egress"],
+          "image": "tuts/payments:${RELEASE_TAG:-latest}",
+          "init": true,
+          "security_opt": ["no-new-privileges:true"],
+          "cap_drop": ["ALL"],
+          "stop_grace_period": "30s",
+        },
+      "notifications":
+        {
+          "build":
+            {
+              "context": ".",
+              "args": { "SERVICE": "notifications" },
+              "dockerfile": "infra/production/Dockerfile",
+            },
+          "environment":
+            {
+              "NODE_ENV": "production",
+              "PORT": "4007",
+              "DATABASE_URL": "postgresql://notifications:${NOTIFICATIONS_DB_PASSWORD}@postgres:5432/notifications",
+              "RABBITMQ_URL": "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672",
+              "CONTEXT_PUBLIC_KEY": "${CONTEXT_PUBLIC_KEY}",
+              "COMMUNICATIONS_ENCRYPTION_KEY": "${COMMUNICATIONS_ENCRYPTION_KEY}",
+              "ALLOW_OUTBOUND_DELIVERY": "${ALLOW_OUTBOUND_DELIVERY:-false}",
+              "CLIENTS_URL": "http://clients:4002",
+            },
+          "depends_on":
+            {
+              "postgres": { "condition": "service_healthy" },
+              "rabbitmq": { "condition": "service_healthy" },
+            },
+          "healthcheck":
+            {
+              "test":
+                [
+                  "CMD",
+                  "node",
+                  "-e",
+                  "fetch('http://localhost:4007/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+                ],
+              "interval": "10s",
+              "timeout": "5s",
+              "retries": 10,
+            },
+          "restart": "unless-stopped",
+          "logging":
+            {
+              "driver": "json-file",
+              "options": { "max-size": "10m", "max-file": "3" },
+            },
+          "networks": ["backend", "egress"],
+          "image": "tuts/notifications:${RELEASE_TAG:-latest}",
+          "init": true,
+          "security_opt": ["no-new-privileges:true"],
+          "cap_drop": ["ALL"],
+          "stop_grace_period": "30s",
+        },
+      "gateway":
+        {
+          "build":
+            {
+              "context": ".",
+              "args": { "SERVICE": "gateway" },
+              "dockerfile": "infra/production/Dockerfile",
+            },
+          "environment":
+            {
+              "PORT": "8080",
+              "CONTEXT_PRIVATE_KEY": "${CONTEXT_PRIVATE_KEY}",
+              "PLATFORM_INTERNAL_SECRET": "${PLATFORM_INTERNAL_SECRET}",
+              "PUBLIC_APP_URL": "${PUBLIC_APP_URL}",
+              "PUBLIC_GATEWAY_URL": "${PUBLIC_GATEWAY_URL}",
+              "PLATFORM_URL": "http://platform:4001",
+              "CLIENTS_URL": "http://clients:4002",
+              "SCHEDULING_URL": "http://scheduling:4003",
+              "LEARNING_URL": "http://learning:4004",
+              "BILLING_URL": "http://billing:4005",
+              "PAYMENTS_URL": "http://payments:4006",
+              "NOTIFICATIONS_URL": "http://notifications:4007",
+              "INTEGRATIONS_URL": "http://integrations:4008",
+              "NODE_ENV": "production",
+            },
+          "depends_on": { "platform": { "condition": "service_healthy" } },
+          "restart": "unless-stopped",
+          "logging":
+            {
+              "driver": "json-file",
+              "options": { "max-size": "10m", "max-file": "3" },
+            },
+          "networks": ["backend", "edge"],
+          "image": "tuts/gateway:${RELEASE_TAG:-latest}",
+          "init": true,
+          "security_opt": ["no-new-privileges:true"],
+          "cap_drop": ["ALL"],
+          "stop_grace_period": "30s",
+          "healthcheck":
+            {
+              "test":
+                [
+                  "CMD",
+                  "node",
+                  "-e",
+                  "fetch('http://localhost:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+                ],
+              "interval": "10s",
+              "timeout": "5s",
+              "retries": 10,
+              "start_period": "30s",
+            },
+        },
+      "web":
+        {
+          "build":
+            {
+              "context": ".",
+              "args":
+                {
+                  "SERVICE": "web",
+                  "NEXT_PUBLIC_GATEWAY_URL": "${PUBLIC_APP_URL:?PUBLIC_APP_URL is required}",
+                },
+              "dockerfile": "infra/production/Dockerfile",
+            },
+          "environment":
+            {
+              "NEXT_PUBLIC_GATEWAY_URL": "${PUBLIC_APP_URL:?PUBLIC_APP_URL is required}",
+              "NODE_ENV": "production",
+              "HOSTNAME": "0.0.0.0",
+              "PORT": "3000",
+            },
+          "depends_on": { "gateway": { "condition": "service_healthy" } },
+          "restart": "unless-stopped",
+          "logging":
+            {
+              "driver": "json-file",
+              "options": { "max-size": "10m", "max-file": "3" },
+            },
+          "networks": ["backend", "edge"],
+          "image": "tuts/web:${RELEASE_TAG:-latest}",
+          "init": true,
+          "security_opt": ["no-new-privileges:true"],
+          "cap_drop": ["ALL"],
+          "stop_grace_period": "30s",
+          "healthcheck":
+            {
+              "test":
+                [
+                  "CMD",
+                  "node",
+                  "-e",
+                  "fetch('http://localhost:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+                ],
+              "interval": "10s",
+              "timeout": "5s",
+              "retries": 10,
+              "start_period": "30s",
+            },
+        },
+      "integrations":
+        {
+          "build":
+            {
+              "context": ".",
+              "args": { "SERVICE": "integrations" },
+              "dockerfile": "infra/production/Dockerfile",
+            },
+          "environment":
+            {
+              "NODE_ENV": "production",
+              "PORT": "4008",
+              "DATABASE_URL": "postgresql://integrations:${INTEGRATIONS_DB_PASSWORD}@postgres:5432/integrations",
+              "RABBITMQ_URL": "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672",
+              "CONTEXT_PUBLIC_KEY": "${CONTEXT_PUBLIC_KEY}",
+              "INTEGRATIONS_ENCRYPTION_KEY": "${INTEGRATIONS_ENCRYPTION_KEY}",
+            },
+          "depends_on":
+            {
+              "postgres": { "condition": "service_healthy" },
+              "rabbitmq": { "condition": "service_healthy" },
+            },
+          "healthcheck":
+            {
+              "test":
+                [
+                  "CMD",
+                  "node",
+                  "-e",
+                  "fetch('http://localhost:4008/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+                ],
+              "interval": "10s",
+              "timeout": "5s",
+              "retries": 10,
+            },
+          "restart": "unless-stopped",
+          "logging":
+            {
+              "driver": "json-file",
+              "options": { "max-size": "10m", "max-file": "3" },
+            },
+          "networks": ["backend", "egress"],
+          "image": "tuts/integrations:${RELEASE_TAG:-latest}",
+          "init": true,
+          "security_opt": ["no-new-privileges:true"],
+          "cap_drop": ["ALL"],
+          "stop_grace_period": "30s",
+        },
+      "uploads-init":
+        {
+          "image": "busybox:1.37",
+          "user": "0:0",
+          "command":
+            [
+              "sh",
+              "-c",
+              "chown 1000:1000 /data/uploads && chmod 700 /data/uploads",
+            ],
+          "volumes": ["learning-uploads:/data/uploads"],
+          "networks": ["backend"],
+          "restart": "no",
+        },
+      "edge":
+        {
+          "image": "caddy:2-alpine",
+          "restart": "unless-stopped",
+          "ports": ["80:80", "443:443", "443:443/udp"],
+          "environment":
+            {
+              "TUTS_DOMAIN": "${TUTS_DOMAIN:?TUTS_DOMAIN is required}",
+              "ACME_EMAIL": "${ACME_EMAIL:?ACME_EMAIL is required}",
+            },
+          "volumes":
+            [
+              "./infra/production/Caddyfile:/etc/caddy/Caddyfile:ro",
+              "caddy-data:/data",
+              "caddy-config:/config",
+            ],
+          "networks": ["edge"],
+          "depends_on":
+            {
+              "gateway": { "condition": "service_healthy" },
+              "web": { "condition": "service_healthy" },
+            },
+          "logging":
+            {
+              "driver": "json-file",
+              "options": { "max-size": "10m", "max-file": "3" },
+            },
+        },
+    },
+  "volumes":
+    {
+      "postgres-data": {},
+      "rabbitmq-data": {},
+      "learning-uploads": {},
+      "caddy-data": {},
+      "caddy-config": {},
+    },
+  "networks": { "backend": { "internal": true }, "edge": {}, "egress": {} },
+}

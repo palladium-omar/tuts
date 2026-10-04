@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { featureNames } from "@palladium/contracts";
 
 export const businessIdSchema = z.uuid();
 export const timezoneSchema = z
@@ -141,6 +142,23 @@ export function starterEntitlements(
   environment = process.env.NODE_ENV,
 ): string[] {
   return environment === "production" ? [] : [...STARTER_ENTITLEMENTS];
+}
+/** Server deployment policy only; browser payloads never select entitlements. */
+export function initialBusinessEntitlements(
+  environment = process.env.NODE_ENV,
+  configured = process.env.INITIAL_BUSINESS_ENTITLEMENTS,
+): string[] {
+  if (configured === undefined) return starterEntitlements(environment);
+  if (!configured.trim()) return [];
+  const entitlements = configured.split(",").map((value) => value.trim());
+  const invalid = entitlements.filter(
+    (value) => !featureNames.some((feature) => feature === value),
+  );
+  if (invalid.length)
+    throw new Error(
+      `INITIAL_BUSINESS_ENTITLEMENTS contains unknown or empty features: ${invalid.map((value) => value || "<empty>").join(", ")}. Allowed features: ${featureNames.join(", ")}`,
+    );
+  return [...new Set(entitlements)];
 }
 /** Explicit null clears a value; absent nested keys retain saved identity and palette. */
 export function mergeSettings(

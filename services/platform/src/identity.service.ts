@@ -10,12 +10,14 @@ import { betterAuth, type BetterAuthOptions } from "better-auth";
 import { fromNodeHeaders } from "better-auth/node";
 import type { Request } from "express";
 import { timingSafeEqual } from "node:crypto";
+import { initialBusinessEntitlements } from "./schemas.js";
 
 @Injectable()
 export class IdentityService implements OnModuleInit {
   readonly auth: ReturnType<typeof betterAuth>;
   readonly gatewayUrl: string;
   readonly trustedOrigins: string[];
+  readonly initialBusinessEntitlements: readonly string[];
   private readonly internalSecret: string;
 
   constructor(@Inject(Database) private readonly database: Database) {
@@ -28,6 +30,9 @@ export class IdentityService implements OnModuleInit {
         "PLATFORM_INTERNAL_SECRET must contain at least 32 characters",
       );
     this.internalSecret = internalSecret;
+    this.initialBusinessEntitlements = Object.freeze(
+      initialBusinessEntitlements(),
+    );
     this.gatewayUrl = new URL(
       process.env.PUBLIC_GATEWAY_URL || "http://localhost:8080",
     ).origin;
@@ -55,6 +60,10 @@ export class IdentityService implements OnModuleInit {
       },
       session: { expiresIn: 60 * 60 * 24 * 7, cookieCache: { enabled: false } },
       advanced: {
+        // Public URL is deployment configuration, never forwarded host/protocol input.
+        trustedProxyHeaders: false,
+        // The private ingress must overwrite this header with the actual client IP.
+        ipAddress: { ipAddressHeaders: ["x-real-ip"] },
         defaultCookieAttributes: { path: "/", httpOnly: true, sameSite: "lax" },
         useSecureCookies: this.gatewayUrl.startsWith("https:"),
       },

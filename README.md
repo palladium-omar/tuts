@@ -2,7 +2,7 @@
 
 Tuts is a composable tutoring-business workspace. Its local preview brings together eight independently running domain services, each with its own API, migrations, and PostgreSQL database. PostgreSQL row-level security, signed gateway context, and RabbitMQ provide the service and tenant boundaries.
 
-The current product is a local development preview with a staff web app. Architecture documents describe the contracts and extension workflow for this system; they include planned capabilities as well as implemented ones. The status list below is the source of truth for what is delivered today.
+The current product is a staff web app with a local preview and a production container deployment configuration. Public hosting is pending billing activation; see [deployment status and runbook](docs/deployment.md). Architecture documents describe the contracts and extension workflow for this system; they include planned capabilities as well as implemented ones. The status list below is the source of truth for what is delivered today.
 
 ## What works today
 
@@ -17,7 +17,7 @@ The current product is a local development preview with a staff web app. Archite
 | Notifications | Email (SMTP/Resend), WhatsApp template and AI drafting connections; recipient previews, permission checks, approved durable campaigns; local delivery disabled                          | Provider delivery/read receipts, SMS, student portal; actual outbound delivery not exercised                 |
 | Integrations  | Token-based Calendly/Cal.com polling, HTTPS JSON contact pulls, authenticated form webhooks, durable CRM/session sync                                                                   | OAuth app connections; businesses must supply credentials and verify their own connection before use         |
 
-There is no cloud deployment configuration or production operation in this repository. OAuth app connections, production payment providers, country-specific bank integrations, student/parent portal access, production entitlement setup, and deployment are future work. The real provider integrations are implemented, but require each business to supply its own credentials; their live behavior has not been verified as part of this implementation. See [connector protocols](docs/architecture/connectors.md), [payment provider contracts](docs/architecture/payments.md), and the [service status list](#what-works-today).
+The [Google Cloud deployment configuration](docs/deployment.md) includes separate production containers, private storage networks, HTTPS, backups and explicit server-side initial feature provisioning. Public deployment is not yet verified. OAuth app connections, production payment providers, country-specific bank integrations, student/parent portal access and paid subscription administration are future work. The real provider integrations are implemented, but require each business to supply its own credentials; their live behavior has not been verified as part of this implementation. See [connector protocols](docs/architecture/connectors.md), [payment provider contracts](docs/architecture/payments.md), and the [service status list](#what-works-today).
 
 ## Architecture
 

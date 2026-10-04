@@ -8,25 +8,25 @@ The integrations service runs independently on port `4008`, owns its database, e
 
 The staff app offers four source types:
 
-| Source | Read direction | Authentication |
-| --- | --- | --- |
-| Calendly | Scheduled events, invitees, attendees, and cancellations from the recent 90-day window | Business-supplied personal access token validated against Calendly's current-user API |
-| Cal.com | Upcoming, recurring, past, cancelled, and unconfirmed bookings from the recent 90-day window | Business-supplied API key validated against Cal.com's current-account API |
-| Contact JSON API | Read-only HTTPS JSON response, optionally selecting a nested array | Optional business-supplied bearer token |
-| Form webhook | Contact records pushed by a business's form provider or server | Per-connection bearer secret, shown once at connection creation |
+| Source           | Read direction                                                                               | Authentication                                                                        |
+| ---------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Calendly         | Scheduled events, invitees, attendees, and cancellations from the recent 90-day window       | Business-supplied personal access token validated against Calendly's current-user API |
+| Cal.com          | Upcoming, recurring, past, cancelled, and unconfirmed bookings from the recent 90-day window | Business-supplied API key validated against Cal.com's current-account API             |
+| Contact JSON API | Read-only HTTPS JSON response, optionally selecting a nested array                           | Optional business-supplied bearer token                                               |
+| Form webhook     | Contact records pushed by a business's form provider or server                               | Per-connection bearer secret, shown once at connection creation                       |
 
 These are direct token/API integrations, not OAuth. The business keeps ownership of provider authorization and can revoke it at the provider. The connector stores only encrypted credentials and sanitized account/connection metadata. A successful validation confirms the credentials against the identity endpoint; it does not certify a particular calendar's data, source field mapping, or ongoing live polling.
 
 ## Business API
 
-| Method | Route | Purpose |
-| --- | --- | --- |
-| GET | `/v1/connections` | List credential-free connection state for the selected business |
-| GET | `/v1/connections/:id` | Read one connection |
-| POST | `/v1/connections` | Validate credentials and create a source |
-| PATCH | `/v1/connections/:id` | Update its display name, credentials, or configuration; provider validation runs again |
-| POST | `/v1/connections/:id/sync` | Run an immediate bounded pull and enqueue accepted records |
-| DELETE | `/v1/connections/:id` | Revoke the local secret/credentials, stop future polling, and emit cleanup events |
+| Method | Route                      | Purpose                                                                                |
+| ------ | -------------------------- | -------------------------------------------------------------------------------------- |
+| GET    | `/v1/connections`          | List credential-free connection state for the selected business                        |
+| GET    | `/v1/connections/:id`      | Read one connection                                                                    |
+| POST   | `/v1/connections`          | Validate credentials and create a source                                               |
+| PATCH  | `/v1/connections/:id`      | Update its display name, credentials, or configuration; provider validation runs again |
+| POST   | `/v1/connections/:id/sync` | Run an immediate bounded pull and enqueue accepted records                             |
+| DELETE | `/v1/connections/:id`      | Revoke the local secret/credentials, stop future polling, and emit cleanup events      |
 
 New connections accept `{provider,displayName,credentials,config}`. Provider is `calendly`, `calcom`, `json_api`, or `form_webhook`. Calendars accept optional `config.bookingUrl`; JSON APIs accept `config.url`, optional `config.recordsPath`, optional token, and `config.mapping`. Mapping names Tuts contact properties and dot-separated JSON source paths. If `recordsPath` is omitted, the response must be an array. Requests are read-only and support at most 2,000 records per sync.
 
@@ -40,7 +40,7 @@ Creating a `form_webhook` connection returns a generated bearer secret exactly o
 
 The body may be one contact object, an array of contact objects, an object with a `contacts` array, or another object with an explicitly configured `recordsPath`. Mapping selects the source fields for `externalId`, names, email, phone, notes, status, and tags. A stable source ID or a valid email is required. Keep the secret in a form provider's server-side webhook configuration or a backend; it must not be embedded in public page code.
 
-External form providers cannot reach a developer's `localhost` gateway. Receiving their requests requires a publicly reachable HTTPS gateway endpoint. This repository has no cloud deployment configuration; calendar and JSON API polling can still be used from the local development stack when the provider can reach the configured source URL.
+External form providers cannot reach a developer's `localhost` gateway. Receiving their requests requires a publicly reachable HTTPS gateway endpoint. The [production deployment configuration](../deployment.md) exposes the gateway under the same HTTPS origin as the web app. Public hosting must be verified before using inbound hooks. Calendar and JSON API polling can also be used from the local development stack when the provider can reach the configured source URL.
 
 ## CRM import and matching
 
@@ -54,13 +54,13 @@ Disconnecting a source emits a durable tombstone event. CRM keeps the imported c
 
 All events use the shared durable RabbitMQ exchange and transactional outbox/inbox. Connector source records travel as bounded batches of at most 200 entries.
 
-| Event | Producer | Consumer | Purpose |
-| --- | --- | --- | --- |
-| `platform.business-profile-updated.v1` | platform | billing | Update the tenant-scoped seller identity projection used when issuing invoices |
-| `integrations.contacts-received.v1` | integrations | clients | Upsert contacts by source identity while preserving local CRM edits |
-| `integrations.sessions-synced.v1` | integrations | scheduling | Upsert the read-only external booking projection |
+| Event                                     | Producer     | Consumer            | Purpose                                                                                    |
+| ----------------------------------------- | ------------ | ------------------- | ------------------------------------------------------------------------------------------ |
+| `platform.business-profile-updated.v1`    | platform     | billing             | Update the tenant-scoped seller identity projection used when issuing invoices             |
+| `integrations.contacts-received.v1`       | integrations | clients             | Upsert contacts by source identity while preserving local CRM edits                        |
+| `integrations.sessions-synced.v1`         | integrations | scheduling          | Upsert the read-only external booking projection                                           |
 | `integrations.connection-disconnected.v1` | integrations | clients, scheduling | Tombstone the source, remove external session projections, and suppress delayed deliveries |
-| `clients.source-synced.v1` | clients | integrations | Record the latest CRM result for a delivered contact batch |
+| `clients.source-synced.v1`                | clients      | integrations        | Record the latest CRM result for a delivered contact batch                                 |
 
 The integrations service checks the entitlement snapshot saved when a connection was last changed before dispatching background and webhook data. Manual connector mutations use the currently verified signed request context. The platform does not yet publish entitlement changes; an administrator changing entitlements outside the current platform APIs must reconnect or update the affected source before its background dispatch snapshot changes.
 
