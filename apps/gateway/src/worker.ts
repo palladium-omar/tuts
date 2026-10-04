@@ -179,6 +179,22 @@ function responseWithCors(response: Response, origin?: string): Response {
   });
 }
 
+function canonicalPageRedirect(request: Request, url: URL, env: GatewayEnv): Response | undefined {
+  if (url.host !== "tuts-palladium.pages.dev" || !["GET", "HEAD"].includes(request.method)) return;
+  const destination = request.headers.get("sec-fetch-dest");
+  const pageNavigation = destination === "document" || (!destination &&
+    (request.method === "HEAD" || request.headers.get("accept")?.includes("text/html")));
+  if (!pageNavigation || /^\/(?:api|health|_next)(?:\/|$)/i.test(decodeURIComponent(url.pathname))) return;
+  const configured = new URL(env.PUBLIC_APP_URL);
+  if (configured.protocol !== "https:" || configured.host !== "tuts.palladiumscholars.com") return;
+  const target = new URL("https://tuts.palladiumscholars.com");
+  // Assign components to a fixed origin: a pathname beginning // must never
+  // become a scheme-relative URL pointing at a caller-selected hostname.
+  target.pathname = url.pathname;
+  target.search = url.search;
+  return new Response(null, { status: 308, headers: { location: target.href } });
+}
+
 async function route(request: Request, env: GatewayEnv): Promise<Response> {
   const url = new URL(request.url);
   if (!safePath(url.pathname)) return notFound();
@@ -198,7 +214,7 @@ async function route(request: Request, env: GatewayEnv): Promise<Response> {
   if (url.pathname === "/health")
     return decorate(Response.json({ service: "gateway", status: "ok" }));
   if (!url.pathname.startsWith("/api/") && url.pathname !== "/api")
-    return decorate(await env.ASSETS.fetch(request));
+    return decorate(canonicalPageRedirect(request, url, env) ?? await env.ASSETS.fetch(request));
   if (!serviceNames.includes(service as (typeof serviceNames)[number])) return decorate(notFound());
   if (!hook && !path.startsWith("/v1/") && !(service === "platform" && path.startsWith("/auth/")))
     return decorate(notFound());

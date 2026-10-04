@@ -47,7 +47,10 @@ After DNS resolves and Pages reports `active`, switch application/auth origins a
 ```sh
 node scripts/cloudflare.mjs init --ingress pages --pages-project tuts-palladium --custom-domain tuts.palladiumscholars.com --public-url 'https://tuts.palladiumscholars.com'
 node scripts/cloudflare.mjs config
-node scripts/cloudflare.mjs deploy
+pnpm --filter @palladium/gateway build
+XDG_CONFIG_HOME="$PWD/.cloudflare/cli-config" node scripts/cloudflare.mjs deploy
 ```
 
 The manifest change preserves existing credentials. It does not itself associate a Pages domain or change DNS. Confirm HTTPS and the ordinary browser authentication flow on the custom hostname before reporting deployment complete.
+
+Once the final origin is configured and the gateway is deployed, ordinary page navigation from `tuts-palladium.pages.dev` redirects with HTTP 308 to `tuts.palladiumscholars.com`, preserving its path and query. The redirect uses a fixed destination origin and leaves API, health, private/runtime, and asset handling unchanged. It remains inactive while the manifest uses the staging origin, so activate it only after DNS and HTTPS are ready.
