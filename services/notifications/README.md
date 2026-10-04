@@ -2,6 +2,32 @@
 
 Independent NestJS process on port 4007 with its own PostgreSQL database. All domain tables force tenant RLS. HTTP calls need a gateway-signed business context and the `notifications` entitlement. Existing activity intents remain separate from campaign delivery.
 
+## System password recovery email
+
+Identity mail uses a separate system capability and provider interface in `src/auth-mail-providers.ts`. It does not read business communication connections, their credentials, campaign consent, or `ALLOW_OUTBOUND_DELIVERY`. Enabling recovery email leaves campaign delivery subject to its own gate. No database, queue, activity intent or campaign is created for a recovery message.
+
+Configure the notifications service with:
+
+- `AUTH_MAIL_ENABLED`: enabled only when exactly `true`; absent/other values disable sending.
+- `AUTH_MAIL_PROVIDER`: currently only `resend` is implemented. Other values report unavailable.
+- `AUTH_MAIL_FROM`: a valid sender mailbox, optionally formatted as `Tuts <mailbox@example.com>`; the sender domain must be authorized in the system Resend account.
+- `AUTH_MAIL_API_KEY`: the dedicated system Resend API key. Never use a tenant connection's credentials.
+- `AUTH_MAIL_INTERNAL_SECRET`: the same dedicated secret on platform and notifications, 32–512 characters using letters, numbers, `+`, `/`, `_`, `=`, or `-`.
+- `PUBLIC_APP_URL`: the trusted HTTPS app origin, such as `https://tuts.palladiumscholars.com`, with no URL credentials, path, query, fragment or nonstandard port. Platform must use the same app origin and a 1,800-second reset-token expiry.
+
+Platform calls notifications through its private `NOTIFICATIONS` service binding in Workers, or `NOTIFICATIONS_URL` under Node, using `serviceFetch`; it forwards no tenant or browser authentication. Both routes below require `X-Auth-Mail-Secret`, checked using fixed-size SHA-256 digests and `timingSafeEqual`. Nest's `@Public` bypasses the tenant JWT only. These routes are excluded from OpenAPI and must never be routed by the public gateway; Workers must retain private-only ingress/service bindings.
+
+| Method | Private route | Request / response |
+| ------ | ------------- | ------------------ |
+| GET | `/internal/auth-mail/status` | `{enabled,available,provider}`; availability means enabled with valid local configuration, not a verified provider credential or delivered email |
+| POST | `/internal/auth-mail/password-reset` | Exact JSON `{recipientEmail,token}`; verified provider acceptance returns HTTP 200 `{accepted:true,messageId}` |
+
+The POST accepts one bounded mailbox and a 16–512 character alphanumeric, underscore or hyphen token. It requires JSON and rejects unknown fields and raw bodies above 2 KiB. The service builds the fixed link `PUBLIC_APP_URL/reset-password#token=<URL-encoded token>` and the subject/text “Reset your Tuts password,” including a 30-minute expiry notice. Callers cannot provide an arbitrary link, subject, template, sender, provider or business ID. Token validation/expiry/consumption remain platform responsibilities.
+
+The Resend adapter posts only to `https://api.resend.com/emails`, rejects redirects, caps response data at 16 KiB, and requires a nonempty provider message ID. It uses a five-second attempt deadline, a twelve-second overall deadline and at most two attempts for network failures or HTTP 408/429/5xx. Both attempts carry the same `Idempotency-Key`, derived from SHA-256 of the recipient/token pair. Definite rejections, malformed acceptance responses and oversized responses are not retried. Credentials, bodies, reset links, tokens and provider error content are never logged or returned. Failures use generic safe 400/401/502/503 errors.
+
+Platform checks readiness before all recovery requests, including requests for unknown accounts, then uses BetterAuth's native callback. A failure after readiness preserves BetterAuth's generic public confirmation to avoid account enumeration; that confirmation is not a delivery receipt. Only the private POST acknowledges provider acceptance, which still does not establish inbox delivery. There is no durable recovery-email queue, webhook, reconciliation or resend history. Credentials and sender authorization must be configured separately; no provider call is made by the status route.
+
 ## Environment and delivery gate
 
 Common runtime configuration: `DATABASE_URL`, `RABBITMQ_URL`, `CONTEXT_PUBLIC_KEY`, optional `PORT`. Communications additionally use:

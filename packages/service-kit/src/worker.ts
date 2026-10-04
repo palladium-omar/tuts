@@ -51,6 +51,10 @@ export function createWorkerService(options: WorkerServiceOptions) {
   }
   return {
     async fetch(request: Request, bindings: CloudflareBindings, context?: unknown): Promise<Response> {
+      const backgroundContext = context && typeof context === 'object' &&
+        'waitUntil' in context && typeof context.waitUntil === 'function'
+        ? { waitUntil: context.waitUntil.bind(context) as (promise: Promise<unknown>) => void }
+        : undefined;
       return withCloudflareInvocation(bindings, async () => {
         const tick = new URL(request.url).pathname === '/__runtime/tick';
         if (tick && (request.method !== 'POST' || !authorizedTick(request, bindings))) {
@@ -72,7 +76,7 @@ export function createWorkerService(options: WorkerServiceOptions) {
           catch { console.warn(`[${options.name}] outbox publication deferred`); }
         }
         return new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers });
-      });
+      }, new URL(request.url).pathname === '/__runtime/tick' ? undefined : backgroundContext);
     },
     async queue(batch: QueueBatch, bindings: CloudflareBindings): Promise<void> {
       await withCloudflareInvocation(bindings, async () => {

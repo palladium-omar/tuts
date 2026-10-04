@@ -1,4 +1,5 @@
 "use client";
+import "./globals.css";
 import {
   useEffect,
   useMemo,
@@ -353,6 +354,11 @@ function Registration({
               <ArrowRight size={17} />
             </button>
           </form>
+          {!register && (
+            <p className="small-note">
+              <a href="/forgot-password">Forgot password?</a>
+            </p>
+          )}
           <button
             className="link"
             onClick={() => {

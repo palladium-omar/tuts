@@ -6,6 +6,8 @@ The current product is a staff web app with a local preview, a container deploym
 
 The original local account and four owned workspaces have been restored to the hosted databases, including CRM, sessions, learning and billing records. See [data migration and recovery](docs/data-migration.md) for the backup, maintenance and integrity checks. Existing passwords were preserved; old browser sessions were not transferred.
 
+Password recovery now includes a sign-in link, request/reset pages, expiring single-use links, password confirmation, session revocation and shared rate limits. **Automatic recovery email is disabled until a real system sender is configured.** An authorized operator can issue and deliver a recovery link separately. See [password recovery](docs/architecture/password-recovery.md) for service contracts, sender setup and the operational limitation.
+
 ## What works today
 
 | Area          | Delivered                                                                                                                                                                               | Not delivered yet                                                                                            |
@@ -113,6 +115,7 @@ Read the contracts before extending a service:
 8. [Connector protocols, sync APIs, and event flow](docs/architecture/connectors.md)
 9. [CRM columns and communications](docs/architecture/crm-communications.md)
 10. [Monthly billing and dashboard](docs/architecture/monthly-billing.md)
+11. [Password recovery and system email](docs/architecture/password-recovery.md)
 
 These pages preserve the intended architecture and clearly scoped future requirements; they do not assert that every described capability is implemented. Check **What works today** above and each service README for current service behavior.
 

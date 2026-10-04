@@ -24,6 +24,21 @@ export class AuthController {
     // and explicitly reuse Nest's parsed body rather than a consumed stream.
     const suffix = req.originalUrl.replace(/^\/auth(?=\/|\?|$)/, "");
     const url = `${this.identity.gatewayUrl}/api/platform/auth${suffix}`;
+    // Match the normalized URL that the native handler receives, including
+    // dot-segment normalization, so alternate paths cannot skip this guard.
+    const recoveryPath = new URL(url).pathname
+      .replace(/^\/api\/platform\/auth(?=\/|$)/, "")
+      .replace(/\/+$/, "");
+    if (
+      req.method === "POST" &&
+      ["/request-password-reset", "/reset-password"].includes(recoveryPath)
+    ) {
+      // Recovery is cookie-independent, but still requires our configured app
+      // Origin in addition to BetterAuth's own CSRF and trusted-origin checks.
+      this.identity.assertMutationOrigin(req);
+      if (recoveryPath === "/request-password-reset")
+        await this.identity.assertPasswordRecoveryAvailable();
+    }
     const hasBody = req.method !== "GET" && req.method !== "HEAD";
     const headers = fromNodeHeaders(req.headers);
     headers.delete("content-length");

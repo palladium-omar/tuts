@@ -29,6 +29,7 @@ export function validateDeployment(input, remote = false) {
   const config = { prefix: 'tuts', accountId: '', ingress: 'worker', ...input };
   if (!/^[a-z][a-z0-9-]{0,29}$/.test(config.prefix)) fail('prefix must be a lowercase resource name, at most 30 characters');
   if (!['worker', 'pages'].includes(config.ingress)) fail('ingress must be worker or pages');
+  if (config.authMailEnabled !== undefined && typeof config.authMailEnabled !== 'boolean') fail('authMailEnabled must be a boolean');
   if (config.ingress === 'pages') {
     if (typeof config.pagesProject !== 'string' || !/^[a-z\d](?:[a-z\d-]{0,56}[a-z\d])?$/.test(config.pagesProject)) fail('pagesProject must be a lowercase Pages project name, at most 58 characters');
   }
@@ -54,14 +55,14 @@ export function freshSecrets(existing = {}) {
     defaults.CONTEXT_PRIVATE_KEY = keys.privateKey;
     defaults.CONTEXT_PUBLIC_KEY = keys.publicKey;
   }
-  for (const name of ['PLATFORM_INTERNAL_SECRET', 'INTERNAL_RUNTIME_SECRET', 'BETTER_AUTH_SECRET']) defaults[name] = token();
+  for (const name of ['PLATFORM_INTERNAL_SECRET', 'INTERNAL_RUNTIME_SECRET', 'BETTER_AUTH_SECRET', 'AUTH_MAIL_INTERNAL_SECRET']) defaults[name] = token();
   for (const name of ['PAYMENT_ENCRYPTION_KEY', 'INTEGRATIONS_ENCRYPTION_KEY', 'COMMUNICATIONS_ENCRYPTION_KEY']) defaults[name] = randomBytes(32).toString('base64');
   const secrets = { ...defaults, ...existing, databasePasswords: { ...existing.databasePasswords }, databaseUrls: { ...existing.databaseUrls } };
   for (const name of serviceNames) secrets.databasePasswords[name] ??= token();
   return secrets;
 }
 function checkSecrets(secrets) {
-  for (const name of ['CONTEXT_PRIVATE_KEY', 'CONTEXT_PUBLIC_KEY', 'PLATFORM_INTERNAL_SECRET', 'INTERNAL_RUNTIME_SECRET', 'BETTER_AUTH_SECRET', 'PAYMENT_ENCRYPTION_KEY', 'INTEGRATIONS_ENCRYPTION_KEY', 'COMMUNICATIONS_ENCRYPTION_KEY']) {
+  for (const name of ['CONTEXT_PRIVATE_KEY', 'CONTEXT_PUBLIC_KEY', 'PLATFORM_INTERNAL_SECRET', 'INTERNAL_RUNTIME_SECRET', 'BETTER_AUTH_SECRET', 'AUTH_MAIL_INTERNAL_SECRET', 'PAYMENT_ENCRYPTION_KEY', 'INTEGRATIONS_ENCRYPTION_KEY', 'COMMUNICATIONS_ENCRYPTION_KEY']) {
     if (typeof secrets[name] !== 'string' || secrets[name].length < 32) fail(`Missing or invalid ${name} in .cloudflare/secrets.json; run init`);
   }
   for (const name of serviceNames) if (!/^[a-f\d]{48}$/i.test(secrets.databasePasswords?.[name] ?? '')) fail(`Missing or invalid database password for ${name}; run init`);
@@ -79,6 +80,8 @@ async function settings(remote = false) {
   const secrets = await json(secretsPath);
   await chmod(secretsPath, 0o600);
   checkSecrets(secrets);
+  if (config.authMailEnabled && (secrets.AUTH_MAIL_PROVIDER !== 'resend' || !secrets.AUTH_MAIL_FROM || !secrets.AUTH_MAIL_API_KEY))
+    fail('Automatic auth mail requires a configured Resend sender and API key before authMailEnabled can be true');
   return { config, secrets };
 }
 export function queueName(config, name, deadLetter = false) { return `${config.prefix}-events-${name}${deadLetter ? '-dead' : ''}`; }
@@ -103,10 +106,12 @@ export function createConfigs(configInput, subscriptions, projectRoot = root) {
     const consumes = subscriptions.some(subscription => subscription.consumer === name);
     output[name] = {
       ...common, name: `${config.prefix}-${name}`, main: join(projectRoot, 'services', name, 'dist/worker.js'), workers_dev: false,
+      ...(['platform', 'notifications'].includes(name) ? { vars: { ...common.vars, AUTH_MAIL_ENABLED: config.authMailEnabled ? 'true' : 'false' } } : {}),
       queues: { ...(producers.length ? { producers } : {}), ...(consumes ? { consumers: [{ queue: queueName(config, name), max_batch_size: 5, max_batch_timeout: 5, max_retries: 5, dead_letter_queue: queueName(config, name, true) }] } : {}) },
       r2_buckets: [{ binding: 'EVENT_PAYLOADS', bucket_name: `${config.prefix}-event-payloads` }, ...(name === 'learning' ? [{ binding: 'UPLOADS', bucket_name: `${config.prefix}-uploads` }] : [])],
       ...(name === 'billing' ? { services: [{ binding: 'SCHEDULING', service: `${config.prefix}-scheduling` }] } : {}),
       ...(name === 'notifications' ? { services: [{ binding: 'CLIENTS', service: `${config.prefix}-clients` }] } : {}),
+      ...(name === 'platform' ? { services: [{ binding: 'NOTIFICATIONS', service: `${config.prefix}-notifications` }] } : {}),
     };
   }
   output.gateway = {
@@ -182,6 +187,10 @@ export function secretsFor(name, secrets) {
   const value = { CONTEXT_PUBLIC_KEY: secrets.CONTEXT_PUBLIC_KEY, INTERNAL_RUNTIME_SECRET: secrets.INTERNAL_RUNTIME_SECRET, DATABASE_URL: secrets.databaseUrls?.[name] };
   if (!value.DATABASE_URL) fail(`Missing ${name} database URL; run migrate before deploy`);
   if (name === 'platform') Object.assign(value, { PLATFORM_INTERNAL_SECRET: secrets.PLATFORM_INTERNAL_SECRET, BETTER_AUTH_SECRET: secrets.BETTER_AUTH_SECRET });
+  if (['platform', 'notifications'].includes(name)) value.AUTH_MAIL_INTERNAL_SECRET = secrets.AUTH_MAIL_INTERNAL_SECRET;
+  if (name === 'notifications') for (const key of ['AUTH_MAIL_PROVIDER', 'AUTH_MAIL_FROM', 'AUTH_MAIL_API_KEY']) {
+    if (typeof secrets[key] === 'string' && secrets[key]) value[key] = secrets[key];
+  }
   const encryption = { payments: 'PAYMENT_ENCRYPTION_KEY', integrations: 'INTEGRATIONS_ENCRYPTION_KEY', notifications: 'COMMUNICATIONS_ENCRYPTION_KEY' }[name];
   if (encryption) value[encryption] = secrets[encryption];
   return value;

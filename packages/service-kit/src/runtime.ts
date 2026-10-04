@@ -2,8 +2,20 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { Pool } from 'pg';
 
 export type CloudflareBindings = Record<string, unknown>;
-type Invocation = { bindings: CloudflareBindings; pools: Map<object, Pool> };
+type Invocation = { bindings: CloudflareBindings; pools: Map<object, Pool>; backgroundTasks: Set<Promise<void>> };
+type BackgroundContext = { waitUntil(promise: Promise<unknown>): void };
 const invocation = new AsyncLocalStorage<Invocation>();
+const nodeBackgroundTasks = new Set<Promise<void>>();
+
+/** Keep asynchronous identity delivery alive after the HTTP response. */
+export function registerBackgroundTask(promise: Promise<unknown>): void {
+  const tasks = invocation.getStore()?.backgroundTasks ?? nodeBackgroundTasks;
+  const retained = promise.then(() => {}, () => {
+    console.warn('Background service task unavailable');
+  });
+  tasks.add(retained);
+  void retained.then(() => { tasks.delete(retained); });
+}
 
 export function isCloudflareRuntime(): boolean {
   return Boolean(invocation.getStore()) || process.env.TUTS_RUNTIME === 'cloudflare';
@@ -13,11 +25,23 @@ export function currentCloudflareBindings(): CloudflareBindings | undefined {
 }
 
 // Kept out of the Node bootstrap path. Every event owns and closes its sockets.
-export async function withCloudflareInvocation<T>(bindings: CloudflareBindings, work: () => Promise<T>): Promise<T> {
-  return invocation.run({ bindings, pools: new Map() }, async () => {
+export async function withCloudflareInvocation<T>(bindings: CloudflareBindings, work: () => Promise<T>, context?: BackgroundContext): Promise<T> {
+  return invocation.run({ bindings, pools: new Map(), backgroundTasks: new Set() }, async () => {
     const scope = invocation.getStore()!;
     try { return await work(); }
-    finally { await Promise.all([...scope.pools.values()].map(pool => pool.end())); }
+    finally {
+      const cleanup = async () => {
+        while (scope.backgroundTasks.size) await Promise.all([...scope.backgroundTasks]);
+        await Promise.all([...scope.pools.values()].map(pool => pool.end()));
+      };
+      if (scope.backgroundTasks.size && context) {
+        // Keep the invocation's sockets and service-binding work alive together.
+        // Only explicitly registered tasks change response cleanup semantics.
+        context.waitUntil(cleanup().catch(() => {
+          console.warn('Background service cleanup unavailable');
+        }));
+      } else await cleanup();
+    }
   });
 }
 

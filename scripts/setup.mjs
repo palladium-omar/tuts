@@ -26,6 +26,8 @@ const defaults = {
   CONTEXT_PUBLIC_KEY: publicKey.replace(/\n/g, "\\n"),
   PLATFORM_INTERNAL_SECRET: token(),
   BETTER_AUTH_SECRET: token(),
+  AUTH_MAIL_INTERNAL_SECRET: token(),
+  AUTH_MAIL_ENABLED: "false",
   PAYMENT_ENCRYPTION_KEY: randomBytes(32).toString("base64"),
   INTEGRATIONS_ENCRYPTION_KEY: randomBytes(32).toString("base64"),
   COMMUNICATIONS_ENCRYPTION_KEY: randomBytes(32).toString("base64"),

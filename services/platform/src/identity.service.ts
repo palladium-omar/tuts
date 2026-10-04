@@ -3,9 +3,16 @@ import {
   Inject,
   Injectable,
   OnModuleInit,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from "@nestjs/common";
-import { Database } from "@palladium/service-kit";
+import {
+  currentCloudflareBindings,
+  Database,
+  isCloudflareRuntime,
+  registerBackgroundTask,
+  serviceFetch,
+} from "@palladium/service-kit";
 import { betterAuth, type BetterAuthOptions } from "better-auth";
 import { fromNodeHeaders } from "better-auth/node";
 import type { Request } from "express";
@@ -53,13 +60,44 @@ export class IdentityService implements OnModuleInit {
       baseURL: this.gatewayUrl,
       basePath: "/api/platform/auth",
       trustedOrigins: this.trustedOrigins,
+      // Auth errors can contain request callback URLs. Keep credentials and
+      // recovery links out of framework logs; delivery emits only a fixed message.
+      logger: { disabled: true },
       emailAndPassword: {
         enabled: true,
         minPasswordLength: 8,
         maxPasswordLength: 128,
+        resetPasswordTokenExpiresIn: 30 * 60,
+        revokeSessionsOnPasswordReset: true,
+        sendResetPassword: async ({ user, token }) => {
+          try {
+            this.assertAuthMailConfigured();
+            const response = await serviceFetch(
+              "notifications",
+              "/internal/auth-mail/password-reset",
+              {
+                method: "POST",
+                headers: this.authMailHeaders(),
+                body: JSON.stringify({ recipientEmail: user.email, token }),
+                signal: AbortSignal.timeout(15_000),
+              },
+            );
+            if (!response.ok) throw new Error("Recovery delivery unavailable");
+            const receipt = (await response.json()) as { accepted?: unknown };
+            if (receipt?.accepted !== true)
+              throw new Error("Recovery delivery unavailable");
+          } catch {
+            // BetterAuth returns its generic success even if delivery fails.
+            // Exposing failures only for existing users would disclose accounts.
+            console.warn("Password recovery delivery unavailable");
+          }
+        },
       },
       session: { expiresIn: 60 * 60 * 24 * 7, cookieCache: { enabled: false } },
       advanced: {
+        // The runtime retains delivery promises and Worker invocation resources
+        // after returning the account-neutral password-recovery response.
+        backgroundTasks: { handler: registerBackgroundTask },
         // Public URL is deployment configuration, never forwarded host/protocol input.
         trustedProxyHeaders: false,
         // The private ingress must overwrite this header with the actual client IP.
@@ -67,7 +105,17 @@ export class IdentityService implements OnModuleInit {
         defaultCookieAttributes: { path: "/", httpOnly: true, sameSite: "lax" },
         useSecureCookies: this.gatewayUrl.startsWith("https:"),
       },
-      rateLimit: { enabled: true, window: 60, max: 30 },
+      rateLimit: {
+        enabled: true,
+        storage: "database",
+        window: 60,
+        max: 30,
+        customRules: {
+          "/request-password-reset": { window: 300, max: 3 },
+          "/reset-password": { window: 300, max: 5 },
+          "/reset-password/*": { window: 300, max: 5 },
+        },
+      },
     };
     this.auth = betterAuth(options);
   }
@@ -100,6 +148,53 @@ export class IdentityService implements OnModuleInit {
     const origin = request.headers.origin;
     if (!origin || !this.trustedOrigins.includes(origin))
       throw new ForbiddenException("A trusted Origin is required");
+  }
+
+  private authMailHeaders() {
+    return {
+      "Content-Type": "application/json",
+      "X-Auth-Mail-Secret": process.env.AUTH_MAIL_INTERNAL_SECRET || "",
+    };
+  }
+
+  private assertAuthMailConfigured() {
+    const secret = process.env.AUTH_MAIL_INTERNAL_SECRET;
+    const binding = currentCloudflareBindings()?.NOTIFICATIONS as
+      | { fetch?: unknown }
+      | undefined;
+    const transportConfigured = isCloudflareRuntime()
+      ? typeof binding?.fetch === "function"
+      : Boolean(process.env.NOTIFICATIONS_URL);
+    if (
+      process.env.AUTH_MAIL_ENABLED !== "true" ||
+      !secret ||
+      !/^[A-Za-z0-9_+/=-]{32,512}$/.test(secret) ||
+      !transportConfigured
+    ) {
+      throw new ServiceUnavailableException("Password recovery is temporarily unavailable");
+    }
+  }
+
+  async assertPasswordRecoveryAvailable() {
+    // Run before email validation/account lookup, including unknown addresses.
+    this.assertAuthMailConfigured();
+    try {
+      const response = await serviceFetch(
+        "notifications",
+        "/internal/auth-mail/status",
+        {
+          method: "GET",
+          headers: this.authMailHeaders(),
+          signal: AbortSignal.timeout(5_000),
+        },
+      );
+      if (!response.ok) throw new Error("Recovery delivery unavailable");
+      const status = (await response.json()) as { available?: unknown };
+      if (status?.available !== true)
+        throw new Error("Recovery delivery unavailable");
+    } catch {
+      throw new ServiceUnavailableException("Password recovery is temporarily unavailable");
+    }
   }
 
   assertInternalSecret(request: Request) {

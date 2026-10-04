@@ -80,9 +80,12 @@ const launches = [...names, "gateway", "web"].map((name, index) => {
       select([
         "PLATFORM_INTERNAL_SECRET",
         "BETTER_AUTH_SECRET",
+        "AUTH_MAIL_INTERNAL_SECRET",
+        "AUTH_MAIL_ENABLED",
         "PUBLIC_APP_URL",
         "PUBLIC_GATEWAY_URL",
       ]),
+      { NOTIFICATIONS_URL: configuration.NOTIFICATIONS_URL || "http://127.0.0.1:4007" },
     );
   if (name === "payments")
     Object.assign(
@@ -98,7 +101,7 @@ const launches = [...names, "gateway", "web"].map((name, index) => {
   if (name === "notifications") {
     Object.assign(
       env,
-      select(["COMMUNICATIONS_ENCRYPTION_KEY", "ALLOW_OUTBOUND_DELIVERY"]),
+      select(["COMMUNICATIONS_ENCRYPTION_KEY", "ALLOW_OUTBOUND_DELIVERY", "PUBLIC_APP_URL", "AUTH_MAIL_INTERNAL_SECRET", "AUTH_MAIL_ENABLED", "AUTH_MAIL_PROVIDER", "AUTH_MAIL_FROM", "AUTH_MAIL_API_KEY"]),
     );
     env.CLIENTS_URL = configuration.CLIENTS_URL || "http://127.0.0.1:4002";
   }

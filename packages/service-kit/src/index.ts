@@ -20,7 +20,7 @@ import { ContextGuard, OPTIONS, Public, type ServiceOptions } from "./auth.js";
 export { Database } from "./database.js";
 export { EventBus, emitEvent } from "./events.js";
 export { Public, Roles, CurrentContext } from "./auth.js";
-export { isCloudflareRuntime, currentCloudflareBindings, serviceFetch } from "./runtime.js";
+export { isCloudflareRuntime, currentCloudflareBindings, serviceFetch, registerBackgroundTask } from "./runtime.js";
 export type { CloudflareBindings } from "./runtime.js";
 export type { ServiceOptions } from "./auth.js";
 export type { RequestContext, PlatformEvent } from "@palladium/contracts";

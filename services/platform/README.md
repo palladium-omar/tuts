@@ -33,6 +33,8 @@ Gateway external prefix is `/api/platform`; it removes this prefix upstream.
 - `POST /auth/sign-up/email`: Better Auth `{name,email,password}`, 8–128 character password; no composition rules.
 - `POST /auth/sign-in/email`: Better Auth `{email,password}`.
 - `POST /auth/sign-out`: revokes the current persistent session.
+- `POST /auth/request-password-reset`: native Better Auth `{email,redirectTo?}`; accepts a trusted app Origin. Returns the same generic success for an existing or unknown address when recovery delivery is configured, or a uniform 503 before email validation/account lookup when unavailable.
+- `POST /auth/reset-password`: native Better Auth `{token,newPassword}`; accepts a trusted app Origin. Tokens expire after 30 minutes, are consumed once, and a successful reset revokes all the user's sessions. Password limits remain 8–128 characters.
 - `GET /auth/get-session`: native Better Auth session response.
 - `GET /v1/session`: `{item:{user,expiresAt}}`, no session token.
 - `GET /v1/businesses`: `{items:[{id,name,role,entitlements,settings,createdAt}]}`, maximum 100.
@@ -71,8 +73,54 @@ provider configuration. Production subscription/admin provisioning is not
 implemented, and there is no business self-service entitlement endpoint. The global identity
 business directory contains only user/business IDs for preselection discovery;
 role and entitlement reads always require tenant transactions and membership.
-No membership invitations, password recovery email transport, email verification
-transport or production subscription administration are implemented.
+No membership invitations, email verification transport or production
+subscription administration are implemented.
+
+## Password recovery delivery
+
+Platform sends only `{recipientEmail,token}` to the private Notifications endpoint
+`POST /internal/auth-mail/password-reset` using `serviceFetch`. Workers require a
+`NOTIFICATIONS` service binding; local Node requires `NOTIFICATIONS_URL`.
+Set `AUTH_MAIL_ENABLED=true` exactly and a shared `AUTH_MAIL_INTERNAL_SECRET`
+(32–512 base64/base64url/hex characters) on Platform and Notifications. Keep this
+secret limited to those two services. Notifications owns the global transactional
+provider and constructs `/reset-password#token=...` from its configured public app
+origin; user callback URLs never control the delivery link. This configuration
+is independent of tenant marketing delivery and `ALLOW_OUTBOUND_DELIVERY`.
+
+Every recovery request checks private `GET /internal/auth-mail/status` before
+account lookup and requires `available:true`. Disabled mail, invalid/missing
+configuration, and a failed status transport return the same generic 503 for all
+email inputs. The status check establishes configured availability, not a
+guarantee that the provider will accept a later message. Better Auth deliberately
+preserves its generic success if delivery subsequently fails, preventing an
+existing-account-only error response from exposing account existence. A failure
+emits only a fixed, redacted server warning; never log token links, passwords or
+provider responses. The public endpoint never returns a recovery token.
+
+Delivery runs through Better Auth's background-task handler, so provider latency
+does not delay only existing-account responses. Workers retain delivery and
+invocation pool cleanup with `waitUntil`; without that context they await the
+tasks before cleanup. Node retains promises until completion in the running
+service process. This is bounded asynchronous delivery, not a durable queue:
+process termination can lose an in-flight message. Provider acceptance and inbox
+delivery still require separate evidence.
+
+Apply `004_auth_rate_limit.sql` before deploying this configuration. Better Auth
+stores auth limits in the platform PostgreSQL database, including recovery
+request limits of 3 per 5 minutes per trusted client IP and reset limits of 5 per
+5 minutes. These limits persist across Worker invocations. The ingress must
+continue replacing `X-Real-IP` with the real client address.
+
+For an authorized administrative recovery when transactional mail is unavailable,
+build Platform and run `node scripts/issue-password-reset.mjs EMAIL`. The command
+uses the configured isolated platform role in `.cloudflare/secrets.json`, verifies
+TLS and role privileges, and calls native Better Auth issuance with a local file
+delivery callback. It saves the single-use link in an exclusive mode-0600 JSON
+file under `.cloudflare/auth-mail/` and prints only the file path. An optional
+`--delivery-file PRIVATE_PATH` selects another private output file. It neither
+changes the user's password nor sends email; only an explicitly authorized
+operator should handle delivery. Never commit or paste this file into logs.
 
 ## Checks
 

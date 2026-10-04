@@ -33,6 +33,7 @@ app.use(
         fixRequestBody(proxyReq, req);
         proxyReq.removeHeader("cookie");
         proxyReq.removeHeader("x-platform-internal-secret");
+        proxyReq.removeHeader("x-auth-mail-secret");
         proxyReq.removeHeader("x-business-id");
       },
       error(_error, _req, res) {
@@ -104,6 +105,7 @@ for (const name of serviceNames) {
       proxyReq(proxyReq, req) {
         proxyReq.removeHeader("authorization");
         proxyReq.removeHeader("x-platform-internal-secret");
+        proxyReq.removeHeader("x-auth-mail-secret");
         proxyReq.removeHeader("x-user-id");
         proxyReq.removeHeader("x-role");
         const token = tokens.get(req as Request);

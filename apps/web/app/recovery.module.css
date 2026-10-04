@@ -1,0 +1,35 @@
+.page {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 32px 20px;
+  background: #f7f8f5;
+  color: #202b28;
+  font: 15px system-ui, sans-serif;
+}
+
+.page, .page * { box-sizing: border-box; }
+.card {
+  width: 100%;
+  max-width: 440px;
+  padding: 32px;
+  border: 1px solid #dce2da;
+  border-radius: 14px;
+  background: #fff;
+}
+.wordmark { margin-bottom: 28px; font-size: 28px; font-weight: 800; color: #315d4d; }
+.card h1 { margin: 0 0 16px; font: 700 28px/1.25 system-ui, sans-serif; letter-spacing: -0.7px; }
+.card p { margin: 0 0 18px; line-height: 1.6; }
+.card fieldset { display: flex; flex-direction: column; padding: 0; margin: 24px 0 0; border: 0; min-width: 0; }
+.card label { display: block; margin: 0 0 8px; font-weight: 600; font-size: 14px; }
+.card input { width: 100%; min-width: 0; padding: 12px; margin: 0 0 18px; border: 1px solid #acbdb4; border-radius: 7px; color: #202b28; background: #fff; font: inherit; }
+.card button, .primaryLink { display: block; padding: 12px 16px; border: 0; border-radius: 8px; text-align: center; font: 600 15px system-ui, sans-serif; text-decoration: none; color: #fff; background: #315d4d; cursor: pointer; }
+.card button:hover, .primaryLink:hover { background: #254d3f; }
+.card button:disabled { opacity: 0.65; cursor: wait; }
+.card a:not(.primaryLink) { color: #315d4d; }
+.card a:focus-visible, .card button:focus-visible, .card input:focus-visible { outline: 3px solid #315d4d; outline-offset: 3px; }
+.card .hint { font-size: 12px; color: #52665c; margin-top: -10px; }
+.card .error { padding: 12px 14px; background: #fceeea; color: #92392d; border-radius: 8px; }
+.card .back { margin-top: 22px; margin-bottom: 0; font-size: 14px; }
+.srOnly { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+@media (max-width: 480px) { .card { padding: 25px 22px; } }

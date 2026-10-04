@@ -27,7 +27,7 @@ const BODY_LIMIT = 25 * 1024 * 1024;
 const HOOK_BODY_LIMIT = 1024 * 1024;
 const keys = new WeakMap<GatewayEnv, ReturnType<typeof importPKCS8>>();
 const trustedHeaderNames = new Set([
-  "authorization", "cookie", "x-platform-internal-secret", "x-business-id",
+  "authorization", "cookie", "x-platform-internal-secret", "x-auth-mail-secret", "x-business-id",
   "x-user-id", "x-role", "x-entitlements", "x-context", "x-request-id",
   "x-real-ip", "forwarded", "host", "connection", "keep-alive",
   "proxy-authenticate", "proxy-authorization", "te", "trailer",
@@ -150,12 +150,16 @@ function copyResponseHeaders(response: Response): Headers {
   return headers;
 }
 
-function responseWithSecurityHeaders(response: Response): Response {
+function responseWithSecurityHeaders(response: Response, sensitive = false): Response {
   const headers = copyResponseHeaders(response);
   headers.set("Strict-Transport-Security", "max-age=31536000");
   headers.set("X-Content-Type-Options", "nosniff");
   headers.set("X-Frame-Options", "DENY");
-  headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+  headers.set("Referrer-Policy", sensitive ? "no-referrer" : "strict-origin-when-cross-origin");
+  if (sensitive) {
+    headers.set("Cache-Control", "no-store");
+    headers.set("Pragma", "no-cache");
+  }
   return new Response(response.body, {
     status: response.status, statusText: response.statusText, headers,
   });
@@ -304,7 +308,9 @@ export default {
     let response: Response;
     try { response = env.TUTS_MAINTENANCE === "true" ? maintenanceResponse(request, env) : await route(request, env); }
     catch { response = error(503, "service_unavailable", "Gateway is unavailable"); }
-    return responseWithSecurityHeaders(response);
+    const path = new URL(request.url).pathname;
+    const sensitive = /^\/(?:forgot-password|reset-password)(?:\/|$)/.test(path) || path.startsWith("/api/platform/auth/");
+    return responseWithSecurityHeaders(response, sensitive);
   },
   async scheduled(_event: unknown, env: GatewayEnv): Promise<void> {
     if (env.TUTS_MAINTENANCE === "true") return;
