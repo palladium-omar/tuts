@@ -48,3 +48,9 @@ Build: `pnpm --filter @palladium/integrations build`. No tests were added or run
 - [Calendly importing events and invitees](https://developer.calendly.com/update-your-system-with-data-from-scheduled-events-admins-only)
 - [Cal.com current account](https://cal.com/docs/api-reference/v2/me/get-my-profile)
 - [Cal.com bookings](https://cal.com/docs/api-reference/v2/bookings/get-all-bookings): current documentation requires `cal-api-version: 2026-05-01`, `cursor`, `limit` and singular status filters. `/v2/me` requires bearer authentication without a mandatory version header.
+
+
+## Cloudflare runtime
+
+`src/worker.ts` exports this domain as an independent Worker through the shared Nest runtime; `src/main.ts` remains the Node entrypoint. The service retains its own PostgreSQL database, signed caller context, tenant RLS and event contracts. Migrations are applied during deployment, outside requests. Worker secrets and bindings are supplied by the deployment configuration.
+The private runtime tick calls `ConnectionsService.poll()` on the central 15-minute cron; event subscriptions register without Node intervals or an initial poll. Cal.com and Calendly requests use fixed HTTPS origins through fetch, reject redirects, bound bodies to 2 MiB and retain a 15-second deadline. Inbound signed form hooks remain supported. Arbitrary JSON endpoint pulls are explicitly unavailable in Workers: node DNS lookup and HTTPS lookup pinning are unsupported there. They require an egress adapter that preserves public DNS validation and IP pinning; the Node transport keeps these checks. See [Cloudflare DNS support](https://developers.cloudflare.com/workers/runtime-apis/nodejs/dns/) and [HTTP request differences](https://developers.cloudflare.com/workers/runtime-apis/nodejs/http/).

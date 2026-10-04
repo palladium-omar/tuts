@@ -14,7 +14,7 @@ for(const service of services){
   for(const match of text.matchAll(/(?:from\s*|import\s*\(|require\s*\()\s*['"]([^'"]+)['"]/g)){
    const target=match[1];
    if(target.startsWith('.') && relative(serviceRoot,resolve(file,'..',target)).startsWith('..'))failures.push(`${relative(root,file)}: escapes service through ${target}`);
-   if(/^@palladium\//.test(target) && !['@palladium/contracts','@palladium/service-kit'].includes(target))failures.push(`${relative(root,file)}: cross-service import ${target}`);
+   if(/^@palladium\//.test(target) && !['@palladium/contracts','@palladium/service-kit'].some(pkg=>target===pkg || target.startsWith(`${pkg}/`)))failures.push(`${relative(root,file)}: cross-service import ${target}`);
   }
  }
 }

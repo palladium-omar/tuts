@@ -1,1 +1,35 @@
-{"name":"@palladium/service-kit","private":true,"version":"0.1.0","type":"module","exports":"./dist/index.js","types":"./dist/index.d.ts","scripts":{"build":"tsc -p tsconfig.json","typecheck":"tsc --noEmit -p tsconfig.json"},"dependencies":{"@palladium/contracts":"workspace:*","@nestjs/common":"^11.0.0","@nestjs/core":"^11.0.0","@nestjs/platform-express":"^11.0.0","@nestjs/swagger":"^11.0.0","reflect-metadata":"^0.2.2","rxjs":"^7.8.2","pg":"^8.16.3","zod":"^4.0.0","jose":"^6.0.0","amqplib":"^0.10.9"}}
+{
+  "name": "@palladium/service-kit",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./worker": {
+      "types": "./dist/worker.d.ts",
+      "import": "./dist/worker.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "tsx --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@palladium/contracts": "workspace:*",
+    "@nestjs/common": "^11.0.0",
+    "@nestjs/core": "^11.0.0",
+    "@nestjs/platform-express": "^11.0.0",
+    "@nestjs/swagger": "^11.0.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "pg": "^8.16.3",
+    "zod": "^4.0.0",
+    "jose": "^6.0.0",
+    "amqplib": "^0.10.9"
+  }
+}

@@ -4,6 +4,7 @@ import {
   createHash,
   randomBytes,
 } from "node:crypto";
+import { isCloudflareRuntime } from "@palladium/service-kit";
 import { lookup } from "node:dns/promises";
 import { request } from "node:https";
 import { isIP } from "node:net";
@@ -105,6 +106,7 @@ export async function safeJsonGet(
     throw new ConnectorError(
       "Endpoint must use HTTPS on port 443 without credentials",
     );
+  if (isCloudflareRuntime()) return cloudflareJsonGet(url.toString(), headers);
   const hostname = url.hostname.replace(/^\[|\]$/g, "");
   const addresses = isIP(hostname)
     ? [{ address: hostname, family: isIP(hostname) }]
@@ -174,4 +176,35 @@ export async function safeJsonGet(
     req.on("error", () => fail("Provider connection failed"));
     req.end();
   });
+}
+
+/** Workers cannot pin fetch DNS. Only immutable provider origins are allowed; arbitrary pulls fail closed. */
+export async function cloudflareJsonGet(input: string, headers: Record<string, string> = {}, transport: typeof fetch = fetch): Promise<any> {
+  const url = new URL(input);
+  if (url.username || url.password || url.hash || !["https://api.cal.com", "https://api.calendly.com"].includes(url.origin))
+    throw new ConnectorError("Custom endpoint pulls are unavailable on this runtime; a DNS-pinned egress adapter is required");
+  try {
+    const response = await transport(url.toString(), { headers: { Accept: "application/json", ...headers }, redirect: "error", signal: AbortSignal.timeout(15000) });
+    if (!response.ok) {
+      await response.body?.cancel();
+      throw new ConnectorError(response.status >= 300 && response.status < 400 ? "Endpoint redirects are not allowed" : `Provider request failed (HTTP ${response.status})`);
+    }
+    if (!response.body) throw new ConnectorError("Provider returned invalid JSON");
+    const reader = response.body.getReader(), chunks: Buffer[] = [];
+    let size = 0;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.length;
+        if (size > 2 * 1024 * 1024) { await reader.cancel(); throw new ConnectorError("Provider response exceeded 2 MB"); }
+        chunks.push(Buffer.from(value));
+      }
+    } finally { reader.releaseLock(); }
+    try { return JSON.parse(Buffer.concat(chunks).toString("utf8")); }
+    catch { throw new ConnectorError("Provider returned invalid JSON"); }
+  } catch (error) {
+    if (error instanceof ConnectorError) throw error;
+    throw new ConnectorError("Provider connection failed or timed out");
+  }
 }

@@ -76,6 +76,14 @@ All services: `DATABASE_URL`, `RABBITMQ_URL`, `CONTEXT_PUBLIC_KEY` (PEM, escaped
 
 Do not add guessed success stubs for external providers. A provider connection or capability that is not implemented must be returned as unavailable. External API credentials and production authorization are not supplied by this repository.
 
+## Cloudflare deployment adapter
+
+`services/<name>/src/app.ts` owns that service's controllers and providers. Its `main.ts` starts the existing Node process; its `worker.ts` uses `createWorkerService` from `@palladium/service-kit/worker`. Compile service TypeScript with `tsc` before Wrangler bundles the emitted JavaScript so Nest decorator metadata is retained.
+
+Workers use invocation-scoped PostgreSQL pools, private service bindings through `serviceFetch`, contract-derived Cloudflare Queue fanout, and the same transactional outbox/inbox. `currentCloudflareBindings` exposes runtime storage bindings to a service's own adapter. Learning alone owns its R2 binding. No service imports another service's application source.
+
+The public gateway's 15-minute schedule invokes private authenticated ticks on all eight services. A service's optional scheduled callback advances its own jobs; all ticks also recover pending outbox publication. Migrations run outside Workers. The [Cloudflare guide](../cloudflare-deployment.md) documents runtime configuration, provider limitations, costs, and deployment evidence.
+
 ## Agent boundaries
 
 Each delegated agent owns only its assigned service folders and may add service-specific README/tests there. Root owns apps, shared packages, infra, root manifests, CI, lockfile and architecture documents. No delegated agent commits, pushes, creates a repository or edits another agent's files.

@@ -18,6 +18,8 @@ import {
   type OnApplicationShutdown,
 } from "@nestjs/common";
 import {
+  isCloudflareRuntime,
+  serviceFetch,
   CurrentContext,
   Database,
   EventBus,
@@ -196,6 +198,7 @@ export class MonthlyService implements OnModuleInit, OnApplicationShutdown {
         parseBody(classSnapshotSchema, event.data),
       );
     });
+    if (isCloudflareRuntime()) return;
     void this.runAutomatic().catch(() => {
       console.warn(
         "[billing] initial automatic draft check failed; next check will retry",
@@ -320,20 +323,14 @@ export class MonthlyService implements OnModuleInit, OnApplicationShutdown {
       !authorization.startsWith("Bearer ")
     )
       throw new BadRequestException("Verified authorization required");
-    const base = process.env.SCHEDULING_URL;
-    if (!base)
-      throw new ServiceUnavailableException(
-        "Scheduling service URL is not configured",
-      );
-    const url = new URL("/v1/class-ledger", base);
-    url.searchParams.set("month", input.month);
-    url.searchParams.set("timeZone", timeZone);
+    const query = new URLSearchParams({ month: input.month, timeZone });
     const requestStartedAt = new Date();
     let response: Response;
     try {
-      response = await fetch(url, {
+      response = await serviceFetch("scheduling", `/v1/class-ledger?${query}`, {
         headers: { authorization },
         signal: AbortSignal.timeout(30000),
+        redirect: "error",
       });
     } catch {
       throw new ServiceUnavailableException(

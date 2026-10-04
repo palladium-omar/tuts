@@ -5,7 +5,7 @@ import {
   OnModuleInit,
   OnModuleDestroy,
 } from "@nestjs/common";
-import { Database, EventBus } from "@palladium/service-kit";
+import { Database, EventBus, isCloudflareRuntime } from "@palladium/service-kit";
 import type { PoolClient } from "pg";
 import { consentSchema } from "./communication-schemas.js";
 import {
@@ -76,6 +76,7 @@ export class CommunicationWorker implements OnModuleInit, OnModuleDestroy {
           throw new Error("consent_producer_invalid");
         return applyConsent(event, tx);
       });
+    if (isCloudflareRuntime()) return;
     this.interval = setInterval(() => void this.tick(), 2000);
     this.interval.unref();
   }

@@ -1,4 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { isCloudflareRuntime } from "@palladium/service-kit";
 import { lookup } from "node:dns/promises";
 import { request } from "node:https";
 import { isIP } from "node:net";
@@ -106,6 +107,7 @@ export function httpsEndpoint(input: string) {
   return u;
 }
 export async function resolvePublicHost(hostname: string) {
+  if (isCloudflareRuntime()) throw new CommunicationError("Custom SMTP and AI endpoints are unavailable on this runtime; a DNS-pinned egress adapter is required");
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const addresses = isIP(hostname)
@@ -138,6 +140,7 @@ export async function safeJsonPost(
   body: unknown,
   headers: Record<string, string> = {},
 ): Promise<unknown> {
+  if (isCloudflareRuntime()) return cloudflareJsonPost(input, body, headers);
   const url = httpsEndpoint(input),
     selected = await resolvePublicHost(url.hostname.replace(/^\[|\]$/g, "")),
     data = JSON.stringify(body);
@@ -222,4 +225,37 @@ export async function safeJsonPost(
     );
     req.end(data);
   });
+}
+
+/** Fixed provider origins only. User-defined SMTP/AI endpoints retain the DNS-pinned Node transport. */
+export async function cloudflareJsonPost(input: string, body: unknown, headers: Record<string, string> = {}, transport: typeof fetch = fetch): Promise<unknown> {
+  const url = httpsEndpoint(input);
+  if (!((url.origin === "https://api.resend.com" && url.pathname === "/emails") || (url.origin === "https://graph.facebook.com" && /^\/v\d{1,2}\.0\/\d{5,30}\/messages$/.test(url.pathname))) || url.search)
+    throw new CommunicationError("Custom AI endpoints are unavailable on this runtime; a DNS-pinned egress adapter is required");
+  const data = JSON.stringify(body);
+  if (Buffer.byteLength(data) > 128 * 1024) throw new CommunicationError("Provider request exceeded limit");
+  try {
+    const response = await transport(url.toString(), { method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json", ...headers }, body: data, redirect: "error", signal: AbortSignal.timeout(15000) });
+    if (!response.ok) {
+      await response.body?.cancel();
+      throw new CommunicationError(`Provider rejected request (HTTP ${response.status})`, response.status >= 500 || response.status === 408);
+    }
+    if (!response.body) throw new CommunicationError("Provider returned invalid JSON", true);
+    const reader = response.body.getReader(), chunks: Buffer[] = [];
+    let size = 0;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.length;
+        if (size > 128 * 1024) { await reader.cancel(); throw new CommunicationError("Provider response exceeded limit", true); }
+        chunks.push(Buffer.from(value));
+      }
+    } finally { reader.releaseLock(); }
+    try { return JSON.parse(Buffer.concat(chunks).toString("utf8")); }
+    catch { throw new CommunicationError("Provider returned invalid JSON", true); }
+  } catch (error) {
+    if (error instanceof CommunicationError) throw error;
+    throw new CommunicationError("Provider connection failed or timed out; acceptance is unknown", true);
+  }
 }

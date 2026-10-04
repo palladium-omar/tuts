@@ -99,3 +99,8 @@ PostgreSQL; its synthetic account is deleted in cleanup. Gateway/Nest HTTP routi
 is verified separately by the root integration workflow.
 
 Business creation and every settings save emit `platform.business-profile-updated.v1` atomically with `{businessId,name,profile,branding,revision}`. The monotonic per-business revision prevents an older delivery from reverting billing identity. The event contains reusable seller details only. Existing businesses first publish their current identity on their next settings save. Billing owns its projection and freezes identity when issuing each invoice; platform never writes billing SQL.
+
+
+## Cloudflare runtime
+
+`src/worker.ts` exports this domain as an independent Worker through the shared Nest runtime; `src/main.ts` remains the Node entrypoint. The service retains its own PostgreSQL database, signed caller context, tenant RLS and event contracts. Migrations are applied during deployment, outside requests. Worker secrets and bindings are supplied by the deployment configuration.

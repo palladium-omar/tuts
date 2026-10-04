@@ -50,3 +50,8 @@ preserves `scheduling.session-completed.v1`. No cross-service SQL is used.
 With `SCHEDULING_TEST_DATABASE_URL`, synthetic PostgreSQL fixtures verify calendar
 month/timezone boundaries, explicit attendance, provider/effective status,
 revision ordering, tenant isolation, transactional backfill and overlap 409s.
+
+
+## Cloudflare runtime
+
+`src/worker.ts` exports this domain as an independent Worker through the shared Nest runtime; `src/main.ts` remains the Node entrypoint. The service retains its own PostgreSQL database, signed caller context, tenant RLS and event contracts. Migrations are applied during deployment, outside requests. Worker secrets and bindings are supplied by the deployment configuration.

@@ -90,3 +90,9 @@ Checks: service test/build commands. With `BILLING_TEST_DATABASE_URL`, synthetic
 fixtures verify completed-only billing, local month boundaries, retries, late
 classes, projection ordering, tenant isolation, real/test revenue and automatic
 first-day drafting. Fixtures are rolled back.
+
+
+## Cloudflare runtime
+
+`src/worker.ts` exports this domain as an independent Worker through the shared Nest runtime; `src/main.ts` remains the Node entrypoint. The service retains its own PostgreSQL database, signed caller context, tenant RLS and event contracts. Migrations are applied during deployment, outside requests. Worker secrets and bindings are supplied by the deployment configuration.
+Billing reconciliation uses the `SCHEDULING` service binding and forwards signed authorization with a 30-second deadline. The private runtime tick calls `MonthlyService.runAutomatic()`. Worker startup creates no polling timers; the central 15-minute cron drives automatic draft checks. Manual reconciliation and invoice actions remain request driven.

@@ -18,6 +18,7 @@ import {
 } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import {
+  serviceFetch,
   CurrentContext,
   Database,
   emitEvent,
@@ -200,22 +201,8 @@ export async function resolveRecipients(
 ) {
   if (!authorization.startsWith("Bearer "))
     throw new ForbiddenException("Verified caller context is required");
-  const base = process.env.CLIENTS_URL;
-  if (!base) throw new BadGatewayException("Clients service is not configured");
-  let url: URL;
   try {
-    url = new URL("/v1/recipients", base);
-    if (
-      !["http:", "https:"].includes(url.protocol) ||
-      url.username ||
-      url.password
-    )
-      throw new Error();
-  } catch {
-    throw new BadGatewayException("Clients service URL is invalid");
-  }
-  try {
-    const response = await fetch(url, {
+    const response = await serviceFetch("clients", "/v1/recipients", {
       method: "POST",
       headers: {
         Authorization: authorization,

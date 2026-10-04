@@ -1,5 +1,25 @@
 {
-  "name":"@palladium/integrations","version":"0.1.0","private":true,"type":"module",
-  "scripts":{"dev":"tsx watch src/main.ts","build":"tsc -p tsconfig.json","typecheck":"tsc --noEmit -p tsconfig.json","start":"node dist/main.js"},
-  "dependencies":{"@palladium/contracts":"workspace:*","@palladium/service-kit":"workspace:*","@nestjs/common":"^11.1.0","@nestjs/core":"^11.1.0","@nestjs/platform-express":"^11.1.0","@nestjs/swagger":"^11.2.0","reflect-metadata":"^0.2.2","rxjs":"^7.8.2","pg":"^8.16.0","zod":"^4.1.0"}
+  "name": "@palladium/integrations",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "start": "node dist/main.js",
+    "test": "tsx --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@palladium/contracts": "workspace:*",
+    "@palladium/service-kit": "workspace:*",
+    "@nestjs/common": "^11.1.0",
+    "@nestjs/core": "^11.1.0",
+    "@nestjs/platform-express": "^11.1.0",
+    "@nestjs/swagger": "^11.2.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "pg": "^8.16.0",
+    "zod": "^4.1.0"
+  }
 }

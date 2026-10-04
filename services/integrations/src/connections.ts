@@ -18,6 +18,7 @@ import {
 } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import {
+  isCloudflareRuntime,
   CurrentContext,
   Database,
   emitEvent,
@@ -150,6 +151,7 @@ export class ConnectionsService {
         ],
       );
     });
+    if (isCloudflareRuntime()) return;
     this.timer = setInterval(() => void this.poll(), 30000);
     this.timer.unref();
     void this.poll();
@@ -518,7 +520,7 @@ export class ConnectionsService {
       return { accepted: true, ...counts };
     });
   }
-  private async poll() {
+  async poll() {
     if (this.polling || this.stopping) return;
     this.polling = true;
     try {

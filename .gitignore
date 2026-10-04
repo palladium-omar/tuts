@@ -12,3 +12,8 @@ playwright-report/
 .DS_Store
 .local/
 *.tsbuildinfo
+.wrangler/
+.dev.vars
+.dev.vars.*
+apps/web/out/
+.cloudflare/

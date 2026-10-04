@@ -1,0 +1,12 @@
+{
+  "rules": [
+    {
+      "id": "event-payload-expiration",
+      "enabled": true,
+      "conditions": { "prefix": "" },
+      "deleteObjectsTransition": {
+        "condition": { "type": "Age", "maxAge": 604800 }
+      }
+    }
+  ]
+}

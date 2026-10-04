@@ -23,8 +23,7 @@ import {
   ApiTags,
 } from "@nestjs/swagger";
 import { FileInterceptor } from "@nestjs/platform-express";
-import { mkdir, open, rename, unlink } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { resourceStorage, type ResourceStorage } from "./storage.js";
 import type { Response } from "express";
 import {
   MAX_UPLOAD_BYTES,
@@ -123,9 +122,8 @@ const withResources = `SELECT a.*, ARRAY(SELECT ar.resource_id FROM assignment_r
 @Injectable()
 export class LearningService {
   constructor(@Inject(Database) private readonly db: Database) {}
-  private readonly uploadDirectory = resolve(
-    process.env.UPLOAD_DIRECTORY || ".local/uploads",
-  );
+  // Optional test injection; production obtains request-local Worker bindings.
+  storageFactory: () => ResourceStorage = resourceStorage;
   async listAssignments(ctx: RequestContext, query: unknown) {
     const q = parseBody(listSchema, query);
     return this.db.withTenant(ctx.businessId, async (tx) => {
@@ -304,20 +302,9 @@ export class LearningService {
       validated = validateUpload(file),
       id = randomUUID(),
       storageKey = randomUUID();
-    const directory = join(this.uploadDirectory, ctx.businessId),
-      finalPath = join(directory, storageKey),
-      temporaryPath = join(directory, `.${storageKey}.tmp`);
-    await mkdir(directory, { recursive: true, mode: 0o700 });
+    const storage = this.storageFactory();
     try {
-      // The private temporary name and rename prevent partial downloads; PostgreSQL owns visibility.
-      const handle = await open(temporaryPath, "wx", 0o600);
-      try {
-        await handle.writeFile(validated.buffer);
-        await handle.sync();
-      } finally {
-        await handle.close();
-      }
-      await rename(temporaryPath, finalPath);
+      await storage.put(ctx.businessId, storageKey, validated.buffer, validated.mimeType);
       return await this.db.withTenant(ctx.businessId, async (tx) => {
         const result = await tx.query<ResourceRow>(
           `INSERT INTO resources(id,business_id,client_id,title,kind,file_name,mime_type,size_bytes,storage_status,storage_key,created_by) VALUES($1,$2,$3,$4,'file_metadata',$5,$6,$7,'stored',$8,$9) RETURNING *`,
@@ -336,7 +323,9 @@ export class LearningService {
         return { item: resourceView(result.rows[0]!) };
       });
     } catch (error) {
-      await Promise.allSettled([unlink(temporaryPath), unlink(finalPath)]);
+      try { await storage.delete(ctx.businessId, storageKey); } catch {
+        console.error("[learning] private upload cleanup failed; orphan reconciliation required");
+      }
       throw error;
     }
   }
@@ -355,17 +344,7 @@ export class LearningService {
     if (!row || row.storage_status !== "stored" || !row.storage_key)
       throw new NotFoundException("Stored resource not found");
     const storageKey = parseBody(uuid, row.storage_key);
-    let handle;
-    try {
-      handle = await open(
-        join(this.uploadDirectory, ctx.businessId, storageKey),
-        "r",
-      );
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT")
-        throw new NotFoundException("Resource file is unavailable");
-      throw error;
-    }
+    const content = await this.storageFactory().read(ctx.businessId, storageKey);
     const fileName = row.file_name || "resource";
     const fallback = fileName
       .replace(/[^a-zA-Z0-9._ -]/g, "_")
@@ -382,7 +361,7 @@ export class LearningService {
     response.setHeader("Cache-Control", "private, no-store");
     if (row.size_bytes !== null)
       response.setHeader("Content-Length", row.size_bytes);
-    return new StreamableFile(handle.createReadStream());
+    return Buffer.isBuffer(content) ? new StreamableFile(content) : new StreamableFile(content);
   }
   async createResource(ctx: RequestContext, body: unknown) {
     const v = parseBody(resourceSchema, body);

@@ -65,3 +65,9 @@ Every domain table forces tenant RLS. Issued snapshots are immutable: repeated e
 Run `pnpm --filter @palladium/payments typecheck`, `build`, and `test`. Database tests require `PAYMENTS_TEST_DATABASE_URL`, a non-superuser without BYPASSRLS. Stripe tests inject a synthetic provider transport and assert the attempt is committed before that transport runs. They verify test-only keys/responses, tenant-bound encryption and RLS, exact retry keys/payloads, uncertain outcomes, provider amount/metadata checks, concurrent allocation/event deduplication, connection permissions, and expiry of the safe retry window. No external provider request or charge is made by tests.
 
 Implementation references: [Stripe Checkout creation](https://docs.stripe.com/api/checkout/sessions/create), [session retrieval](https://docs.stripe.com/api/checkout/sessions/retrieve), [account retrieval](https://docs.stripe.com/api/accounts/retrieve), [idempotent requests](https://docs.stripe.com/api/idempotent_requests), and [currency/minor-unit rules](https://docs.stripe.com/currencies). Real external credentials have not been supplied or tested in this task.
+
+
+## Cloudflare runtime
+
+`src/worker.ts` exports this domain as an independent Worker through the shared Nest runtime; `src/main.ts` remains the Node entrypoint. The service retains its own PostgreSQL database, signed caller context, tenant RLS and event contracts. Migrations are applied during deployment, outside requests. Worker secrets and bindings are supplied by the deployment configuration.
+Stripe has a fixed-origin fetch adapter with redirect rejection, bounded bodies, a 15-second deadline and conservative acceptance ambiguity. It still accepts test credentials only and rejects test mode in production. No live payment capability is enabled by deploying this adapter.

@@ -1,0 +1,120 @@
+# Cloudflare deployment
+
+This deployment keeps Tuts' eight independent domain services and their PostgreSQL databases. Cloudflare supplies the request runtime, private service calls, event queues, scheduled invocations, static assets, and private upload storage. Neon supplies PostgreSQL. The existing Node/container deployment remains available through the normal `main.ts` entrypoints.
+
+As of October 4, 2026, all nine Wrangler bundles, the Next.js static export, and local workerd integration checks have passed. Local checks exercised successful password signup/sign-in, gateway service bindings, tenant-scoped CRM requests, R2 upload/download byte equality, and queue consumption into a notification intent. Synthetic fixtures were removed afterward. A free Neon project has been created in London. Cloudflare signup, deployment credentials, cloud resources, remote migrations, deployment, live provider requests, and public browser verification are still pending. Local execution does not establish deployed CPU-limit compliance or a working hosted app.
+
+## Service and data boundaries
+
+| Component | Cloudflare deployment | Data and access |
+| --- | --- | --- |
+| Browser app | Next.js static export in the gateway's `ASSETS` binding | Browser sessions and API calls use the gateway origin |
+| Gateway | One public Fetch Worker | Verifies browser Origin, resolves platform membership, and issues short-lived signed context |
+| Platform | Private Worker | Own PostgreSQL database; identity, sessions, businesses, memberships |
+| Clients | Private Worker | Own PostgreSQL database; CRM and contact projections |
+| Scheduling | Private Worker | Own PostgreSQL database; classes and connected-calendar projections |
+| Learning | Private Worker | Own PostgreSQL database plus private R2 objects; assignments and resources |
+| Billing | Private Worker | Own PostgreSQL database; rates, invoice drafts, invoices, allocations |
+| Payments | Private Worker | Own PostgreSQL database; connector state and payment reconciliation |
+| Notifications | Private Worker | Own PostgreSQL database; campaigns, delivery jobs, notifications |
+| Integrations | Private Worker | Own PostgreSQL database; connector credentials, polling, intake |
+| Scheduled jobs | One cron trigger on the gateway Worker | Calls each service's authenticated runtime tick every 15 minutes |
+
+Only the gateway receives public HTTP traffic. Disable `workers.dev`, preview URLs, and public routes on domain services. Service calls use explicit bindings named `PLATFORM`, `CLIENTS`, `SCHEDULING`, `LEARNING`, `BILLING`, `PAYMENTS`, `NOTIFICATIONS`, and `INTEGRATIONS`. A binding does not grant tenant permission: the existing signed-context and resource authorization checks still apply.
+
+The gateway rejects public `/internal` and `/__runtime` paths, including encoded variants. Ordinary API forwarding removes client-supplied authorization, internal secrets, identity/role/tenant context headers, and forwarding headers, then overwrites `x-real-ip` from Cloudflare's client IP. Non-platform business requests obtain membership and entitlements through the private platform context endpoint before receiving a JWT. Browser mutations require a trusted Origin. Platform owns session cookies; the gateway preserves separate `Set-Cookie` values and their security attributes.
+
+The public `/api/integrations/hooks/...` route retains the existing connector-scoped `Authorization` secret and strips browser cookies and staff context. Its request limit remains 1 MiB. Other API requests have a 25 MiB streaming gateway limit; Learning retains its 20 MiB file limit and file-content validation. R2 objects use validated business/resource keys and are retrieved through the authorized Learning API. Keep the bucket private, with no public `r2.dev` endpoint or public custom domain.
+
+Each service must have a distinct database and a dedicated owner/login role with `NOSUPERUSER` and `NOBYPASSRLS`. Do not deploy a Neon administration credential or a role that inherits an RLS-bypassing role as `DATABASE_URL`. Tenant tables retain `ENABLE ROW LEVEL SECURITY`, `FORCE ROW LEVEL SECURITY`, and the policies keyed by the transaction-local `app.business_id`. Verify effective role membership and tenant isolation after provisioning. Separate databases can share a Neon project/compute to reduce cost; this must not introduce shared tables, cross-database SQL, or another service's credentials.
+
+## Runtime adaptation
+
+Domain controllers, tenant transactions, wire contracts, event schemas, and business rules remain in their service folders. `@palladium/service-kit/worker` hosts each Nest application through Cloudflare's Node HTTP compatibility bridge. Database sockets belong to a Worker invocation and close when it completes. Migrations run from the deployment script, outside the Worker request runtime. Long-lived Node timers are replaced by queue consumers and scheduled ticks.
+
+Cloudflare Queues replaces RabbitMQ for this deployment. An event is still written to its producer's transactional outbox alongside the state change. Outbox publication sends a copy to every consumer whose subscription matches the exact event type in [`eventConsumerSubscriptions`](../packages/contracts/src/index.ts). It marks the outbox entry published only after all destination sends succeed. Partial fanout can produce duplicates; the consumer's transactional inbox deduplicates by consumer/event ID before applying the handler. Queue retry and dead-letter configuration must be provisioned for each consumer.
+
+Queues limits each message to 128,000 bytes including metadata. Larger event bodies, including business logos and contact batches, use a separate private `EVENT_PAYLOADS` R2 bucket shared by the transport adapters. The queue carries a versioned pointer with identity fields and a content digest; consumers validate the referenced bytes and event identity before passing the original event to domain handlers. This transport bucket has seven-day expiration, longer than the configured queue retention. It is separate from Learning's private upload bucket, which has no such expiration. Full event JSON remains in each producer's PostgreSQL outbox for recovery. [Queue size limits](https://developers.cloudflare.com/queues/platform/limits/).
+
+| Consumer queue | Subscribed event types |
+| --- | --- |
+| Billing | `payments.payment-confirmed.v1`, `platform.business-profile-updated.v1`, `scheduling.class-updated.v1` |
+| Integrations | `clients.source-synced.v1` |
+| Clients | `integrations.contacts-received.v1`, `integrations.connection-disconnected.v1` |
+| Scheduling | `integrations.sessions-synced.v1`, `integrations.connection-disconnected.v1` |
+| Payments | `billing.invoice-issued.v1` |
+| Notifications | `clients.client-created.v1`, `clients.client-updated.v1`, `scheduling.session-created.v1`, `scheduling.session-completed.v1`, `learning.assignment-created.v1`, `billing.invoice-issued.v1`, `payments.payment-confirmed.v1` |
+
+Producer bindings use `EVENTS_<CONSUMER>` names. Queues perform fanout between independent consumers; one shared queue with competing consumers would lose the required subscription behavior. Successful HTTP and queue invocations attempt outbox flushing. A single `*/15 * * * *` gateway schedule also ticks **all eight** services sequentially, so pending events in services without a domain job can recover. Sequential ticks leave room for database/provider calls within Cloudflare's six pending-connection slots, which are shared by service-bound Workers within the top-level invocation. [Connection limits](https://developers.cloudflare.com/workers/platform/limits/#simultaneous-open-connections). Ticks require a shared `INTERNAL_RUNTIME_SECRET` of at least 32 characters and remain private; the gateway rejects public runtime paths. A failed tick fails the scheduled invocation after all services have been attempted, and each tick has a 30-second deadline. The eight deadlines total four minutes, below the cron's 15-minute wall-time limit. Billing additionally runs automatic arrears drafting, Integrations polls enabled connections, and Notifications advances approved campaign jobs. These jobs are eventually consistent and may wait until the next tick.
+
+## Provider availability
+
+| Provider route | Cloudflare behavior |
+| --- | --- |
+| Calendly and Cal.com | Fetch adapters target the fixed provider origins; businesses still supply valid tokens |
+| Resend and Meta WhatsApp | Fetch adapters target fixed provider origins; explicit outbound-delivery enablement and campaign approval still apply |
+| Stripe test API | Fetch adapter is implemented; existing test-only restrictions remain |
+| Custom HTTPS contact sources | Unavailable pending a safe egress adapter that preserves DNS/address checks |
+| Custom SMTP | Unavailable pending a safe egress adapter |
+| Business AI endpoints | Unavailable pending a safe egress adapter |
+
+The Worker runtime sets `NODE_ENV=production`. The current Stripe test connector requires development or test, and the simulated sandbox provider retains its production restriction. Therefore deploying these adapters does **not** enable Stripe test payment links or real payment collection in the hosted production app. Production payment-provider support remains unfinished. Provider adapter tests and a successful deploy do not establish successful live calendar sync or message delivery.
+
+## Deployment files and sequence
+
+The deployment interface is `node scripts/cloudflare.mjs <command>`, with `init`, `config`, `build`, `bundle`, `provision`, `migrate`, and `deploy`. Its manifest, secret scoping, queue topology, database isolation checks, and deployment ordering have focused local checks. Remote commands have not yet been exercised against the hosting accounts.
+
+Local deployment metadata belongs in ignored `.cloudflare/deployment.json`, with `prefix`, `accountId`, `publicUrl`, and optional `customDomain` fields. Generated Wrangler files live under `.cloudflare/generated/<service>/wrangler.json`; the gateway configuration binds `apps/web/out` as `ASSETS` with `run_worker_first: true` so API/private-path checks take precedence over asset serving.
+
+Ignored `.cloudflare/secrets.json` contains the top-level `CONTEXT_PRIVATE_KEY`, `CONTEXT_PUBLIC_KEY`, `PLATFORM_INTERNAL_SECRET`, `INTERNAL_RUNTIME_SECRET`, `BETTER_AUTH_SECRET`, `PAYMENT_ENCRYPTION_KEY`, `INTEGRATIONS_ENCRYPTION_KEY`, and `COMMUNICATIONS_ENCRYPTION_KEY`. Its `databasePasswords` and `databaseUrls` maps each have the eight lowercase service names as keys; `adminDatabaseUrl` holds the Neon administration connection used for provisioning databases/roles. Keep both JSON files out of Git and shared artifacts. Stable encryption keys must survive redeployments or stored connector credentials become unreadable. Deployment uploads only the required secrets to each Worker; the administration credential must remain local and the static browser bundle must contain no secrets.
+
+Run from the repository root, replacing `YOUR-SUBDOMAIN` with the account's actual Workers subdomain:
+
+```sh
+pnpm install
+node scripts/cloudflare.mjs init --public-url 'https://tuts-gateway.YOUR-SUBDOMAIN.workers.dev'
+node scripts/cloudflare.mjs config
+node scripts/cloudflare.mjs build
+node scripts/cloudflare.mjs bundle
+```
+
+`init` also accepts `--account-id`, `--prefix`, and `--custom-domain`. Configure the intended account, service/resource names, public URLs, and stable secrets using the generated files. Create or select a Neon project and store its administration URL as `adminDatabaseUrl` before running `migrate`; the generated per-service passwords are used to create the restricted service roles. Start with the gateway's HTTPS `workers.dev` address for both `PUBLIC_APP_URL` and `PUBLIC_GATEWAY_URL`. The `bundle` step reports each deployable Worker's size and local compatibility errors before a release is uploaded; actual edge startup/CPU acceptance still needs deployment and measurement.
+
+The static browser build can also be run directly:
+
+```sh
+TUTS_STATIC_EXPORT=true NEXT_PUBLIC_GATEWAY_URL='' pnpm --filter @palladium/web build
+```
+
+Its output is `apps/web/out`. Empty `NEXT_PUBLIC_GATEWAY_URL` compiles same-origin API calls into the browser app. Set a public HTTPS gateway URL only when a distinct browser origin is intentional and configured as trusted. The normal build retains Next.js standalone output.
+
+After authenticating the selected Cloudflare and Neon accounts and resolving account activation/plan limits:
+
+```sh
+node scripts/cloudflare.mjs provision
+node scripts/cloudflare.mjs config
+node scripts/cloudflare.mjs migrate
+node scripts/cloudflare.mjs deploy
+```
+
+`provision` creates Cloudflare queues/dead-letter queues, the private upload bucket, and the private event payload bucket with its seven-day lifecycle policy. Generated bindings use resource names. `migrate` uses the local Neon administration URL to create separate databases and restricted roles, then applies each service's migrations as its own role and records its connection URL in `databaseUrls`. `deploy` uploads each Worker's required secrets and deploys private domain Workers in dependency order before exposing the public gateway with its cron trigger. Confirm the final script's behavior before using these commands against an account: provisioning and deployment create remote resources, and migration changes remote schemas.
+
+## Cost target and limits
+
+The target is a $0 attempt for a small demo, subject to actual account access and resource limits. It is not a cost guarantee. Cloudflare Workers Free currently permits 10 ms CPU per HTTP invocation; the Nest initialization, identity/password processing, imports, and upload validation need measurement against that limit and the startup limit. Workers Paid has a $5/month account minimum, with usage above included allowances billed separately. The application may need that plan. [Workers limits](https://developers.cloudflare.com/workers/platform/limits/), [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/).
+
+Current Cloudflare documentation lists a 64 MiB uncompressed Worker limit for both plans, with no compressed-size limit. Verify the account's effective constraints and Wrangler output. No remote upload/startup acceptance has been demonstrated. [Worker size limits](https://developers.cloudflare.com/workers/platform/limits/#worker-size).
+
+Neon's current Free allowance is 100 CU-hours per project per month, and inactive compute normally scales to zero after five minutes. A 0.25 CU compute awakened every 15 minutes for five minutes would consume roughly 60 CU-hours over 30 days, before work duration, queue activity, or browser traffic. Multiple service databases on one compute share that compute's budget; separate projects have separate quotas and wake cycles. The 15-minute schedule is a compromise between recovery latency and idle cost. Confirm actual compute size, suspension settings, storage/transfer allowances, and observed usage. [Neon Free allowance](https://neon.com/blog/neon-free-plan-1-gb-per-project), [Neon scale-to-zero documentation](https://github.com/neondatabase/website/blob/main/content/docs/introduction/scale-to-zero.md).
+
+The observed Neon signup console lists 0.5 GB storage for this account. Use the actual console quota when planning capacity; the published free-plan announcement may describe a different rollout.
+
+Queues Free includes 10,000 operations/day; fanout and retries multiply operations. This configuration uses 24-hour retention for both delivery and dead-letter queues. Inspect failures promptly: expiration does not automatically replay an event whose outbox row is already marked published. Outbox rows are retained in PostgreSQL, but operator replay tooling is not implemented. R2 Standard has a free storage/operation allowance, but account activation, payment-method requirements, credits, and their applicability have not been checked for this account. Treat R2 availability and any credits as unresolved until verified in the account. [Queues pricing](https://developers.cloudflare.com/queues/platform/pricing/), [R2 pricing](https://developers.cloudflare.com/r2/pricing/).
+
+## Public verification and custom domain
+
+First deploy and verify the gateway's `workers.dev` URL. Required hosted checks include loading the ordinary browser app, signup/sign-in/session/sign-out cookies, tenant isolation, feature denial, blocked internal paths, event retry/deduplication, scheduled recovery, private upload/download isolation, and provider capability errors. Use synthetic data. Record live results separately from local checks.
+
+The intended custom domain is `tuts.palladiumscholars.com`. A Worker Custom Domain requires control of the applicable Cloudflare zone; an existing CNAME on that hostname must be resolved before attaching it. Cloudflare account authentication alone does not establish zone control. [Custom Domains](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/).
+
+Before changing nameservers or DNS records, export and compare the existing zone. Preserve the existing Firebase website records, Google mail MX records, and related verification/SPF/DKIM/DMARC records. Add only the Tuts hostname after the staged app works and zone control is verified. Change the platform/gateway public URLs to the custom HTTPS origin, regenerate configuration, redeploy, and repeat cookie/Origin/browser checks. DNS cutover and custom-domain verification have not been performed.

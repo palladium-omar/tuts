@@ -30,7 +30,7 @@ The resource response contains `storageStatus: "upload_pending"` and `url: null`
 
 Assignment list and detail include `resources` metadata alongside `resourceIds`. Assignments return `{item}` containing id/businessId/clientId/title/description/dueAt/status/resourceIds/submissionText/submissionUrl/submittedAt/feedback/reviewedAt/createdAt/updatedAt. Lifecycle: assigned → submitted → completed or needs_revision → submitted. Submission requires `{submissionText}` or `{submissionUrl}`; review uses `{status:"completed"|"needs_revision",feedback?}`. Finished assignments reject new submissions. Transaction row locks prevent competing progress updates.
 
-Every domain table forces PostgreSQL tenant RLS. Request body tenant fields are rejected. Assignment creation atomically emits `learning.assignment-created.v1`. Student IDs are opaque references; membership and other services' records are not inferred from UUIDs. Direct student/parent portals, remote object storage, revision history and automatic grading are pending.
+Every domain table forces PostgreSQL tenant RLS. Request body tenant fields are rejected. Assignment creation atomically emits `learning.assignment-created.v1`. Student IDs are opaque references; membership and other services' records are not inferred from UUIDs. Direct student/parent portals, revision history and automatic grading are pending.
 
 Run `pnpm --filter @palladium/learning typecheck`, `build`, or `test`. Database tests require `LEARNING_TEST_DATABASE_URL` for an isolated database using a non-superuser role without BYPASSRLS.
 
@@ -39,3 +39,9 @@ Actual file uploads accept nonempty PDF, PNG, JPEG, WebP, DOCX, PPTX and UTF-8 T
 Uploaded resources retain `kind:"file_metadata"`, return `storageStatus:"stored"`, `url:null`, and service-relative `downloadUrl:"/v1/resources/:id/download"`; external clients prefix this with `/api/learning`. Attach their IDs through the existing assignment `resourceIds` field. No internal filesystem path or storage key is returned.
 
 Set `UPLOAD_DIRECTORY` to persistent, private service storage outside any static web root; default `.local/uploads` resolves from the service working directory. The Docker workflow mounts a persistent learning volume. Files use random UUID names in tenant directories, permissions 0600, and an atomic temporary-file rename before SQL metadata becomes visible. Failed SQL writes clean up the file. A process crash between filesystem and database writes can leave an unreferenced file; backups and periodic orphan cleanup must be coordinated with this service database. Downloads verify tenant metadata and owner/admin/tutor roles, use `Content-Disposition:attachment`, `X-Content-Type-Options:nosniff`, and private/no-store caching. Existing pending metadata has no downloadable content.
+
+
+## Cloudflare runtime
+
+`src/worker.ts` exports this domain as an independent Worker through the shared Nest runtime; `src/main.ts` remains the Node entrypoint. The service retains its own PostgreSQL database, signed caller context, tenant RLS and event contracts. Migrations are applied during deployment, outside requests. Worker secrets and bindings are supplied by the deployment configuration.
+Workers require a private R2 bucket bound as `UPLOADS`. Validated bytes are stored under `<business UUID>/<storage UUID>`; download authorization queries tenant-scoped PostgreSQL metadata before bucket access. No public URL or bucket key is returned, and SQL failures delete the object. A crash between object and metadata writes can leave an orphan; reconciliation must account for the database. Local Node storage continues using the private disk directory and atomic rename described above.

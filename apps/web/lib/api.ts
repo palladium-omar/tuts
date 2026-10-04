@@ -13,7 +13,7 @@ export type Api = (
   key?: string,
 ) => Promise<any>;
 export const gateway =
-  process.env.NEXT_PUBLIC_GATEWAY_URL ?? "http://localhost:8080";
+  (process.env.NEXT_PUBLIC_GATEWAY_URL ?? "http://localhost:8080").replace(/\/$/, "");
 export function createApi(businessId?: string): Api {
   return async (path, method = "GET", body, key) => {
     const multipart = body instanceof FormData;

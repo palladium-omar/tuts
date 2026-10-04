@@ -126,3 +126,8 @@ Client mutations emit transactional `clients.client-created.v1`,
 removes local payer/source links; other services keep their own historical data.
 
 Checks: `pnpm --filter @palladium/clients build` and `pnpm --filter @palladium/clients test`. PostgreSQL RLS integration checks require `CLIENTS_TEST_DATABASE_URL` pointing to an already-migrated database with a non-superuser runtime role; fixture writes are rolled back.
+
+
+## Cloudflare runtime
+
+`src/worker.ts` exports this domain as an independent Worker through the shared Nest runtime; `src/main.ts` remains the Node entrypoint. The service retains its own PostgreSQL database, signed caller context, tenant RLS and event contracts. Migrations are applied during deployment, outside requests. Worker secrets and bindings are supplied by the deployment configuration.

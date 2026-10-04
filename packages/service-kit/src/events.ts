@@ -5,9 +5,12 @@ import type { PoolClient } from 'pg';
 import { eventConsumerSubscriptions, platformEventSchema, type PlatformEvent } from '@palladium/contracts';
 import { Database } from './database.js';
 import { OPTIONS, type ServiceOptions } from './auth.js';
+import { currentCloudflareBindings, isCloudflareRuntime } from './runtime.js';
+import { decodeQueueEvent, encodeQueueEvent, type QueueEvent } from './event-transport.js';
 const exchange = 'palladium.events';
 export async function emitEvent(tx: PoolClient, input: {type:string;producer:string;businessId:string;correlationId?:string;data:Record<string,unknown>}): Promise<string> {
   const event = platformEventSchema.parse({...input,id:randomUUID(),version:1,occurredAt:new Date().toISOString(),correlationId:input.correlationId ?? randomUUID()});
+  if (event.producer !== event.type.split('.')[0]) throw new Error('Invalid event producer');
   await tx.query('INSERT INTO service_outbox(id,event) VALUES($1,$2)',[event.id,JSON.stringify(event)]);
   return event.id;
 }
@@ -26,6 +29,7 @@ export class EventBus {
   constructor(@Inject(Database) private readonly db:Database,@Inject(OPTIONS) private readonly options:ServiceOptions) {}
   subscribe(type:string,handler:Handler) { this.handlers.set(type,[...(this.handlers.get(type) ?? []),handler]); }
   async start() {
+    if (isCloudflareRuntime()) { this.connected = true; return; }
     if (process.env.DISABLE_BROKER === 'true' || this.stopping || this.starting || this.connected) return;
     if (!process.env.RABBITMQ_URL) throw new Error('RABBITMQ_URL is required');
     this.starting = true;
@@ -97,21 +101,47 @@ export class EventBus {
   }
   private async consume(channel:ConfirmChannel,queue:string,msg:ConsumeMessage) {
     try {
-      const event = platformEventSchema.parse(JSON.parse(msg.content.toString()));
-      if (event.producer !== event.type.split('.')[0]) throw new Error('Invalid event producer');
-      const handlers=this.handlers.get(event.type);
-      if (!handlers) throw new Error('No handler for event');
-      await this.db.withTenant(event.businessId,async tx=>{
-        const inserted=await tx.query('INSERT INTO service_inbox(consumer,event_id) VALUES($1,$2) ON CONFLICT DO NOTHING RETURNING event_id',[this.options.name,event.id]);
-        if (!inserted.rowCount)return;
-        for(const handler of handlers)await handler(event,tx);
-      });
+      await this.consumeEvent(JSON.parse(msg.content.toString()));
       channel.ack(msg);
     } catch {
       const attempts=Number(msg.properties.headers?.['x-attempts']??0)+1;
       try { await this.send(channel,attempts>=5?`${queue}.dead`:`${queue}.retry`,msg,attempts);channel.ack(msg); }
       catch { try { channel.nack(msg,false,true); } catch {} }
     }
+  }
+  async consumeEvent(input: unknown): Promise<void> {
+    const event = isCloudflareRuntime() ? await decodeQueueEvent(input) : platformEventSchema.parse(input);
+    if (event.producer !== event.type.split('.')[0]) throw new Error('Invalid event producer');
+    const handlers = this.handlers.get(event.type);
+    if (!handlers?.length) throw new Error('No handler for event');
+    await this.db.withTenant(event.businessId, async tx => {
+      const inserted = await tx.query('INSERT INTO service_inbox(consumer,event_id) VALUES($1,$2) ON CONFLICT DO NOTHING RETURNING event_id', [this.options.name, event.id]);
+      if (!inserted.rowCount) return;
+      for (const handler of handlers) await handler(event, tx);
+    });
+  }
+  async flushOutbox(): Promise<void> {
+    if (!isCloudflareRuntime()) { await this.flush(); return; }
+    const bindings = currentCloudflareBindings();
+    if (!bindings) throw new Error('Event publication requires an active invocation');
+    // SKIP LOCKED makes concurrent requests safe without a process-wide busy flag.
+    // A partial fanout rolls back publication; consumers deduplicate its retry.
+    await this.db.transaction(async tx => {
+      const { rows } = await tx.query<{ id: string; event: PlatformEvent }>('SELECT id,event FROM service_outbox WHERE published_at IS NULL ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 50');
+      for (const row of rows) {
+        const event = platformEventSchema.parse(row.event);
+        if (event.producer !== this.options.name || event.producer !== event.type.split('.')[0]) throw new Error('Invalid outbox producer');
+        const message = await encodeQueueEvent(event);
+        for (const subscription of eventConsumerSubscriptions) {
+          if (!(subscription.types as readonly string[]).includes(event.type)) continue;
+          const key = `EVENTS_${subscription.consumer.toUpperCase()}`;
+          const queue = bindings[key] as { send?: (event: QueueEvent, options: { contentType: 'json' }) => Promise<void> } | undefined;
+          if (typeof queue?.send !== 'function') throw new Error(`Missing ${key} queue binding`);
+          await queue.send(message, { contentType: 'json' });
+        }
+        await tx.query('UPDATE service_outbox SET published_at=now() WHERE id=$1', [row.id]);
+      }
+    });
   }
   private async flush() {
     if(this.busy || !this.connected || !this.channel)return;

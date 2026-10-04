@@ -20,6 +20,9 @@ import { ContextGuard, OPTIONS, Public, type ServiceOptions } from "./auth.js";
 export { Database } from "./database.js";
 export { EventBus, emitEvent } from "./events.js";
 export { Public, Roles, CurrentContext } from "./auth.js";
+export { isCloudflareRuntime, currentCloudflareBindings, serviceFetch } from "./runtime.js";
+export type { CloudflareBindings } from "./runtime.js";
+export type { ServiceOptions } from "./auth.js";
 export type { RequestContext, PlatformEvent } from "@palladium/contracts";
 export function parseBody<T>(schema: ZodType<T>, input: unknown): T {
   const result = schema.safeParse(input);
@@ -97,8 +100,7 @@ class HealthController {
     };
   }
 }
-export async function bootstrap(options: ServiceOptions): Promise<void> {
-  if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is required");
+export async function createServiceApplication(options: ServiceOptions, migrate = true): Promise<NestExpressApplication> {
   @Module({
     controllers: [HealthController, ...options.controllers],
     providers: [
@@ -116,10 +118,10 @@ export async function bootstrap(options: ServiceOptions): Promise<void> {
   app.useBodyParser("json", { limit: "8mb" });
   app.useBodyParser("urlencoded", { extended: true, limit: "1mb" });
   const db = app.get(Database);
-  await db.migrate(options.migrationsDir);
+  if (migrate) await db.migrate(options.migrationsDir);
   app.useGlobalGuards(app.get(ContextGuard));
   app.useGlobalFilters(new ApiErrors());
-  app.enableShutdownHooks();
+  if (migrate) app.enableShutdownHooks();
   await app.init();
   const doc = SwaggerModule.createDocument(
     app,
@@ -132,6 +134,11 @@ export async function bootstrap(options: ServiceOptions): Promise<void> {
   app
     .getHttpAdapter()
     .get("/openapi.json", (_req: any, res: any) => res.json(doc));
+  return app;
+}
+export async function bootstrap(options: ServiceOptions): Promise<void> {
+  if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is required");
+  const app = await createServiceApplication(options);
   await app.listen(Number(process.env.PORT ?? options.port), "0.0.0.0");
   await app.get(EventBus).start();
 }

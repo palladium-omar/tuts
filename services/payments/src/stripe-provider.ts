@@ -3,6 +3,7 @@ import {
   ServiceUnavailableException,
   UnprocessableEntityException,
 } from "@nestjs/common";
+import { isCloudflareRuntime } from "@palladium/service-kit";
 import { request } from "node:https";
 import { z } from "zod";
 export const stripeCredentialsSchema = z
@@ -81,6 +82,7 @@ export const stripeRequest: StripeTransport = async (
   const data = body?.toString() ?? "";
   if (Buffer.byteLength(data) > 32 * 1024)
     throw new StripeError("stripe_request_too_large");
+  if (isCloudflareRuntime()) return cloudflareStripeRequest(method, path, secretKey, body, idempotencyKey);
   return new Promise((resolve, reject) => {
     const req = request(
       {
@@ -281,4 +283,40 @@ export function checkoutPayload(value: {
 @Injectable()
 export class StripeClient {
   request: StripeTransport = stripeRequest;
+}
+
+/** Fetch adapter preserves the fixed Stripe origin and ambiguity after attempted POST acceptance. */
+export async function cloudflareStripeRequest(method: "GET" | "POST", path: string, secretKey: string, body?: URLSearchParams, idempotencyKey?: string, transport: typeof fetch = fetch): Promise<unknown> {
+  if (!/^\/v1\/(?:account|checkout\/sessions(?:\/cs_test_[A-Za-z0-9]+)?)$/.test(path)) throw new StripeError("stripe_endpoint_invalid");
+  stripeCredentialsSchema.pick({ secretKey: true }).parse({ secretKey });
+  requireStripeTest();
+  const data = body?.toString() ?? "";
+  if (Buffer.byteLength(data) > 32 * 1024) throw new StripeError("stripe_request_too_large");
+  try {
+    const response = await transport(`https://api.stripe.com${path}`, {
+      method, headers: { Authorization: `Bearer ${secretKey}`, Accept: "application/json", ...(method === "POST" ? { "Content-Type": "application/x-www-form-urlencoded", "Idempotency-Key": idempotencyKey! } : {}) },
+      ...(method === "POST" ? { body: data } : {}), redirect: "error", signal: AbortSignal.timeout(15000),
+    });
+    if (!response.ok) {
+      await response.body?.cancel();
+      throw new StripeError(`stripe_request_rejected_http_${response.status}`, response.status >= 500 || response.status === 408 || response.status === 409, response.status);
+    }
+    if (!response.body) throw new StripeError("stripe_response_invalid", method === "POST");
+    const reader = response.body.getReader(), chunks: Buffer[] = [];
+    let size = 0;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.length;
+        if (size > 128 * 1024) { await reader.cancel(); throw new StripeError("stripe_response_too_large", method === "POST"); }
+        chunks.push(Buffer.from(value));
+      }
+    } finally { reader.releaseLock(); }
+    try { return JSON.parse(Buffer.concat(chunks).toString("utf8")); }
+    catch { throw new StripeError("stripe_response_invalid", method === "POST"); }
+  } catch (error) {
+    if (error instanceof StripeError) throw error;
+    throw new StripeError("stripe_connection_failed", method === "POST");
+  }
 }
