@@ -20,6 +20,7 @@ export interface GatewayEnv {
   INTERNAL_RUNTIME_SECRET: string;
   PUBLIC_APP_URL: string;
   PUBLIC_GATEWAY_URL: string;
+  TUTS_MAINTENANCE?: string;
 }
 
 const BODY_LIMIT = 25 * 1024 * 1024;
@@ -195,6 +196,37 @@ function canonicalPageRedirect(request: Request, url: URL, env: GatewayEnv): Res
   return new Response(null, { status: 308, headers: { location: target.href } });
 }
 
+function maintenanceResponse(request: Request, env: GatewayEnv): Response {
+  const url = new URL(request.url);
+  // Preserve the established document redirect without calling any binding.
+  if (safePath(url.pathname)) {
+    const redirect = canonicalPageRedirect(request, url, env);
+    if (redirect) return redirect;
+  }
+  const headers = new Headers({
+    "Cache-Control": "no-store", "Retry-After": "60", "X-Tuts-Maintenance": "true",
+  });
+  const document = !/^\/(?:api|health)(?:\/|$)/i.test(url.pathname) &&
+    (request.headers.get("sec-fetch-dest") === "document" ||
+      request.headers.get("accept")?.includes("text/html"));
+  let response: Response;
+  if (document) {
+    headers.set("Content-Type", "text/html; charset=utf-8");
+    headers.set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'");
+    response = new Response(request.method === "HEAD" ? null :
+      '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Tuts maintenance</title><style>body{font:18px system-ui,sans-serif;max-width:36rem;margin:15vh auto;padding:2rem;color:#18352b;background:#f7faf8}h1{font-size:2rem}p{line-height:1.6}</style><main><h1>We’ll be back shortly</h1><p>Tuts is temporarily unavailable while we restore your workspace. Please try again in a few minutes.</p></main></html>',
+      { status: 503, headers });
+  } else {
+    headers.set("Content-Type", "application/json; charset=utf-8");
+    response = new Response(request.method === "HEAD" ? null : JSON.stringify({
+      error: { code: "maintenance", message: "Tuts is temporarily unavailable. Please try again shortly." },
+    }), { status: 503, headers });
+  }
+  const origin = request.headers.get("origin");
+  const trusted = origin && [new URL(env.PUBLIC_APP_URL).origin, new URL(env.PUBLIC_GATEWAY_URL).origin].includes(origin);
+  return responseWithCors(response, trusted ? origin : undefined);
+}
+
 async function route(request: Request, env: GatewayEnv): Promise<Response> {
   const url = new URL(request.url);
   if (!safePath(url.pathname)) return notFound();
@@ -270,11 +302,12 @@ async function route(request: Request, env: GatewayEnv): Promise<Response> {
 export default {
   async fetch(request: Request, env: GatewayEnv): Promise<Response> {
     let response: Response;
-    try { response = await route(request, env); }
+    try { response = env.TUTS_MAINTENANCE === "true" ? maintenanceResponse(request, env) : await route(request, env); }
     catch { response = error(503, "service_unavailable", "Gateway is unavailable"); }
     return responseWithSecurityHeaders(response);
   },
   async scheduled(_event: unknown, env: GatewayEnv): Promise<void> {
+    if (env.TUTS_MAINTENANCE === "true") return;
     if (typeof env.INTERNAL_RUNTIME_SECRET !== "string" || env.INTERNAL_RUNTIME_SECRET.length < 32)
       throw new Error("Runtime secret must contain at least 32 characters");
     // Service bindings and their nested database/provider calls share the

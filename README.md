@@ -4,6 +4,8 @@ Tuts is a composable tutoring-business workspace. Its local preview brings toget
 
 The current product is a staff web app with a local preview, a container deployment configuration, and a Cloudflare runtime adapter. The hosted app is available at [tuts.palladiumscholars.com](https://tuts.palladiumscholars.com), with page visits to [tuts-palladium.pages.dev](https://tuts-palladium.pages.dev) redirecting to the custom domain. Live checks confirmed the custom hostname homepage, health endpoint, unauthenticated session endpoint, and canonical redirect. Hosted signup/sign-in and authenticated workflows remain unverified. See the [Cloudflare deployment guide](docs/cloudflare-deployment.md), [domain setup](docs/cloudflare-domain.md), and [agent tooling setup](docs/agent-setup.md). Architecture documents describe the contracts and extension workflow for this system; they include planned capabilities as well as implemented ones. The status list below is the source of truth for what is delivered today.
 
+The original local account and four owned workspaces have been restored to the hosted databases, including CRM, sessions, learning and billing records. See [data migration and recovery](docs/data-migration.md) for the backup, maintenance and integrity checks. Existing passwords were preserved; old browser sessions were not transferred.
+
 ## What works today
 
 | Area          | Delivered                                                                                                                                                                               | Not delivered yet                                                                                            |

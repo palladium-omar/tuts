@@ -14,7 +14,7 @@ do not authenticate an account or grant deployment access.
 | Wrangler CLI | Project-local credentials under `.cloudflare/cli-config/` | Authenticated; all 12 event queues and the Pages project were created through the CLI |
 | Neon MCP | Pinned to existing project `divine-poetry-44729356` with selected tool categories | No OAuth grant completed |
 | Neon CLI | Available through the local npm cache; its default profile has no saved account credentials | Unauthenticated |
-| Neon PostgreSQL | Existing project connection saved only in ignored private deployment settings | All eight service databases migrated with verified TLS and restricted roles; cross-service database access denied |
+| Neon PostgreSQL | Existing project connection saved only in ignored private deployment settings | All eight service schemas and original owned-workspace records restored with verified TLS and restricted roles; cross-service database access denied; copied rows verified against the private snapshot |
 | Deployment | All nine Workers and Pages deployed; primary origin `tuts.palladiumscholars.com` | Custom hostname homepage, `/health`, and unauthenticated session endpoint return HTTP 200 with valid TLS; HTML request for `/?view=scheduling` redirects canonically to the custom hostname; signup/sign-in and authenticated flows remain unverified |
 
 An existing signed-in provider dashboard is a separate browser session; it does

@@ -438,7 +438,7 @@ async function migrate(config, secrets) {
           const check = await client.query('SELECT has_database_privilege(current_user,$1,\'CONNECT\') AS allowed', [sqlName(config, other)]);
           if (check.rows[0].allowed) fail(`${role} can connect to another service database`);
         }
-        console.log(`${name} migrations applied with an ordinary isolated database role`);
+        console.log(`${name} schema migrations applied with an ordinary isolated database role; existing account and business records are not copied by this command`);
       } finally { await client.end(); }
     }
   } catch (error) {
