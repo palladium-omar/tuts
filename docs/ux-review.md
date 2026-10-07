@@ -2,6 +2,8 @@
 
 Three agents used the running local website in separate browser tabs, implemented fixes, and revisited the changed flows. The coordinating agent reviewed navigation and phone layouts. All created records belong to the synthetic `Tuts UX — CRM`, `Tuts UX — Teaching`, and `Tuts UX — Setup` businesses in the local development database.
 
+These fixtures were inadvertently included in the later data recovery. On October 7, their hosted memberships and workspace-discovery entries were removed, feature access was cleared, and the leftover demo communication connection was disabled. See [the cleanup record](data-migration.md#october-7-2026-test-workspace-cleanup). Keep these businesses in development for future reviews.
+
 ## Findings and changes
 
 | Area             | Observed friction                                                                                   | Change                                                                                                                  |

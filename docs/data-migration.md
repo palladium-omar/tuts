@@ -66,3 +66,11 @@ The restored records include one account, four owned workspaces, 20 CRM records,
 Fifteen historical rows referenced tenant IDs without any Platform business. Those rows remain in the private source archives and were excluded from the active copy; the original local databases were not changed. The old browser session also remains archived. Account password hashes were copied unchanged. No outbound messages or payment operations were initiated; the saved campaign is a draft, there are no pending payment attempts, and no automatic billing settings were configured.
 
 Hosted interactive sign-in and connected-provider behavior still require separate verification. Migration equality and storage read-back are the verified scope of this recovery.
+
+## October 7, 2026 test-workspace cleanup
+
+The recovery copied three development UI-review businesses alongside the real business. After the owner requested their removal, their exact names, IDs and sole-owner memberships were checked against the live databases and archived in a private recovery snapshot. Their Platform memberships and discovery-directory entries were removed in one transaction, and their feature entitlements were cleared. Their underlying business records and service data remain recoverable; they are no longer active workspaces or accessible through normal business authorization.
+
+One demo communication connection was disabled and one pending demo recipient was marked skipped. The test businesses had no active calendar connections, queued campaigns or automatic billing. A read-back found zero memberships and directory entries for the three test businesses, with only Palladium Scholars remaining in the original owner's workspace list. The real business row matched its pre-cleanup snapshot. Workspace discovery is scoped to the authenticated user's memberships; these fixtures were attached only to the original owner.
+
+The historical migration snapshot still records all four source businesses. Do not rerun that snapshot to republish development fixtures. Keep synthetic UI-review businesses in development and audit fixture provenance before any future data transfer.
