@@ -17,6 +17,8 @@ import type { ZodType } from "zod";
 import { Database } from "./database.js";
 import { EventBus } from "./events.js";
 import { ContextGuard, OPTIONS, Public, type ServiceOptions } from "./auth.js";
+import { currentDiagnosticId, logDiagnostic } from './diagnostics.js';
+export { logDiagnostic } from './diagnostics.js';
 export { Database } from "./database.js";
 export { EventBus, emitEvent } from "./events.js";
 export { Public, Roles, CurrentContext } from "./auth.js";
@@ -69,17 +71,15 @@ class ApiErrors implements ExceptionFilter {
       code = "invalid_input";
       message = "Invalid request data";
     }
-    if (status === 500)
-      console.error(
-        "Unhandled request failure",
-        error instanceof Error ? error.name : typeof error,
-      );
+    if (status >= 400) logDiagnostic(status >= 500 ? 'error' : 'warn', 'api_error', {
+      status, method: req.method, route: req.path, error,
+    });
     res
       .status(status)
       .json({
         error: { code, message },
         requestId:
-          req.context?.requestId ?? req.headers["x-request-id"] ?? null,
+          req.context?.requestId ?? currentDiagnosticId() ?? null,
       });
   }
 }

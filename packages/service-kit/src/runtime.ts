@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { Pool } from 'pg';
+import { currentDiagnosticId, logDiagnostic } from './diagnostics.js';
 
 export type CloudflareBindings = Record<string, unknown>;
 type Invocation = { bindings: CloudflareBindings; pools: Map<object, Pool>; backgroundTasks: Set<Promise<void>> };
@@ -10,8 +11,8 @@ const nodeBackgroundTasks = new Set<Promise<void>>();
 /** Keep asynchronous identity delivery alive after the HTTP response. */
 export function registerBackgroundTask(promise: Promise<unknown>): void {
   const tasks = invocation.getStore()?.backgroundTasks ?? nodeBackgroundTasks;
-  const retained = promise.then(() => {}, () => {
-    console.warn('Background service task unavailable');
+  const retained = promise.then(() => {}, (error) => {
+    logDiagnostic('error', 'background_failed', { error });
   });
   tasks.add(retained);
   void retained.then(() => { tasks.delete(retained); });
@@ -37,8 +38,8 @@ export async function withCloudflareInvocation<T>(bindings: CloudflareBindings, 
       if (scope.backgroundTasks.size && context) {
         // Keep the invocation's sockets and service-binding work alive together.
         // Only explicitly registered tasks change response cleanup semantics.
-        context.waitUntil(cleanup().catch(() => {
-          console.warn('Background service cleanup unavailable');
+        context.waitUntil(cleanup().catch((error) => {
+          logDiagnostic('error', 'cleanup_failed', { error });
         }));
       } else await cleanup();
     }
@@ -56,8 +57,8 @@ export function invocationPool(owner: object): Pool {
     pool = new Pool({ connectionString, max: 2, connectionTimeoutMillis: 5000, idleTimeoutMillis: 1000 });
     // Handle idle socket failures without leaking database details into logs.
     const invocationOwnedPool = pool;
-    pool.on('error', () => {
-      if (!invocationOwnedPool.ending) console.warn('Database connection unavailable');
+    pool.on('error', (error) => {
+      if (!invocationOwnedPool.ending) logDiagnostic('error', 'database_failed', { error });
     });
     scope.pools.set(owner, pool);
   }
@@ -65,6 +66,10 @@ export function invocationPool(owner: object): Pool {
 }
 
 export async function serviceFetch(serviceName: string, path: string, init?: RequestInit): Promise<Response> {
+  const headers = new Headers(init?.headers);
+  const requestId = currentDiagnosticId();
+  if (requestId) headers.set('x-request-id', requestId);
+  init = { ...init, headers };
   if (!/^[a-z][a-z0-9_-]*$/i.test(serviceName) || !path.startsWith('/') || path.startsWith('//')) {
     throw new Error('Invalid internal service destination');
   }

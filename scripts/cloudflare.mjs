@@ -93,6 +93,14 @@ export function createConfigs(configInput, subscriptions, projectRoot = root) {
     compatibility_flags: ['nodejs_compat', 'enable_nodejs_http_server_modules'],
     ...(config.accountId ? { account_id: config.accountId } : {}),
     preview_urls: false,
+    // Keep recovery tokens out of URL metadata. Application records use only
+    // normalized routes and an explicit safe field allowlist.
+    observability: {
+      enabled: true, redact_query_string: true,
+      logs: { enabled: true, head_sampling_rate: 1, invocation_logs: false, persist: true },
+      traces: { enabled: false },
+    },
+    upload_source_maps: true,
     alias: Object.fromEntries(['class-validator', 'class-transformer', 'class-transformer/storage', '@nestjs/websockets/socket-module', '@nestjs/microservices/microservices-module', '@nestjs/microservices'].map(name => [name, join(projectRoot, 'packages/service-kit/dist/cloudflare-optional.js')])),
     send_metrics: false,
     minify: true,

@@ -114,7 +114,7 @@ test("verified tenant context replaces spoofed headers; path/query/body and cook
   assert.equal(forwarded.req.headers.get("idempotency-key"), "request-1");
   assert.equal(forwarded.req.headers.get("x-real-ip"), "203.0.113.15");
   for (const name of ["x-platform-internal-secret", "x-user-id", "x-role", "x-entitlements", "x-business-id",
-    "x-context-user", "x-request-id", "x-forwarded-for", "forwarded", "cf-connecting-ip"])
+    "x-context-user", "x-forwarded-for", "forwarded", "cf-connecting-ip"])
     assert.equal(forwarded.req.headers.get(name), null, name);
   const { payload } = await jwtVerify(forwarded.req.headers.get("authorization").slice(7), publicKey, {
     issuer: "palladium-gateway", audience: "palladium-services", algorithms: ["EdDSA"],
@@ -123,6 +123,9 @@ test("verified tenant context replaces spoofed headers; path/query/body and cook
   assert.equal(payload.sub, "staff-user");
   assert.equal(payload.role, "owner");
   assert.notEqual(payload.requestId, "attacker");
+  assert.equal(payload.requestId, forwarded.req.headers.get("x-request-id"));
+  assert.equal(payload.requestId, contextCall.req.headers.get("x-request-id"));
+  assert.equal(payload.requestId, response.headers.get("x-request-id"));
   assert.equal(payload.exp - payload.iat, 60);
 });
 
@@ -321,8 +324,9 @@ test("every public response receives the existing security headers without mergi
   broken.env.ASSETS.fetch = async () => { throw new Error("broken static binding"); };
   responses.push(await worker.fetch(broken.request("/"), broken.env));
   assert.deepEqual(responses.map((response) => response.status), [200, 200, 404, 400, 403, 403, 201, 503]);
-  for (const response of responses)
-    for (const [name, value] of Object.entries(expected)) assert.equal(response.headers.get(name), value);
+  for (const [index, response] of responses.entries())
+    for (const [name, value] of Object.entries(expected))
+      assert.equal(response.headers.get(name), name === "referrer-policy" && [4,5,6].includes(index) ? "no-referrer" : value);
   const cookies = responses[6].headers.getSetCookie();
   assert.deepEqual(cookies, [
     "session=one; Path=/; Expires=Wed, 21 Oct 2026 07:28:00 GMT",

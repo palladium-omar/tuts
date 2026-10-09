@@ -10,6 +10,7 @@ import {
   currentCloudflareBindings,
   Database,
   isCloudflareRuntime,
+  logDiagnostic,
   registerBackgroundTask,
   serviceFetch,
 } from "@palladium/service-kit";
@@ -86,10 +87,10 @@ export class IdentityService implements OnModuleInit {
             const receipt = (await response.json()) as { accepted?: unknown };
             if (receipt?.accepted !== true)
               throw new Error("Recovery delivery unavailable");
-          } catch {
+          } catch (error) {
             // BetterAuth returns its generic success even if delivery fails.
             // Exposing failures only for existing users would disclose accounts.
-            console.warn("Password recovery delivery unavailable");
+            logDiagnostic('error', 'password_mail_failed', { error });
           }
         },
       },
@@ -171,6 +172,7 @@ export class IdentityService implements OnModuleInit {
       !/^[A-Za-z0-9_+/=-]{32,512}$/.test(secret) ||
       !transportConfigured
     ) {
+      logDiagnostic("error", "password_mail_not_configured", { status: 503 });
       throw new ServiceUnavailableException("Password recovery is temporarily unavailable");
     }
   }

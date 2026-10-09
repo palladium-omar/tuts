@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { gateway } from "../../lib/api";
+import { gateway, supportReference } from "../../lib/api";
 import styles from "../recovery.module.css";
 
 export default function ForgotPasswordForm() {
@@ -31,9 +31,9 @@ export default function ForgotPasswordForm() {
         body: JSON.stringify({ email, redirectTo: `${window.location.origin}/reset-password` }),
       });
       if (!response.ok) {
-        setError(response.status === 429
+        setError((response.status === 429
           ? "Too many requests. Wait a few minutes before trying again."
-          : "Password reset email is temporarily unavailable. Please try again later.");
+          : "Password reset email is currently unavailable. Please contact support.") + supportReference(response));
         return;
       }
       form.reset();

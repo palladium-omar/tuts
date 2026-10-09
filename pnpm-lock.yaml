@@ -38,6 +38,9 @@ importers:
       '@palladium/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@palladium/service-kit':
+        specifier: workspace:*
+        version: link:../../packages/service-kit
       express:
         specifier: ^5.1.0
         version: 5.2.1

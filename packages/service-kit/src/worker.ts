@@ -5,6 +5,7 @@ import { createServiceApplication } from './index.js';
 import { EventBus } from './events.js';
 import type { ServiceOptions } from './auth.js';
 import { withCloudflareInvocation, type CloudflareBindings } from './runtime.js';
+import { diagnosticId, logDiagnostic, withDiagnostics } from './diagnostics.js';
 
 export interface WorkerServiceOptions extends Omit<ServiceOptions, 'migrationsDir'> {
   migrationsDir?: string;
@@ -55,7 +56,13 @@ export function createWorkerService(options: WorkerServiceOptions) {
         'waitUntil' in context && typeof context.waitUntil === 'function'
         ? { waitUntil: context.waitUntil.bind(context) as (promise: Promise<unknown>) => void }
         : undefined;
-      return withCloudflareInvocation(bindings, async () => {
+      const requestId = diagnosticId(request.headers.get('x-request-id'));
+      const tickRequest = new URL(request.url).pathname === '/__runtime/tick';
+      return withDiagnostics({ service: options.name, requestId, trigger: tickRequest ? 'scheduled' : 'http' }, async () => {
+      const started = Date.now();
+      let status = 500;
+      try {
+      const result = await withCloudflareInvocation(bindings, async () => {
         const tick = new URL(request.url).pathname === '/__runtime/tick';
         if (tick && (request.method !== 'POST' || !authorizedTick(request, bindings))) {
           return new Response('Unauthorized', { status: 401 });
@@ -73,13 +80,26 @@ export function createWorkerService(options: WorkerServiceOptions) {
         const body = response.body ? await response.arrayBuffer() : null;
         if (response.status < 400) {
           try { await events.flushOutbox(); }
-          catch { console.warn(`[${options.name}] outbox publication deferred`); }
+          catch (error) { logDiagnostic('warn', 'outbox_deferred', { error }); }
         }
         return new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers });
-      }, new URL(request.url).pathname === '/__runtime/tick' ? undefined : backgroundContext);
+      }, tickRequest ? undefined : backgroundContext);
+      status = result.status;
+      const headers = new Headers(result.headers);
+      headers.set('x-request-id', requestId);
+      return new Response(result.body, { status, statusText: result.statusText, headers });
+      } catch (error) {
+        logDiagnostic('error', tickRequest ? 'tick_failed' : 'request_failed', { error });
+        // Cloudflare also records uncaught exceptions: never rethrow raw SQL or provider text.
+        throw new Error('Tuts service invocation failed; consult structured diagnostics');
+      } finally {
+        logDiagnostic(status >= 500 ? 'error' : status >= 400 ? 'warn' : 'info', 'request_completed', { status, method: request.method, route: new URL(request.url).pathname, durationMs: Date.now() - started });
+      }
+      });
     },
     async queue(batch: QueueBatch, bindings: CloudflareBindings): Promise<void> {
-      await withCloudflareInvocation(bindings, async () => {
+      await withDiagnostics({ service: options.name, requestId: diagnosticId(), trigger: 'queue' }, async () => {
+      try { await withCloudflareInvocation(bindings, async () => {
         const { app } = await application(bindings);
         const events = app.get(EventBus);
         for (const message of batch.messages) {
@@ -87,11 +107,15 @@ export function createWorkerService(options: WorkerServiceOptions) {
             await events.consumeEvent(message.body);
             await events.flushOutbox();
             message.ack();
-          } catch {
-            console.warn(`[${options.name}] queue processing deferred`);
+          } catch (error) {
+            logDiagnostic('warn', 'queue_retry', { error });
             message.retry({ delaySeconds: 30 });
           }
         }
+      }); } catch (error) {
+        logDiagnostic('error', 'queue_failed', { error });
+        throw new Error('Tuts queue invocation failed; consult structured diagnostics');
+      }
       });
     },
   };

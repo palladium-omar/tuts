@@ -1,5 +1,6 @@
 import { importPKCS8, SignJWT } from "jose";
 import { requestContextSchema, serviceNames } from "@palladium/contracts";
+import { diagnosticId, currentDiagnosticId, diagnosticBusiness, logDiagnostic, withDiagnostics } from "@palladium/service-kit/diagnostics";
 
 /** Domain Workers are private service bindings; only this Worker has ingress. */
 export interface FetchBinding {
@@ -231,7 +232,7 @@ function maintenanceResponse(request: Request, env: GatewayEnv): Response {
   return responseWithCors(response, trusted ? origin : undefined);
 }
 
-async function route(request: Request, env: GatewayEnv): Promise<Response> {
+async function route(request: Request, env: GatewayEnv, requestId: string): Promise<Response> {
   const url = new URL(request.url);
   if (!safePath(url.pathname)) return notFound();
   const match = /^\/api\/([^/]+)(\/.*)?$/.exec(url.pathname);
@@ -259,6 +260,7 @@ async function route(request: Request, env: GatewayEnv): Promise<Response> {
   if (length && (!/^\d+$/.test(length) || Number(length) > limit))
     return decorate(error(413, "body_too_large", "Request body is too large"));
   const headers = sanitizedHeaders(request, hook);
+  headers.set("x-request-id", requestId);
   if (service !== "platform" && !hook) {
     const businessId = request.headers.get("x-business-id");
     if (!businessId) return decorate(error(400, "business_required", "Select a business"));
@@ -267,6 +269,7 @@ async function route(request: Request, env: GatewayEnv): Promise<Response> {
       const contextHeaders = new Headers({
         "content-type": "application/json", cookie: request.headers.get("cookie") ?? "",
         "x-platform-internal-secret": env.PLATFORM_INTERNAL_SECRET,
+        "x-request-id": requestId,
       });
       const contextResponse = await boundFetch(env.PLATFORM, "https://platform.internal/internal/context",
         new Request("https://gateway.internal/context", {
@@ -275,10 +278,11 @@ async function route(request: Request, env: GatewayEnv): Promise<Response> {
         }), contextHeaders, 64 * 1024, 5000, true);
       if (!contextResponse.ok) return decorate(contextResponse);
       const { item } = await contextResponse.json() as { item: unknown };
-      const context = requestContextSchema.parse({ ...(item as object), requestId: crypto.randomUUID() });
+      const context = requestContextSchema.parse({ ...(item as object), requestId });
       if (context.businessId !== businessId) throw new Error("Platform returned a different business");
       if (!context.entitlements.includes(service!))
         return decorate(error(403, "feature_disabled", "Feature is not enabled for this business"));
+      diagnosticBusiness(context.businessId);
       let key = keys.get(env);
       if (!key) {
         key = importPKCS8(env.CONTEXT_PRIVATE_KEY.replace(/\\n/g, "\n"), "EdDSA");
@@ -288,7 +292,8 @@ async function route(request: Request, env: GatewayEnv): Promise<Response> {
         .setIssuer("palladium-gateway").setAudience("palladium-services")
         .setIssuedAt().setExpirationTime("60s").sign(await key);
       headers.set("authorization", `Bearer ${token}`);
-    } catch {
+    } catch (reason) {
+      logDiagnostic("error", "identity_failed", { error: reason, target: "platform" });
       return decorate(error(503, "identity_unavailable", "Business access could not be verified"));
     }
   }
@@ -297,6 +302,7 @@ async function route(request: Request, env: GatewayEnv): Promise<Response> {
     return decorate(await boundFetch(binding, `https://${service}.internal${path}${url.search}`,
       request, headers, limit, 30_000));
   } catch (reason) {
+    logDiagnostic("error", "upstream_failed", { error: reason, target: service });
     return decorate(reason instanceof BodyTooLarge
       ? error(413, "body_too_large", "Request body is too large")
       : error(503, "service_unavailable", `${service} service is unavailable`));
@@ -305,14 +311,29 @@ async function route(request: Request, env: GatewayEnv): Promise<Response> {
 
 export default {
   async fetch(request: Request, env: GatewayEnv): Promise<Response> {
-    let response: Response;
-    try { response = env.TUTS_MAINTENANCE === "true" ? maintenanceResponse(request, env) : await route(request, env); }
-    catch { response = error(503, "service_unavailable", "Gateway is unavailable"); }
-    const path = new URL(request.url).pathname;
-    const sensitive = /^\/(?:forgot-password|reset-password)(?:\/|$)/.test(path) || path.startsWith("/api/platform/auth/");
-    return responseWithSecurityHeaders(response, sensitive);
+    const requestId = diagnosticId(); // Public callers cannot forge support references.
+    return withDiagnostics({ service: 'gateway', requestId, trigger: 'http' }, async () => {
+      const started = Date.now();
+      let response: Response;
+      try { response = env.TUTS_MAINTENANCE === "true" ? maintenanceResponse(request, env) : await route(request, env, requestId); }
+      catch (reason) {
+        logDiagnostic('error', 'request_failed', { error: reason });
+        response = error(503, "service_unavailable", "Gateway is unavailable");
+      }
+      const path = new URL(request.url).pathname;
+      logDiagnostic(response.status >= 500 ? 'error' : response.status >= 400 ? 'warn' : 'info', 'request_completed', {
+        status: response.status, method: request.method, route: path, durationMs: Date.now() - started,
+      });
+      const sensitive = /^\/(?:forgot-password|reset-password)(?:\/|$)/.test(path) || path.startsWith("/api/platform/auth/");
+      const secured = responseWithSecurityHeaders(response, sensitive);
+      const headers = copyResponseHeaders(secured);
+      headers.set('x-request-id', requestId);
+      headers.set('access-control-expose-headers', 'X-Request-Id');
+      return new Response(secured.body, { status: secured.status, statusText: secured.statusText, headers });
+    });
   },
   async scheduled(_event: unknown, env: GatewayEnv): Promise<void> {
+    return withDiagnostics({ service: "gateway", requestId: diagnosticId(), trigger: "scheduled" }, async () => {
     if (env.TUTS_MAINTENANCE === "true") return;
     if (typeof env.INTERNAL_RUNTIME_SECRET !== "string" || env.INTERNAL_RUNTIME_SECRET.length < 32)
       throw new Error("Runtime secret must contain at least 32 characters");
@@ -322,17 +343,22 @@ export default {
     for (const name of serviceNames) {
       try {
         const url = `https://${name}.internal/__runtime/tick`;
-        const headers = new Headers({ authorization: `Bearer ${env.INTERNAL_RUNTIME_SECRET}` });
+        const headers = new Headers({ authorization: `Bearer ${env.INTERNAL_RUNTIME_SECRET}`, "x-request-id": currentDiagnosticId()! });
         const request = new Request(url, { method: "POST", headers });
         const response = await boundFetch(env[name.toUpperCase() as Uppercase<typeof name>],
           url, request, headers, 64 * 1024, 30_000);
         // The tick result is only a status; consume no provider/tenant data here.
         await response.body?.cancel();
-        if (!response.ok) failed = true;
-      } catch {
+        if (!response.ok) {
+          failed = true;
+          logDiagnostic("error", "tick_failed", { target: name, status: response.status });
+        } else logDiagnostic("info", "tick_completed", { target: name, status: response.status });
+      } catch (reason) {
+        logDiagnostic("error", "tick_failed", { target: name, error: reason });
         failed = true;
       }
     }
     if (failed) throw new Error("Scheduled service jobs failed");
+    });
   },
 };

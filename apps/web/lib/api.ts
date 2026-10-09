@@ -14,6 +14,10 @@ export type Api = (
 ) => Promise<any>;
 export const gateway =
   (process.env.NEXT_PUBLIC_GATEWAY_URL ?? "http://localhost:8080").replace(/\/$/, "");
+export function supportReference(response: Response): string {
+  const id = response.headers.get("x-request-id");
+  return id && /^[a-f\d]{8}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{12}$/i.test(id) ? ` Reference: ${id}` : "";
+}
 export function createApi(businessId?: string): Api {
   return async (path, method = "GET", body, key) => {
     const multipart = body instanceof FormData;
@@ -40,7 +44,7 @@ export function createApi(businessId?: string): Api {
         data.message ??
         `Request failed (${response.status})`;
       throw new Error(
-        Array.isArray(message) ? message.join(". ") : String(message),
+        (Array.isArray(message) ? message.join(". ") : String(message)) + supportReference(response),
       );
     }
     return data;

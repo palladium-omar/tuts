@@ -2,6 +2,7 @@ import { createParamDecorator, ExecutionContext, SetMetadata, Injectable, Inject
 import { Reflector } from '@nestjs/core';
 import { importSPKI, jwtVerify } from 'jose';
 import { requestContextSchema, type RequestContext } from '@palladium/contracts';
+import { diagnosticBusiness } from './diagnostics.js';
 export const OPTIONS = 'PALLADIUM_SERVICE_OPTIONS';
 export interface ServiceOptions { name: string; port: number; controllers: any[]; providers?: any[]; migrationsDir: string; entitlement?: string; }
 export const Public = () => SetMetadata('palladium.public', true);
@@ -22,6 +23,7 @@ export class ContextGuard implements CanActivate {
       req.context = requestContextSchema.parse(payload);
     } catch { throw new UnauthorizedException('Invalid or expired service context'); }
     const context = req.context as RequestContext;
+    diagnosticBusiness(context.businessId);
     if (this.options.entitlement && !context.entitlements.includes(this.options.entitlement)) throw new ForbiddenException('Feature is not enabled for this business');
     const roles = this.reflector.getAllAndOverride<RequestContext['role'][]>('palladium.roles',[execution.getHandler(),execution.getClass()]) ?? ['owner','admin','tutor'];
     if (!roles.includes(context.role)) throw new ForbiddenException('Role cannot perform this operation');
