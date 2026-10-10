@@ -5,7 +5,7 @@ import type {PoolClient} from 'pg';
 import {createHash,randomUUID} from 'node:crypto';
 import {z} from 'zod';
 import * as s from './schemas.js';
-import {builtInTemplates,type TemplateDefinition} from './templates.js';
+import {builtInTemplates,cycleForSystemKey,templatesForCycle,type TemplateDefinition} from './templates.js';
 type Row=Record<string,any>;
 const scoped=(ctx:RequestContext)=>ctx.accessScope==='students'||['student','parent'].includes(ctx.role);
 const administrator=(ctx:RequestContext)=>!scoped(ctx)&&['owner','admin'].includes(ctx.role);
@@ -51,9 +51,14 @@ export class PlanningService {
    const body=z.object({item:z.object({id:z.uuid()})}).parse(await response.json());assertStudentAccess(ctx,body.item.id);return body.item.id;
   }catch(error){if(error instanceof NotFoundException||error instanceof ForbiddenException)throw error;throw new ServiceUnavailableException('Student validation is unavailable');}
  }
- private async seed(tx:PoolClient,ctx:RequestContext) {
-  for(const template of builtInTemplates)await tx.query(`INSERT INTO planning_templates(business_id,template_key,version,name,definition,system)
-   VALUES($1,$2,$3,$4,$5,true) ON CONFLICT DO NOTHING`,[ctx.businessId,template.key,template.version,template.name,JSON.stringify(template)]);
+ private async seed(tx:PoolClient,ctx:RequestContext,cycle?:number) {
+  const templates=cycle&&cycle>2031?[...builtInTemplates,...templatesForCycle(cycle)]:builtInTemplates;
+  // One tenant-scoped insert per request, regardless of the number of releases.
+  // Existing versions remain immutable and previously-created boards untouched.
+  await tx.query(`INSERT INTO planning_templates(business_id,template_key,version,name,definition,system)
+   SELECT $1,seed.key,seed.version,seed.name,seed.definition::jsonb,true
+   FROM unnest($2::text[],$3::integer[],$4::text[],$5::text[]) AS seed(key,version,name,definition)
+   ON CONFLICT DO NOTHING`,[ctx.businessId,templates.map(t=>t.key),templates.map(t=>t.version),templates.map(t=>t.name),templates.map(t=>JSON.stringify(t))]);
  }
  private async template(tx:PoolClient,key:string,version?:number):Promise<{item:Row;definition:TemplateDefinition}> {
   const row=(await tx.query(`SELECT * FROM planning_templates WHERE template_key=$1${version?' AND version=$2':''} ORDER BY version DESC LIMIT 1`,version?[key,version]:[key])).rows[0];
@@ -61,10 +66,10 @@ export class PlanningService {
  }
  private templateItem(row:Row) {return {key:row.template_key,version:row.version,name:row.name,system:row.system,definition:row.definition,createdAt:iso(row.created_at)};}
  async templates(ctx:RequestContext,query:z.infer<typeof s.templateQuerySchema>) {
-  return this.db.withTenant(ctx.businessId,async tx=>{await this.seed(tx,ctx);const rows=(await tx.query(`SELECT DISTINCT ON(template_key) * FROM planning_templates WHERE (definition->>'cycle')::integer=$1 ORDER BY template_key,version DESC LIMIT 200`,[query.cycle])).rows;return {items:rows.map(row=>this.templateItem(row)),cycle:query.cycle};});
+  return this.db.withTenant(ctx.businessId,async tx=>{await this.seed(tx,ctx,query.cycle);const rows=(await tx.query(`SELECT DISTINCT ON(template_key) * FROM planning_templates WHERE (definition->>'cycle')::integer=$1 ORDER BY template_key,version DESC LIMIT 200`,[query.cycle])).rows;return {items:rows.map(row=>this.templateItem(row)),cycle:query.cycle};});
  }
  async templateDetail(ctx:RequestContext,key:string,version?:number) {
-  return this.db.withTenant(ctx.businessId,async tx=>{await this.seed(tx,ctx);return {item:this.templateItem((await this.template(tx,key,version)).item)};});
+  return this.db.withTenant(ctx.businessId,async tx=>{await this.seed(tx,ctx,cycleForSystemKey(key));return {item:this.templateItem((await this.template(tx,key,version)).item)};});
  }
  async createTemplate(ctx:RequestContext,input:z.infer<typeof s.customTemplateSchema>) {
   if(!input.key.startsWith('custom-'))throw new BadRequestException('User template keys must begin with custom-');
@@ -166,7 +171,7 @@ export class PlanningService {
  async instantiate(ctx:RequestContext,key:string,input:z.infer<typeof s.instantiateSchema>,authorization:string) {
   const student=await this.student(ctx,input.studentId,authorization);
   const hash=createHash('sha256').update(JSON.stringify({key,...input})).digest('hex');
-  return this.db.withTenant(ctx.businessId,async tx=>{await this.seed(tx,ctx);
+  return this.db.withTenant(ctx.businessId,async tx=>{await this.seed(tx,ctx,cycleForSystemKey(key));
    await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[`${ctx.businessId}:${ctx.sub}:instantiate:${input.idempotencyKey}`]);
    const saved=(await tx.query('SELECT * FROM planning_instantiations WHERE actor_id=$1 AND idempotency_key=$2',[ctx.sub,input.idempotencyKey])).rows[0];
    if(saved){if(saved.request_hash!==hash)throw new ConflictException('Idempotency key was used for different template choices');return {...await this.detail(tx,ctx,await this.board(tx,ctx,saved.board_id)),replayed:true};}
@@ -184,17 +189,31 @@ export class PlanningService {
   const board=await this.board(tx,ctx,id,true);this.manager(ctx,board);if(!board.template_key)throw new BadRequestException('Board was not created from a template');if(version<board.template_version)throw new ConflictException('Template review cannot roll back to an older version');
   const {definition}=await this.template(tx,board.template_key,version);if(definition.cycle!==board.applicability?.cycle||definition.country!==board.applicability?.country||definition.round!==board.applicability?.round||definition.program!==board.applicability?.program||definition.applicantCategory!==board.applicability?.applicantCategory||(definition.applicantCountries.length&&!definition.applicantCountries.includes(board.applicability?.applicantCountry)))throw new ConflictException('New template applicability requires a new board');
   const rows=(await tx.query('SELECT * FROM planning_cards WHERE board_id=$1 AND archived_at IS NULL',[id])).rows;
+  const columns=(await tx.query('SELECT * FROM planning_columns WHERE board_id=$1 ORDER BY position,id LIMIT 30',[id])).rows;
   const suggestions=rows.filter(row=>row.template_card_key&&definition.cards.some(card=>card.key===row.template_card_key)).map(row=>({cardId:row.id,expectedRevision:Number(row.revision),templateCardKey:row.template_card_key,currentDeadline:row.deadline,proposedDeadline:definition.cards.find(card=>card.key===row.template_card_key)!.deadline,preserveUserEdit:Boolean(row.deadline_edited)}));
-  return {board,definition,suggestions};
+  const addedCards=definition.cards.filter(card=>!rows.some(row=>row.template_card_key===card.key)).map(card=>({...card,
+   destinationColumnId:(columns.find(column=>column.name===definition.columns[card.columnIndex])??columns[card.columnIndex]??columns[0])?.id??null}));
+  return {board,definition,suggestions,addedCards,rows};
  }
- async reviewTemplate(ctx:RequestContext,id:string,version:number) {return this.db.withTenant(ctx.businessId,async tx=>{const {board,definition,suggestions}=await this.review(tx,ctx,id,version);return {board:boardItem(board),templateVersion:definition.version,suggestions,addedCards:definition.cards.filter(card=>!suggestions.some(suggestion=>suggestion.templateCardKey===card.key)).map(card=>({key:card.key,title:card.title})),automaticApply:false};});}
+ async reviewTemplate(ctx:RequestContext,id:string,version:number) {return this.db.withTenant(ctx.businessId,async tx=>{const {board,definition,suggestions,addedCards}=await this.review(tx,ctx,id,version);return {board:boardItem(board),templateVersion:definition.version,suggestions,addedCards,automaticApply:false};});}
  async applyTemplate(ctx:RequestContext,id:string,input:z.infer<typeof s.templateApplySchema>) {
-  return this.db.withTenant(ctx.businessId,async tx=>{const {board,definition,suggestions}=await this.review(tx,ctx,id,input.version);this.expect(board.revision,input.expectedRevision,'Board');
+  return this.db.withTenant(ctx.businessId,async tx=>{const {board,definition,suggestions,addedCards,rows}=await this.review(tx,ctx,id,input.version);this.expect(board.revision,input.expectedRevision,'Board');
    const selected=new Set(input.cardIds);if(selected.size!==input.cardIds.length||input.cardIds.some(id=>!suggestions.some(row=>row.cardId===id)))throw new BadRequestException('Select existing template cards');
+   const selectedKeys=input.addedCardKeys??[],addKeys=new Set(selectedKeys);
+   if(addKeys.size!==selectedKeys.length||selectedKeys.some(key=>!definition.cards.some(card=>card.key===key)))throw new BadRequestException('Select existing template task keys');
+   const additions=addedCards.filter(card=>addKeys.has(card.key));
+   if(rows.length+additions.length>500)throw new ConflictException('A board supports up to 500 active cards');
+   if(additions.some(card=>!card.destinationColumnId))throw new ConflictException('Add a board column before adding template tasks');
    const updated:Row[]=[];for(const suggestion of suggestions.filter(row=>selected.has(row.cardId))){if(suggestion.preserveUserEdit)continue;const row=(await tx.query('UPDATE planning_cards SET deadline=$2,revision=revision+1,updated_at=now() WHERE id=$1 RETURNING *',[suggestion.cardId,JSON.stringify(suggestion.proposedDeadline)])).rows[0];updated.push(row);}
+   const added:Row[]=[];
+   for(const card of additions){
+    const position=Math.min(1e9,Math.max(-1,...[...rows,...added].filter(row=>row.column_id===card.destinationColumnId).map(row=>Number(row.position)))+1);
+    added.push(await this.insertCard(tx,ctx,board,{...card,columnId:card.destinationColumnId,position,templateCardKey:card.key}));
+   }
    // Date updates are explicit; titles, checklists, resources, custom cards and
-   // user-edited dates are never replaced by publishing a template revision.
-   await tx.query('UPDATE planning_boards SET template_version=$2 WHERE id=$1',[id,definition.version]);const changed=await this.bump(tx,ctx,board);for(const card of updated)await cardEvent(tx,ctx,changed,card);return {board:boardItem(changed),cards:updated.map(cardItem),preservedCardIds:suggestions.filter(row=>selected.has(row.cardId)&&row.preserveUserEdit).map(row=>row.cardId)};
+   // user-edited dates are never replaced. Selected additions append under the
+   // parent lock; a fresh-revision retry skips keys already present on the board.
+   await tx.query('UPDATE planning_boards SET template_version=$2 WHERE id=$1',[id,definition.version]);const changed=await this.bump(tx,ctx,board);for(const card of [...updated,...added])await cardEvent(tx,ctx,changed,card);return {board:boardItem(changed),cards:[...updated,...added].map(cardItem),addedCards:added.map(cardItem),alreadyPresentCardKeys:selectedKeys.filter(key=>rows.some(row=>row.template_card_key===key)),preservedCardIds:suggestions.filter(row=>selected.has(row.cardId)&&row.preserveUserEdit).map(row=>row.cardId)};
   });
  }
 }

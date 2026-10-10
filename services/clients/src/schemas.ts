@@ -1,8 +1,10 @@
 import { z } from "zod";
 import { validStudentPhoto } from "./student-photo.js";
+import { planningProfileSchema } from "./planning-profile.js";
 export const clientIdSchema = z.uuid();
 export const contactStatusSchema = z.enum(["lead", "active", "inactive"]);
 export const contactFields = {
+    planningProfile: planningProfileSchema.nullable(),
     photo: z.string().max(349600).refine(validStudentPhoto,"Photo must be a PNG, JPEG or WebP of at most 256 KiB").nullable(),
     firstName: z.string().trim().max(80),
     lastName: z.string().trim().max(80),
@@ -31,7 +33,8 @@ export const createClientSchema = z
     ...optionalFields,
 })
     .strict()
-    .refine((v) => Boolean(v.displayName || [v.firstName, v.lastName].filter(Boolean).join(" ")), "A display name or first/last name is required");
+    .refine((v) => Boolean(v.displayName || [v.firstName, v.lastName].filter(Boolean).join(" ")), "A display name or first/last name is required")
+    .refine((v) => v.kind === "student" || v.planningProfile == null, "Planning profiles belong to students");
 // Kind is immutable because payer relationships depend on it.
 export const updateClientSchema = z
     .object(optionalFields)

@@ -5,6 +5,7 @@ import type { RequestContext } from '@palladium/contracts';
 import type { PoolClient } from 'pg';
 import { type ClientRow } from './contact-store.js';
 import { requireStudent } from './student-identity.js';
+import { studentPlanningProfile } from './planning-profile.js';
 const pagination = z.object({
     limit: z.coerce.number().int().min(1).max(100).default(50), offset: z.coerce.number().int().min(0).max(100000).default(0)
 }).strict();
@@ -64,7 +65,7 @@ export class PortalStudentsController {
             phones: unknown;
         }>(`SELECT c.id,c.display_name,s.relationship,s.is_primary,COALESCE((SELECT jsonb_agg(jsonb_build_object('id',a.id,'value',a.value,'label',a.label,'isPrimary',a.is_primary) ORDER BY a.is_primary DESC,a.id) FROM contact_addresses a WHERE a.business_id=c.business_id AND a.contact_id=c.id AND a.kind='email'),'[]'::jsonb) emails,COALESCE((SELECT jsonb_agg(jsonb_build_object('id',a.id,'value',a.value,'label',a.label,'isPrimary',a.is_primary) ORDER BY a.is_primary DESC,a.id) FROM contact_addresses a WHERE a.business_id=c.business_id AND a.contact_id=c.id AND a.kind='phone'),'[]'::jsonb) phones FROM student_contacts s JOIN related_contacts c ON c.business_id=s.business_id AND c.id=s.contact_id WHERE s.student_id=$1 ORDER BY s.is_primary DESC,c.id LIMIT 100`, [row.id]);
         return {
-            id: row.id, firstName: row.first_name, lastName: row.last_name, displayName: row.display_name, photo: row.photo ?? null, revision: row.revision, contacts: contacts.rows.map(c => ({
+            id: row.id, firstName: row.first_name, lastName: row.last_name, displayName: row.display_name, photo: row.photo ?? null, revision: row.revision, planningProfile: studentPlanningProfile(row.planning_profile), contacts: contacts.rows.map(c => ({
                 id: c.id, displayName: c.display_name, relationship: c.relationship, isPrimary: c.is_primary, emails: c.emails, phones: c.phones
             }))
         };

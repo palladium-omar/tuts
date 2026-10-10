@@ -237,3 +237,47 @@ Each phase is integrated before starting dependent phases. Parallel agents own
 disjoint paths within a phase; root owns contracts, shared authorization, runtime
 registration, migrations/deployment orchestration and final integration. No agent
 changes production, commits, or sends external messages independently.
+
+## Kanban interaction and application planning revision (2026-10-10)
+
+A drag updates the browser's board immediately. A board-scoped mutation queue
+persists moves through Planning's authenticated HTTP API in order, using the
+latest acknowledged board/card revisions. Later optimistic moves remain visible
+when earlier acknowledgements arrive. There is no database connection in the
+browser. The queue isolates boards, abandons stale view updates on navigation,
+and surfaces a recoverable failure without disabling the entire workspace.
+Revision conflicts refresh the authoritative board and preserve/replay safe
+pending intent; retries must not silently overwrite another actor's edits.
+Whole task cards activate drag after a movement threshold. Normal clicks open
+cards; menus, links, inputs, and keyboard controls retain their own behavior.
+
+Clients owns an optional, validated planning profile on the student record:
+current grade (9–12), the academic year starting in September, expected graduation
+year, and optional explicit university-entry year. Only these educational facts
+are exposed in the student-safe projection. A missing or inconsistent profile is
+handled with a short guided clarification; no year is inferred from a name or
+contact address. Planning chooses the relevant entry cycle from these facts:
+grade 12 in 2026–27 means 2027 entry, grade 11 means 2028, and grade 9 means 2030.
+An explicit entry year takes precedence for gap years and other school systems.
+
+Templates provide dated preparation milestones and typical application rounds,
+including ED/EA, RD, financial aid and SAT preparation/testing. Exact official
+published deadlines retain their source, timezone and verification date.
+November 1 and January 1 defaults are useful planning targets and are labelled
+as typical dates to confirm for the chosen institution, never universal official
+requirements. Future cycles can use suggested milestones while their official
+calendars are unpublished. Templates publish immutable new versions; existing
+boards keep manual edits and receive reviewable update suggestions.
+
+Existing template boards expose a reviewed update: select unedited deadline
+changes and missing template tasks (individually or in bulk). Planning validates
+selected stable keys, capacity, destination columns, permission and board revision
+under its parent lock; it appends tasks, emits their events and advances the
+template version in one tenant transaction. A fresh-revision retry skips already
+present keys. The latest version can still add previously skipped tasks.
+
+Pending moves live in browser memory for the authenticated API context; view
+navigation retains them, while a full reload does not provide offline replay.
+Conflicted moves require an explicit review/apply decision after authoritative
+state recovery. Student education edits remain a tutor capability; a student
+can provide missing education facts for the plan without CRM write access.

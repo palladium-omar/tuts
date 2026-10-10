@@ -120,6 +120,11 @@ Card create/PATCH accepts `deadline: null` or:
 null; timezone must be an IANA zone. Official dates require a source link.
 The response additionally contains `status: verified|requires_confirmation|user_set`
 and `verifiedAt: ISO|null`. Only the reviewed built-in template can set verified.
+Suggested template preparation dates use `kind: personal`,
+`status: requires_confirmation` and `verifiedAt: null`; their applicability
+explains that they are planning targets. They do not mean the student has agreed
+that date. Suggested reminders use noon UTC as a calendar marker, not an
+institution's submission cutoff or a test center appointment time.
 A supplied official date remains requires_confirmation; a supplied personal date
 is user_set. No date supplied is requires_confirmation. Editing or clearing a
 template date sets `deadlineEdited=true`, preventing template updates from
@@ -129,17 +134,19 @@ personal milestones and the visible verification state.
 ### Templates
 
 Templates are immutable versioned tenant records. First use seeds built-in
-versions with `ON CONFLICT DO NOTHING`; a source update must publish a higher
-version. System templates cannot be overwritten through the API.
+versions with one tenant-scoped batch `INSERT ... ON CONFLICT DO NOTHING`; a source
+update must publish a higher version. System templates cannot be overwritten
+through the API. The six original 2027 version-1 definitions are preserved; the
+dated release uses version 2 and the same template/card keys.
 
 | Method/path | Input | Response |
 | --- | --- | --- |
-| GET `/v1/templates` | `?cycle=2027` | `{items:[Template],cycle}` (bounded200 latest versions) |
+| GET `/v1/templates` | `?cycle=2027` (entry year, 2027–2200) | `{items:[Template],cycle}` (bounded200 latest versions) |
 | GET `/v1/templates/:key` | `?version=1` optional; latest otherwise | `{item:Template}` |
 | POST `/v1/templates/:key/instantiate` | below | board detail plus `{replayed:boolean}` |
 | POST `/v1/templates` | custom definition below; staff role only | `{item:Template}` with next immutable version |
 | GET `/v1/boards/:id/template-review` | `?version=2` | `{board,templateVersion,suggestions,addedCards,automaticApply:false}` |
-| POST `/v1/boards/:id/template-apply` | `{version,expectedRevision,cardIds:UUID[]}` | `{board,cards,preservedCardIds}` |
+| POST `/v1/boards/:id/template-apply` | `{version,expectedRevision,cardIds:UUID[],addedCardKeys?:string[]}` | `{board,cards,addedCards,alreadyPresentCardKeys,preservedCardIds}` |
 
 `Template = {key,version,name,system,definition,createdAt}`.
 Definition includes `key,version,name,cycle,country,applicantCountries,
@@ -147,6 +154,21 @@ applicantCategory,program,round,applicability,sourceUrls,verifiedAt,columns,card
 Country is destination ISO2; applicantCountries is empty or an explicit origin
 country constraint. Columns are names; cards have a stable `key`, `columnIndex`
 and the ordinary card fields, with response deadline metadata.
+
+Built-in releases cover entry cycles 2027–2031. A request for a later supported
+cycle generates the same six template families with dated suggested preparation
+milestones and persists them as immutable version 1. Direct detail/instantiate
+requests for those system keys also seed the matching cycle. This generation
+never copies a 2027 verified date into a future official deadline. Future dates
+all require confirmation, even where a provider has announced an anticipated
+calendar. Each future source URL is a place to check, not proof of that date.
+
+Clients owns the student's planning profile; Planning does not infer a grade or
+cycle from identity fields. The caller resolves entry year from that validated
+profile and supplies `cycle`. Grade 12 in 2026–27 corresponds to 2027 entry,
+grade 11 to 2028 and grade 9 to 2030, with an explicit entry year taking precedence.
+Use each returned definition's exact scope fields during instantiation; the
+Campus France round changes with the procedure year.
 
 Instantiation requires an explicit template choice and scope confirmation:
 
@@ -186,7 +208,27 @@ Template review never overwrites a board automatically. Suggestions expose the
 current/proposed date, templateCardKey, cardId, expectedRevision and
 preserveUserEdit. Apply only changes dates on selected, unedited template cards;
 other card fields and custom cards remain intact. User-edited dates are returned
-in preservedCardIds. Added template cards are suggestions for manual creation.
+in preservedCardIds. `addedCards` in review contains each missing task's complete
+template card fields plus `destinationColumnId` (nullable if no column exists).
+The service chooses the matching template column name, then the current column
+at the template's ordinal, then the first current column. This preserves renamed
+or reordered board columns and gives the preview a concrete destination.
+
+Supply reviewed `addedCardKeys` explicitly to append selected missing tasks,
+including their dates, checklists and references, without recreating the board.
+The optional field defaults to no additions and supports at most 200 unique
+template keys. The board lock and expected revision protect both date updates
+and additions in one tenant transaction; the 500 active-card limit applies before
+any changes. All added tasks receive ordinary card IDs, stable `templateCardKey`,
+revision 1 and `deadlineEdited: false`. They append after current destination
+cards. Invalid keys, missing columns or stale revisions do not partially change
+the board.
+
+The apply response's `cards` includes changed existing cards and new cards;
+`addedCards` contains only the new cards. A retry with the old revision returns
+409. After refreshing, selecting a key that is already present safely skips it
+and lists it in `alreadyPresentCardKeys`, preventing duplicate tasks. Missing
+tasks can also be selected later at the board's current template version.
 Older versions cannot roll a board back. New country/program/round applicability
 requires a new board rather than silently reclassifying existing work.
 
@@ -205,10 +247,28 @@ promise that an institution's dates or requirements cannot change.
 | `bocconi-2027-early-international` | 29 Sep2026,15:00 Europe/Rome; already closed | Historical tracking only, same official source |
 | `campus-france-maroc-2027` | 15 Nov2026,23:59 Africa/Casablanca | Morocco 2026/27 application procedure for2027 entry, listed connected/DAP programs only; [official Morocco calendar](https://www.maroc.campusfrance.org/calendrier-de-la-procedure-de-candidature-20262027) |
 
-No generic university admission deadline, inferred interview deadline, result
-release date or personal preparation deadline is manufactured. The source's
-current applicant category, individual course, country/procedure and admissions
-round control applicability. Each unspecified deadline stays visibly unverified.
+The Common App release includes an ED/EA **November 1** and RD **January 1**
+typical target, essay/recommendation milestones, separate financial aid preparation
+and SAT preparation, registration, testing and score-reporting reminders. Typical
+dates require confirmation for each chosen institution; aid priority dates are
+separate and may differ. CSS Profile, institution aid forms and FAFSA eligibility
+must be checked for the individual applicant. The [Common App application
+guide](https://www.commonapp.org/apply/first-year-students/) and [College Board CSS
+Profile](https://cssprofile.collegeboard.org/) are reference sources, not universal
+aid deadline sources.
+
+For 2027 entry, [College Board's calendar](https://satsuite.collegeboard.org/sat/dates-deadlines)
+confirms the October 3, 2026 and December 5, 2026 SAT dates. Their regular
+registration deadlines are September 18 and November 20 at 23:59 ET, respectively,
+and those exact registration cutoffs are verified official cards.
+[Score release dates](https://satsuite.collegeboard.org/scores/score-release-dates)
+are October 16 and December 18. Testing cards are personal calendar reminders;
+the admission ticket controls arrival time. October is the last scheduled SAT
+before the typical November 1 target, and is already past at this review. A
+December attempt can precede January targets only when the chosen college's
+accepted-test and score receipt rules allow it. No institution's acceptance of a
+specific test is inferred. Future testing reminders are planning windows requiring
+the official test, registration and score-release calendar to be confirmed.
 
 ## Events and merges
 
@@ -233,8 +293,18 @@ an old source grant cannot authorize the merge target. No access grant transfers
 
 ## Build checkpoint and limitations
 
-`pnpm --filter @palladium/planning build` passed. No tests were added/run, migrations
-applied or provider actions performed. Root owns dependency installation, service
+`pnpm --filter @palladium/planning typecheck` passed. Nine focused tests passed:
+
+```sh
+TSX_TSCONFIG_PATH=services/planning/tsconfig.json node --import tsx --test services/planning/test/*.test.ts
+```
+
+They cover dated releases, future provenance, preserved old versions/card keys,
+batch tenant seeding, explicit review/additions, preservation of edited dates,
+destination columns, addition retry deduplication, capacity and stale revision
+and scope/actor rejection. Service tests use a transaction fixture; they do not
+replace database RLS integration checks. No migrations were needed or applied,
+and no provider actions were performed. Root owns dependency installation, service
 registry, queue wiring and deployment. Multiple boards, card/column changes and
 source-backed dates are implemented independently of provider credentials.
 Arbitrary link previews, external document creation, provider deadline monitoring

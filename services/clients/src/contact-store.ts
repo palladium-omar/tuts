@@ -5,9 +5,11 @@ import { emitEvent } from "@palladium/service-kit";
 import type { ContactInput, ContactPatch } from "./schemas.js";
 import { normalizeName, syncLegacyContact } from "./student-identity.js";
 import { validateCustomFields } from "./custom-fields.js";
+import type { PlanningProfile } from "./planning-profile.js";
 export type ClientRow = {
   id: string;
   photo: string | null;
+  planning_profile: PlanningProfile | null;
   revision: number;
   merged_into: string | null;
   portal_protected_at: Date | null;
@@ -30,6 +32,7 @@ export type ClientRow = {
 export const item = (r: ClientRow) => ({
   id: r.id,
   photo: r.photo ?? null,
+  planningProfile: r.planning_profile ?? null,
   kind: r.kind,
   revision: r.revision,
   portalProtected: Boolean(r.portal_protected_at),
@@ -72,6 +75,7 @@ export async function createContact(
   input: ContactInput,
   correlationId?: string,
 ) {
+  if (input.kind !== "student" && input.planningProfile != null) throw new BadRequestException("Planning profiles belong to students");
   await validateCustomFields(tx, input.customFields ?? {});
   const id = randomUUID();
   const displayName =
@@ -83,8 +87,8 @@ export async function createContact(
     );
   const result = await tx.query<ClientRow>(
     `INSERT INTO clients
-    (business_id,id,kind,display_name,first_name,last_name,email,phone,notes,status,tags,source,custom_fields,email_opt_in,whatsapp_opt_in,photo)
-    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14,$15,$16) RETURNING *`,
+    (business_id,id,kind,display_name,first_name,last_name,email,phone,notes,status,tags,source,custom_fields,email_opt_in,whatsapp_opt_in,photo,planning_profile)
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14,$15,$16,$17::jsonb) RETURNING *`,
     [
       businessId,
       id,
@@ -102,6 +106,7 @@ export async function createContact(
       input.emailOptIn ?? false,
       input.whatsappOptIn ?? false,
       input.photo ?? null,
+      input.planningProfile == null ? null : JSON.stringify(input.planningProfile),
     ],
   );
   await tx.query("UPDATE clients SET normalized_name=$2 WHERE id=$1", [id, normalizeName(displayName)]);
@@ -120,6 +125,7 @@ export async function createContact(
   return result.rows[0]!;
 }
 const columns = {
+  planningProfile: "planning_profile",
   photo: "photo",
   firstName: "first_name",
   lastName: "last_name",
@@ -145,6 +151,7 @@ export async function updateContact(
 ) {
   await validateCustomFields(tx, input.customFields ?? {});
   const currentCanonical = await requireClient(tx, id);
+  if (currentCanonical.kind !== "student" && input.planningProfile != null) throw new BadRequestException("Planning profiles belong to students");
   id = currentCanonical.id;
   const patch = { ...input };
   if (patch.email) patch.email = normalizeEmail(patch.email);
@@ -172,10 +179,10 @@ export async function updateContact(
   const assignments = Object.entries(patch).map(([key, value]) => {
     const column = columns[key as keyof typeof columns];
     if (!column) throw new Error("Unsupported client field");
-    values.push(key === "customFields" ? JSON.stringify(value) : value);
+    values.push((key === "customFields" || key === "planningProfile") && value !== null ? JSON.stringify(value) : value);
     return key === "customFields"
       ? `custom_fields=custom_fields || $${values.length}::jsonb`
-      : `${column}=$${values.length}`;
+      : `${column}=$${values.length}${key === "planningProfile" ? "::jsonb" : ""}`;
   });
   if (!assignments.length) return requireClient(tx, id);
   const result = await tx.query<ClientRow>(

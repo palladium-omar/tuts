@@ -160,9 +160,10 @@ export async function saveRelatedContact(tx: PoolClient, ctx: RequestContext, st
         });
     return (await listRelatedContacts(tx, studentId)).find(c => c.id === id)!;
 }
-const mergeFields = ['photo', 'firstName', 'lastName', 'displayName', 'notes', 'status', 'source', 'emailOptIn', 'whatsappOptIn'] as const;
+const mergeFields = ['planningProfile', 'photo', 'firstName', 'lastName', 'displayName', 'notes', 'status', 'source', 'emailOptIn', 'whatsappOptIn'] as const;
 const addressKinds = ['email', 'phone'] as const;
 const empty = (value: unknown) => value === null || value === undefined || value === '';
+const profileValue = (value: object | null) => value === null ? 'null' : JSON.stringify(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)));
 export async function mergePreview(tx: PoolClient, sourceId: string, targetId: string) {
     if (sourceId === targetId)
         throw new ConflictException('Choose two different students');
@@ -206,7 +207,7 @@ export async function mergePreview(tx: PoolClient, sourceId: string, targetId: s
         target: unknown;
     }[] = [];
     for (const field of mergeFields)
-        if (!empty(a[field]) && !empty(b[field]) && a[field] !== b[field])
+        if (!empty(a[field]) && !empty(b[field]) && (field === 'planningProfile' ? profileValue(a[field]) !== profileValue(b[field]) : a[field] !== b[field]))
             conflicts.push({
                 field, source: a[field], target: b[field]
             });

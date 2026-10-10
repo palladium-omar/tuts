@@ -138,3 +138,11 @@
 @media (prefers-reduced-motion: reduce) { .planning-guide-step { animation: none; }.planning-space *, .planning-guide * { transition: none !important; }.planning-drag-overlay { transform: none; } }
 
 .student-board-kanban[data-dragging="true"] { scroll-snap-type: none; }
+
+.student-board-card.is-grabbable, .student-board-card.is-grabbable .student-board-card-open { cursor: grab; touch-action: none; }
+.student-board-card.is-grabbable:active, .student-board-card.is-grabbable .student-board-card-open:active { cursor: grabbing; }
+.planning-card-tools { cursor: auto; touch-action: auto; }
+.planning-move-recovery { margin: 16px 0; padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--tint); font-size: 13px; line-height: 1.6; }
+.planning-move-recovery p { margin: 0 0 10px; }
+.planning-move-recovery ul { padding-left: 20px; overflow-wrap: anywhere; }
+.planning-move-recovery .student-boards-actions { margin-bottom: 0; }
