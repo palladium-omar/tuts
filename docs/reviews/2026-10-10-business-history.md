@@ -33,6 +33,9 @@ service databases and capabilities are preserved. Architecture was documented in
   with recalculated amount, current-month invoices, all-month paid filter.
   Browser upload chooser was unavailable; multipart upload was exercised through
   the authenticated gateway instead. No real client rows used as browser fixtures.
+- Narrow 390px dashboard check caught a chart accessibility table extending the
+  page width. Added a clipped screen-reader wrapper and shared accessible label
+  style, then rechecked page width.
 - Browser walkthrough caught a renamed dashboard navigation guard preventing
   return from another feature; corrected and regression tested before release.
 
