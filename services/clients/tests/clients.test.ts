@@ -57,7 +57,7 @@ test("create runs insert and non-PII event on the same selected tenant transacti
       return work({
         async query(sql: string, values: unknown[]) {
           queries.push({ sql, values });
-          return { rows: [row] };
+          return { rows: sql.startsWith('INSERT INTO clients') ? [row] : [] };
         },
       });
     },
@@ -66,12 +66,12 @@ test("create runs insert and non-PII event on the same selected tenant transacti
     displayName: "Synthetic Student",
   });
   assert.equal(result.item.displayName, "Synthetic Student");
-  assert.equal(queries.length, 3);
   assert.ok(queries[0]!.sql.includes("pg_advisory_xact_lock"));
   assert.ok(queries[1]!.sql.startsWith("INSERT INTO clients"));
   assert.equal(queries[1]!.values[0], tenant);
-  assert.ok(queries[2]!.sql.startsWith("INSERT INTO service_outbox"));
-  const event = JSON.parse(queries[2]!.values[1] as string);
+  const outbox = queries.find(query => query.sql.startsWith('INSERT INTO service_outbox'))!;
+  assert.ok(outbox, 'create must persist its event inside the same tenant callback');
+  const event = JSON.parse(outbox.values[1] as string);
   assert.equal(event.businessId, tenant);
   assert.equal(event.type, "clients.client-created.v1");
   assert.deepEqual(event.data, {

@@ -36,6 +36,8 @@
 .duplicate-retained-addresses { list-style: none; padding: 0; margin: 10px 0 14px; display: grid; gap: 8px; }
 .duplicate-retained-addresses li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; overflow-wrap: anywhere; }
 .duplicate-retained-addresses small { color: var(--muted); }
+.duplicate-address-choice { display: flex; align-items: center; gap: 9px; margin: 0; min-width: 0; }
+.duplicate-address-choice input { width: 16px; height: 16px; flex-shrink: 0; accent-color: var(--accent); }
 .duplicate-confirm { display: flex; align-items: flex-start; gap: 10px; line-height: 1.6; font-size: 13px; }
 .duplicate-confirm input { width: 16px; height: 16px; flex-shrink: 0; margin-top: 3px; accent-color: var(--accent); }
 .duplicate-source-issues { border-top: 1px solid var(--line); margin-top: 24px; padding-top: 18px; }

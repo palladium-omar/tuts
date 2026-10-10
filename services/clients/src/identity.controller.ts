@@ -16,7 +16,8 @@ const contact = z.object({
 }).strict().refine(v => (v.emails?.filter(a => a.isPrimary).length ?? 0) <= 1 && (v.phones?.filter(a => a.isPrimary).length ?? 0) <= 1, 'Only one primary address of each kind');
 const merge = z.object({
     sourceId: z.uuid(), targetId: z.uuid(), sourceRevision: z.number().int().positive(), targetRevision: z.number().int().positive(), fieldChoices: z.record(z.string().max(100), z.enum(['source', 'target'])).default({}),
-    primaryAddresses: z.object({ email: z.email().max(320).optional(), phone: z.string().trim().min(3).max(40).optional() }).strict().optional()
+    primaryAddresses: z.object({ email: z.email().max(320).optional(), phone: z.string().trim().min(3).max(40).optional() }).strict().optional(),
+    retainedAddresses: z.object({ email: z.array(z.email().max(320)).max(20).optional(), phone: z.array(z.string().trim().min(3).max(40)).max(20).optional() }).strict().optional()
 }).strict();
 const pagination = z.object({
     limit: z.coerce.number().int().min(1).max(100).default(50), offset: z.coerce.number().int().min(0).max(100000).default(0)

@@ -148,9 +148,12 @@ test("partial custom patch merges values and emits current consent within transa
     tx(async (sql, values = []) => {
       queries.push({ sql, values });
       return {
-        rows: sql.includes("client_fields")
-          ? [definition]
-          : [{ id: clientId, email_opt_in: true, whatsapp_opt_in: false }],
+        rows: sql.includes("client_fields") ? [definition]
+          : sql.startsWith('WITH RECURSIVE canonical') || sql.includes('RETURNING *') ? [{
+            id: clientId, kind: 'student', display_name: 'Synthetic Student',
+            email: null, phone: null, revision: 1, merged_into: null,
+            email_opt_in: true, whatsapp_opt_in: false
+          }] : [],
       };
     }),
     ctx.businessId,
