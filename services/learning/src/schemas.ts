@@ -76,6 +76,10 @@ export const listSchema = z
 export const resourceListSchema = listSchema.omit({ status: true }).extend({
   kind: z.enum(['google_doc', 'link', 'file_metadata']).optional(),
 });
+// Portal filters use the same pagination and student scope as staff reads.
+export const portalAssignmentListSchema = listSchema.extend({
+  status: z.enum(['assigned', 'submitted', 'completed', 'needs_revision', 'actionable']).optional(),
+});
 
 export const uploadSchema = z
   .object({ clientId: uuid, title: z.string().trim().min(1).max(200) })

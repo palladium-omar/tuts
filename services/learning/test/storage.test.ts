@@ -33,7 +33,8 @@ test("private R2 reads use the business namespace and reject traversal", async (
 });
 test("SQL upload failure cleans up the private R2 object", async () => {
   const fake = bucket();
-  const db = { async withTenant() { throw new Error("SQL rollback"); } } as unknown as Database;
+  // Authorize/lock first, write the object, then simulate the metadata insert failing.
+  const db = { async withTenant(_id: string, work: (tx: unknown) => Promise<unknown>) { return work({ async query(sql: string) { if (sql.startsWith('INSERT INTO resources')) throw new Error('SQL rollback'); return {rows: []}; } }); } } as unknown as Database;
   const service = new LearningService(db); service.storageFactory = () => fake.storage;
   await assert.rejects(service.uploadResource(ctx, { clientId: randomUUID(), title: "Worksheet" }, upload), /SQL rollback/);
   assert.equal(fake.objects.size, 0);

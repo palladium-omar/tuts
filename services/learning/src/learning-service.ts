@@ -7,7 +7,7 @@ import type { RequestContext } from '@palladium/contracts';
 import { assignmentView, resourceView, type AssignmentRow, type ResourceRow } from './learning-model.js';
 import { resourceStorage, type ResourceStorage } from './storage.js';
 import { validateUpload, type UploadedResourceFile } from './uploads.js';
-import { assignmentSchema, listSchema, resourceListSchema, resourceSchema, reviewSchema, submissionSchema, uploadSchema, submissionUploadSchema, uuid } from './schemas.js';
+import { assignmentSchema, listSchema, portalAssignmentListSchema, resourceListSchema, resourceSchema, reviewSchema, submissionSchema, uploadSchema, submissionUploadSchema, uuid } from './schemas.js';
 import { authorizedStudent, lockLearning, scopedIds } from './student-scope.js';
 const withResources = `SELECT a.*,ARRAY(SELECT ar.resource_id FROM assignment_resources ar WHERE ar.business_id=a.business_id AND ar.assignment_id=a.id ORDER BY ar.resource_id) resource_ids,ARRAY(SELECT ar.resource_id FROM assignment_submission_resources ar WHERE ar.business_id=a.business_id AND ar.assignment_id=a.id ORDER BY ar.resource_id) submission_resource_ids FROM assignments a`;
 @Injectable()
@@ -54,16 +54,17 @@ export class LearningService {
             }
         });
     }
-    async listAssignments(ctx: RequestContext, query: unknown) {
-        const q = parseBody(listSchema, query);
+    async listAssignments(ctx: RequestContext, query: unknown, portal = false) {
+        const q = parseBody(portal ? portalAssignmentListSchema : listSchema, query);
         return this.db.withTenant(ctx.businessId, async (tx) => {
             const clientId = q.clientId ? await authorizedStudent(tx, ctx, q.clientId) : null, scope = scopedIds(ctx);
             const values = [ctx.businessId, clientId, q.status ?? null, scope];
-            const where = `a.business_id=$1 AND ($2::uuid IS NULL OR a.client_id=$2) AND ($3::text IS NULL OR a.status=$3) AND ($4::uuid[] IS NULL OR a.client_id=ANY($4::uuid[]))`;
+            const where = `a.business_id=$1 AND ($2::uuid IS NULL OR a.client_id=$2) AND ($3::text IS NULL OR a.status=$3 OR ($3='actionable' AND a.status IN ('assigned','needs_revision'))) AND ($4::uuid[] IS NULL OR a.client_id=ANY($4::uuid[]))`;
             const count = await tx.query<{
                 total: string;
             }>(`SELECT count(*) total FROM assignments a WHERE ${where}`, values);
-            const rows = await tx.query<AssignmentRow>(`${withResources} WHERE ${where} ORDER BY a.created_at DESC,a.id LIMIT $5 OFFSET $6`, [...values, q.limit, q.offset]);
+            const order = portal ? "CASE WHEN a.status IN ('assigned','needs_revision') THEN 0 WHEN a.status='submitted' THEN 1 ELSE 2 END,a.due_at ASC NULLS LAST,a.created_at DESC,a.id" : 'a.created_at DESC,a.id';
+            const rows = await tx.query<AssignmentRow>(`${withResources} WHERE ${where} ORDER BY ${order} LIMIT $5 OFFSET $6`, [...values, q.limit, q.offset]);
             const items = await Promise.all(rows.rows.map(r => this.assignmentDetail(tx, ctx, r)));
             return {
                 items, total: Number(count.rows[0]!.total), limit: q.limit, offset: q.offset

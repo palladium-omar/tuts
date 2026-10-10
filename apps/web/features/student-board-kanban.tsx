@@ -5,35 +5,29 @@ import { CSS } from "@dnd-kit/utilities";
 import { CheckCheck, GripVertical, MoreHorizontal, Plus } from "lucide-react";
 import type { Row } from "../lib/api";
 import { deadlineTime } from "./student-board-card";
-import { positionBetween } from "../lib/kanban-order";
+import { positionBetween, keyboardTaskStep } from "../lib/kanban-order";
 
 const sorted = (cards: Row[], columnId: string) => cards.filter(card => card.columnId === columnId).sort((a, b) => a.position - b.position || a.id.localeCompare(b.id));
 export function StudentBoardKanban({ columns, cards, canWrite, canManage, busy, onMove, onEdit, onAdd, onColumn }: { columns: Row[]; cards: Row[]; canWrite: boolean; canManage: boolean; busy: boolean; onMove: (card: Row, columnId: string, position: number) => Promise<void>; onEdit: (card: Row) => void; onAdd: (column: Row, position: number) => void; onColumn: (column: Row) => void }) {
   const [activeId, setActiveId] = useState<string | null>(null), [preview, setPreview] = useState<Row[]>(cards);
   useEffect(() => { if (!activeId) setPreview(cards); }, [cards, activeId]);
   const previewRef = useRef(preview); previewRef.current = preview;
+  const keyboardTarget = useRef<{columnId: string; targetId: string} | null>(null);
   const keyboardCoordinates: KeyboardCoordinateGetter = (event, { context }) => {
     if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.code)) return;
     event.preventDefault();
-    const rows = previewRef.current, active = rows.find(card => card.id === context.active?.id);
-    const overCard = rows.find(card => card.id === context.over?.id);
-    const columnId = overCard?.columnId ?? columns.find(column => column.id === context.over?.id)?.id ?? active?.columnId;
-    if (!columnId) return;
-    if (event.code === "ArrowLeft" || event.code === "ArrowRight") {
-      const index = columns.findIndex(column => column.id === columnId), next = columns[index + (event.code === "ArrowRight" ? 1 : -1)];
-      if (!next) return;
-      const target = sorted(rows.filter(card => card.id !== active?.id), next.id)[0];
-      const rect = context.droppableRects.get(target?.id ?? next.id);
-      if (rect) return { x: rect.left + (target ? 0 : 12), y: rect.top + (target ? 0 : 52) };
-    } else {
-      const siblings = sorted(rows, columnId), index = siblings.findIndex(card => card.id === (overCard?.id ?? active?.id));
-      const target = siblings[index + (event.code === "ArrowDown" ? 1 : -1)], rect = target && context.droppableRects.get(target.id);
-      if (rect) return { x: rect.left, y: rect.top };
-    }
+    const step = keyboardTaskStep(previewRef.current as (Row & {id: string; columnId: string; position: number})[], columns as (Row & {id: string})[], String(context.active?.id), event.code);
+    if (!step) return;
+    keyboardTarget.current = step;
+    previewRef.current = step.cards; setPreview(step.cards);
+    requestAnimationFrame(() => document.getElementById(`planning-handle-${context.active?.id}`)?.focus({preventScroll: true}));
+    const rect = context.droppableRects.get(step.targetId);
+    if (rect) return {x: rect.left + (step.targetId === step.columnId ? 12 : 0), y: rect.top + (step.targetId === step.columnId ? 53 : 1)};
   };
-  const sensors = useSensors(useSensor(MouseSensor, { activationConstraint: { distance: 5 } }), useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 6 } }), useSensor(KeyboardSensor, { coordinateGetter: keyboardCoordinates }));
+  const sensors = useSensors(useSensor(MouseSensor, { activationConstraint: { distance: 5 } }), useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 6 } }), useSensor(KeyboardSensor, { coordinateGetter: keyboardCoordinates, scrollBehavior: "auto" }));
   const activeCard = cards.find(card => card.id === activeId);
   const collisions: CollisionDetection = args => {
+    if (!args.pointerCoordinates && keyboardTarget.current) return [{id: keyboardTarget.current.targetId}];
     const hits = pointerWithin(args), candidates = hits.length ? hits : rectIntersection(args);
     const hit = candidates[0];
     if (hit && columns.some(column => column.id === hit.id)) {
@@ -55,29 +49,31 @@ export function StudentBoardKanban({ columns, cards, canWrite, canManage, busy, 
     });
   }
   function end(event: DragEndEvent) {
-    const original = cards.find(card => card.id === event.active.id), current = preview.find(card => card.id === event.active.id);
-    if (!original || !current || !event.over) { setActiveId(null); setPreview(cards); return; }
-    const target = preview.find(card => card.id === event.over!.id), columnId = target?.columnId ?? columns.find(column => column.id === event.over!.id)?.id ?? current.columnId;
-    let order = sorted(preview, columnId);
+    const rows = previewRef.current, keyboard = event.activatorEvent instanceof KeyboardEvent;
+    const targetId = keyboard ? keyboardTarget.current?.targetId ?? event.over?.id : event.over?.id;
+    const original = cards.find(card => card.id === event.active.id), current = rows.find(card => card.id === event.active.id);
+    if (!original || !current || !targetId) { setActiveId(null); setPreview(cards); return; }
+    const target = rows.find(card => card.id === targetId), columnId = keyboard ? current.columnId : target?.columnId ?? columns.find(column => column.id === targetId)?.id ?? current.columnId;
+    let order = sorted(rows, columnId);
     const index = order.findIndex(card => card.id === current.id), targetIndex = target ? order.findIndex(card => card.id === target.id) : order.length - 1;
     // Cross-column insertion is previewed during dragging; within-column sorting
     // uses the final drop target. Cancelled drags never reach the persistence API.
-    if (original.columnId === current.columnId && index >= 0 && targetIndex >= 0) order = arrayMove(order, index, targetIndex);
+    if (!keyboard && original.columnId === current.columnId && index >= 0 && targetIndex >= 0) order = arrayMove(order, index, targetIndex);
     const at = order.findIndex(card => card.id === current.id), before = order[at - 1], after = order[at + 1];
     const position = positionBetween(before?.position, after?.position);
-    setActiveId(null);
+    keyboardTarget.current = null; setActiveId(null);
     if (original.columnId === columnId && sorted(cards, columnId).findIndex(card => card.id === original.id) === at) { setPreview(cards); return; }
     void onMove(original, columnId, position).finally(() => {
       if (event.activatorEvent instanceof KeyboardEvent) document.getElementById(`planning-handle-${original.id}`)?.focus({ preventScroll: true });
     });
   }
-  return <DndContext sensors={sensors} collisionDetection={collisions} onDragStart={event => { setPreview(cards); setActiveId(String(event.active.id)); }} onDragOver={over} onDragEnd={end} onDragCancel={() => { setActiveId(null); setPreview(cards); }} accessibility={{ announcements: {
+  return <DndContext sensors={sensors} collisionDetection={collisions} onDragStart={event => { keyboardTarget.current = null; previewRef.current = cards; setPreview(cards); setActiveId(String(event.active.id)); }} onDragOver={over} onDragEnd={end} onDragCancel={() => { keyboardTarget.current = null; setActiveId(null); setPreview(cards); }} accessibility={{ announcements: {
       onDragStart: ({ active }) => `Picked up ${cards.find(card => card.id === active.id)?.title ?? "task"}.`,
       onDragOver: ({ active, over }) => { const rows = previewRef.current, target = rows.find(card => card.id === over?.id), column = columns.find(item => item.id === (target?.columnId ?? over?.id)); return column ? `${rows.find(card => card.id === active.id)?.title ?? "Task"}, over ${column.name}.` : undefined; },
       onDragEnd: ({ active }) => `${cards.find(card => card.id === active.id)?.title ?? "Task"} dropped.`,
       onDragCancel: () => "Move cancelled. The task is unchanged.",
     }, screenReaderInstructions: { draggable: "Press Space to pick up a task. Use arrow keys to move it, Space to drop, and Escape to cancel." } }}>
-    <div className="student-board-kanban" aria-label="Planning board columns">{columns.map((column, index) => <Column key={column.id} column={column} index={index} items={sorted(preview, column.id)} canManage={canManage} canWrite={canWrite} busy={busy} onColumn={onColumn} onAdd={onAdd}>
+    <div className="student-board-kanban" data-dragging={!!activeId} aria-label="Planning board columns">{columns.map((column, index) => <Column key={column.id} column={column} index={index} items={sorted(preview, column.id)} canManage={canManage} canWrite={canWrite} busy={busy} onColumn={onColumn} onAdd={onAdd}>
       {sorted(preview, column.id).map(card => <Task key={card.id} card={card} columns={columns} canWrite={canWrite} busy={busy} onEdit={onEdit} onMove={onMove} cards={cards} />)}
     </Column>)}</div>
     <DragOverlay dropAnimation={{ duration: 180, easing: "cubic-bezier(.2,.8,.2,1)" }}>{activeCard ? <article className="student-board-card planning-drag-overlay"><TaskContent card={activeCard} /></article> : null}</DragOverlay>

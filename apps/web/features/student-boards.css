@@ -32,6 +32,30 @@
 .student-template-scope p { font-size: 13px; color: var(--muted); line-height: 1.6; }
 .student-board-danger { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--line); }
 .student-board-banner { border-radius: 8px; background: var(--tint); padding: 12px; margin: 12px 0; line-height: 1.6; font-size: 13px; }
+.planning-space .crm-record-fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.planning-task-view { min-width: 0; }
+.planning-task-view h3 { margin: 24px 0 12px; font-size: 15px; }
+.planning-task-view p, .planning-task-view strong, .planning-task-view label { overflow-wrap: anywhere; }
+.planning-task-toolbar, .planning-task-section-title { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.planning-task-description { white-space: pre-wrap; line-height: 1.7; color: var(--muted); }
+.planning-task-section-title h3 { margin: 0; }
+.planning-task-section-title span { color: var(--muted); font-size: 12px; }
+.planning-task-checklist-section { margin: 24px 0; }
+.planning-task-checklist-section progress { width: 100%; height: 6px; margin: 14px 0; accent-color: var(--accent); }
+.planning-task-check { display: flex; flex-direction: row; align-items: flex-start; gap: 12px; border: 1px solid var(--line); border-radius: 10px; padding: 14px; margin: 8px 0; line-height: 1.6; cursor: pointer; }
+.planning-task-check input { flex: 0 0 18px; width: 18px; height: 18px; margin-top: 2px; accent-color: var(--accent); }
+.planning-task-check span { min-width: 0; }
+.planning-task-check.is-complete { background: var(--tint); color: var(--muted); }
+.planning-task-check.is-complete span { text-decoration: line-through; }
+.planning-task-checklist-section small { display: block; min-height: 20px; color: var(--muted); font-size: 12px; margin-top: 10px; }
+.planning-task-references { display: grid; gap: 10px; }
+.planning-task-reference { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 16px; border: 1px solid var(--line); border-radius: 10px; text-decoration: none; }
+.planning-task-reference:hover { background: var(--tint); border-color: var(--accent); }
+.planning-task-reference > span:first-child { min-width: 0; }
+.planning-task-reference strong, .planning-task-reference small { display: block; }
+.planning-task-reference small { margin-bottom: 5px; font-size: 11px; color: var(--muted); }
+.planning-task-advanced { margin: 18px 0; }
+.planning-task-advanced summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 @media (max-width: 640px) { .student-board-grid { grid-template-columns: 1fr; } .student-board-links-row { grid-template-columns: minmax(0, 1fr) auto; } .student-board-links-row label:first-child { grid-column: 1 / -1; } }
 .student-board-banner .student-template-source, a.student-template-source { display: block; margin: 8px 0; }
 .student-board-tile > button:hover h3, .student-board-card-open:hover strong { color: var(--accent); }
@@ -60,7 +84,7 @@
 .student-board-card-open small, .planning-deadline-pill { overflow-wrap: anywhere; max-width: 100%; }
 .planning-deadline-pill { display: inline-block; margin-top: 12px; padding: 3px 7px; background: var(--tint); color: var(--accent); border-radius: 5px; font-size: 10px; line-height: 1.6; }
 .planning-deadline-pill.needs-date { background: #f5efe0; color: #80622f; }
-.student-board-card small.planning-task-checklist { display: flex; align-items: center; gap: 4px; margin-top: 10px; font-size: 11px; }
+.student-board-card small.planning-task-checklist-section { display: flex; align-items: center; gap: 4px; margin-top: 10px; font-size: 11px; }
 .planning-card-tools { position: absolute; top: 9px; right: 5px; display: flex; flex-direction: column; align-items: center; }
 .planning-icon-button { border: 0; padding: 4px; background: transparent; color: var(--muted); border-radius: 5px; }
 .planning-icon-button:hover { background: var(--tint); color: var(--ink); }
@@ -112,3 +136,5 @@
 @keyframes planning-enter { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 @media (max-width: 640px) { .planning-path-grid { grid-template-columns: 1fr; }.planning-guide { margin-top: 4px; }.planning-guide h2 { font-size: 26px; }.student-board-column { flex-basis: 264px; width: 264px; }.planning-preview-header, .planning-preview ul { padding-left: 16px; padding-right: 16px; } }
 @media (prefers-reduced-motion: reduce) { .planning-guide-step { animation: none; }.planning-space *, .planning-guide * { transition: none !important; }.planning-drag-overlay { transform: none; } }
+
+.student-board-kanban[data-dragging="true"] { scroll-snap-type: none; }

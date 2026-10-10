@@ -30,7 +30,7 @@ export class PortalLearningController {
     ctx: RequestContext, 
     @Query()
     query: unknown) {
-        return portalLinks(await this.learning.listAssignments(ctx, query));
+        return portalLinks(await this.learning.listAssignments(ctx, query, true));
     }
     @Get('assignments/:id')
     @Permissions('learning.read')

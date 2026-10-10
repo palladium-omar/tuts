@@ -13,6 +13,16 @@
 .portal-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
 .portal-card { padding: 22px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); min-width: 0; }
 .portal-card h3 { margin: 0 0 12px; }
+.portal-card h3, .portal-card p, .portal-welcome h1 { overflow-wrap: anywhere; }
+.portal-welcome > div { min-width: 0; }
+.portal-learning-toolbar { display: flex; gap: 18px; flex-wrap: wrap; align-items: flex-end; margin: 12px 0 24px; }
+.portal-learning-toolbar > div { flex: 1; min-width: 240px; }
+.portal-learning-toolbar h2 { font-size: 24px; margin: 0 0 8px; }
+.portal-learning-toolbar p { margin: 0; }
+.portal-learning-toolbar label { margin: 0; min-width: 170px; }
+.portal-past-due { display: inline-block; padding: 2px 6px; margin-left: 8px; border-radius: 5px; color: #805c21; background: #fbf2df; font-size: 11px; }
+.portal-draft-status { color: var(--muted); font-size: 12px; line-height: 1.6; }
+.portal-shell .crm-record-fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .portal-card p { line-height: 1.6; font-size: 14px; white-space: pre-wrap; }
 .portal-card .status { margin-bottom: 8px; display: inline-block; }
 .portal-material { display: flex; gap: 10px; align-items: flex-start; border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin: 10px 0; }
