@@ -24,6 +24,7 @@ export interface GatewayEnv {
   PUBLIC_APP_URL: string;
   PUBLIC_GATEWAY_URL: string;
   TUTS_MAINTENANCE?: string;
+  CONTENT_SECURITY_POLICY?: string;
 }
 
 const BODY_LIMIT = 25 * 1024 * 1024;
@@ -335,9 +336,11 @@ export default {
       logDiagnostic(response.status >= 500 ? 'error' : response.status >= 400 ? 'warn' : 'info', 'request_completed', {
         status: response.status, method: request.method, route: path, durationMs: Date.now() - started, ...timings,
       });
-      const sensitive = /^\/(?:forgot-password|reset-password)(?:\/|$)/.test(path) || path.startsWith("/api/platform/auth/");
+      const sensitive = path.startsWith("/api/") || /^\/(?:forgot-password|reset-password)(?:\/|$)/.test(path) || path.startsWith("/api/platform/auth/");
       const secured = responseWithSecurityHeaders(response, sensitive);
       const headers = copyResponseHeaders(secured);
+      if (env.CONTENT_SECURITY_POLICY) headers.set('Content-Security-Policy', env.CONTENT_SECURITY_POLICY);
+      headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
       headers.set('x-request-id', requestId);
       headers.set('server-timing', [`gateway;dur=${Math.max(0, Date.now()-started)}`, ...Object.entries(timings).map(([name, value]) => `${name === 'identityMs' ? 'identity' : 'service'};dur=${Math.max(0, value)}`)].join(', '));
       headers.set('access-control-expose-headers', 'X-Request-Id, Server-Timing');

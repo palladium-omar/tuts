@@ -2,6 +2,8 @@
 
 ## Scope and conclusion
 
+This is the baseline audit. Its open statuses are historical; consult the [remediation receipt](2026-10-10-audit-remediation.md) for subsequent changes and deployment evidence.
+
 Application baseline: `2a442139a81960a80a1ffd19660128756b617b66`. Live target: `https://tuts.palladiumscholars.com`. Reviewed repository source, migrations, dependencies, Git branch state, live Cloudflare settings and ordinary-role Neon metadata; exercised synthetic local tests and public HTTP requests. Documentation/CI/test corrections in this audit do not change the deployed application runtime.
 
 **Documentation was behind the product.** GitHub's default `main` was `5b87bf7`, while deployed work was pushed on `feat/student-workspace`. Several contract introductions still said eight services, no portal, and local-only file storage. Queue tables omitted merge/Planning/Reporting subscriptions. This audit updates the current docs, adds generated ownership/route inventory and records implementation limits. Historical release reviews remain dated evidence.

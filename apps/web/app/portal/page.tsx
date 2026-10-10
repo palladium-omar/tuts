@@ -1,14 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useState, type CSSProperties, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { GraduationCap, LogOut } from "lucide-react";
 import { hasPermission } from "@palladium/contracts";
-import { createApi, date, errorMessage, type Api, type Business, type Row } from "../../lib/api";
+import { clearApi, createApi, date, errorMessage, type Api, type Business, type Row } from "../../lib/api";
 import { Empty, Notice } from "../../components/shared";
 import { Registration } from "../../features/registration";
 import { PortalLearning } from "./portal-learning";
 import { StudentBoards } from "../../features/student-boards";
 import { clearHomeworkDrafts } from "../../lib/homework-draft";
+import { installClientDiagnostics, portalDiagnosticView } from "../../lib/client-diagnostics";
 import { useActiveTime } from "./use-active-time";
 import "../globals.css";
 import "../../features/teaching-ux.css";
@@ -49,8 +50,13 @@ export default function StudentPortal() {
 
 // A dedicated component keeps the business API stable between portal renders.
 function PortalWorkspace({ platform, business, authorId }: { platform: Api; business: Business; authorId: string }) {
-  const api = useMemo(() => createApi(business.id), [business.id]);
+  const capabilityKey = JSON.stringify([authorId,business.role,business.permissions,business.entitlements,business.accessScope,business.studentIds]);
+  const api = useMemo(() => createApi(business.id), [business.id,capabilityKey]);
+  useEffect(() => () => clearApi(api), [api]);
   const [grants, setGrants] = useState<Row[]>([]), [students, setStudents] = useState<Row[]>([]), [selected, setSelected] = useState<Row | null>(null), [studentOffset, setStudentOffset] = useState(0), [tab, setTab] = useState(() => typeof window === "undefined" ? "homework" : new URLSearchParams(window.location.search).get("section") ?? "homework"), [loading, setLoading] = useState(true), [error, setError] = useState(""), [revision, setRevision] = useState(0);
+  const diagnosticView = useRef(tab);
+  diagnosticView.current = portalDiagnosticView(tab);
+  useEffect(() => installClientDiagnostics(api, () => diagnosticView.current), [api]);
   const available = (domain: string) => business.entitlements.includes(domain) && hasPermission(business, `${domain}.read`);
   const trackingAllowed = business.role === "student" && grants.some((grant) => grant.studentId === selected?.id && grant.relationship === "student") && business.entitlements.includes("reporting") && hasPermission(business, "reporting.write");
   useActiveTime(api, selected?.id, trackingAllowed);

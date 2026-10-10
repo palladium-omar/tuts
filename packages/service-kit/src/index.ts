@@ -17,6 +17,7 @@ import type { ZodType } from "zod";
 import { Database } from "./database.js";
 import { EventBus } from "./events.js";
 import { ContextGuard, OPTIONS, Public, type ServiceOptions } from "./auth.js";
+import { ExpensiveRequestGuard } from "./quotas.js";
 import { currentDiagnosticId, logDiagnostic } from './diagnostics.js';
 export { logDiagnostic } from './diagnostics.js';
 export { Database } from "./database.js";
@@ -108,6 +109,7 @@ export async function createServiceApplication(options: ServiceOptions, migrate 
       Database,
       EventBus,
       ContextGuard,
+      ExpensiveRequestGuard,
       ...(options.providers ?? []),
     ],
   })
@@ -115,14 +117,20 @@ export async function createServiceApplication(options: ServiceOptions, migrate 
   const app = await NestFactory.create<NestExpressApplication>(ServiceModule, {
     rawBody: true,
   });
+  app.use((_req: any, res: any, next: () => void) => {
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.vary('Origin');
+    res.vary('Authorization');
+    res.vary('Cookie');
+    next();
+  });
   app.useBodyParser("json", { limit: "8mb" });
   app.useBodyParser("urlencoded", { extended: true, limit: "1mb" });
   const db = app.get(Database);
   if (migrate) await db.migrate(options.migrationsDir);
-  app.useGlobalGuards(app.get(ContextGuard));
+  app.useGlobalGuards(app.get(ContextGuard), app.get(ExpensiveRequestGuard));
   app.useGlobalFilters(new ApiErrors());
   if (migrate) app.enableShutdownHooks();
-  await app.init();
   const doc = SwaggerModule.createDocument(
     app,
     new DocumentBuilder()
@@ -134,6 +142,7 @@ export async function createServiceApplication(options: ServiceOptions, migrate 
   app
     .getHttpAdapter()
     .get("/openapi.json", (_req: any, res: any) => res.json(doc));
+  await app.init();
   return app;
 }
 export async function bootstrap(options: ServiceOptions): Promise<void> {

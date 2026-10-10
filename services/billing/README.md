@@ -164,8 +164,10 @@ month. The aggregate separates work ledger amounts from invoice revenues. Record
 revenue equals real native allocations plus imported invoice paid declarations;
 simulated payments and paid work assertions are excluded. Expected monthly work
 value and native class estimates are separate. When work history exists, hours,
-trends and observed student counts use that ledger; otherwise they use completed
-native classes. Sources cannot be combined safely without reviewed identity links.
+trends and student measures use that ledger; otherwise they use completed
+native classes. Imported names do not establish student identity: person measures
+use reviewed canonical row associations and remain unknown while any selected
+activity source contains unreviewed, ambiguous or stale identity rows. Sources cannot be combined safely without reviewed identity links.
 Missing identity/classification data produces null measures with coverage notes.
 Churn describes inactivity relative to the previous month and remains provisional
 until the selected month ends. Importing history never issues invoices, charges
@@ -175,3 +177,75 @@ clients, sends messages, or creates payment transactions.
 source bytes/raw retention, tenant boundaries, staged tokens, partial review,
 retries, duplicate prevention, edits and exact multicurrency aggregates. No real
 customer workbook belongs in fixtures or production implementation checks.
+
+
+## Reviewed work-row identities
+
+Migration `008_history_identity.sql` adds Billing-owned `billing_work_identities`
+with forced tenant RLS. Associations refer to individual work IDs, retain the
+reviewer, reason, timestamp and revision, and preserve imported names, source
+cells and original file bytes. Equal names are never automatically combined;
+spelling variants share a person only after an explicit review selects the same
+canonical CRM student.
+
+`GET /v1/work-log` adds an `identity` object to each work row:
+`{status,studentId,revision,reason,reviewedAt}`. Read statuses are `unreviewed`,
+`linked`, `unknown`, `ambiguous` and `stale`. A missing review has revision zero.
+Any subsequent work-row edit makes the previous association stale until reviewed
+again; stale reviews expose a null student ID and cannot support person metrics.
+
+`PATCH /v1/work-log/:id/identity` accepts:
+
+```json
+{
+  "status": "linked",
+  "studentId": "11111111-1111-4111-8111-111111111111",
+  "expectedWorkRevision": 1,
+  "expectedIdentityRevision": 0,
+  "reason": "Tutor checked the original appointment"
+}
+```
+
+`status` accepts `linked`, `unknown` or `ambiguous`. Linking requires a student
+UUID; the other statuses require an absent/null student ID. Both revision fields
+are mandatory. Reasons are optional and bounded to 500 characters. A concurrent
+work edit or review returns 409; a foreign/missing work row returns 404.
+Successful responses are `{item:{workId,status,studentId,revision,reason,reviewedAt}}`.
+
+Reviews require business staff scope plus `billing.read`, `reporting.financial`
+and `billing.write`. Linking additionally requires Clients entitlement and
+`clients.read`. Billing forwards the original signed bearer to private
+Clients `/v1/clients/:id`, requires a student response, and uses its canonical
+UUID. Verification has a five-second deadline and a 64 KiB response bound; an
+unavailable service, inaccessible contact or payer cannot create an association.
+This needs the existing private `CLIENTS` service binding on Workers or
+`CLIENTS_URL` on Node. Unknown/ambiguous review does not query Clients. No name
+matching or cross-service SQL is performed.
+
+In Dashboard → Work tracker → Monthly work, **Review identity** opens an
+individual-row review. Staff search a bounded CRM page, explicitly choose a
+student and confirm the evidence, or mark the row unknown/ambiguous. The all-time
+work table still groups source labels for ledger totals and is labelled as such;
+it is not a person/cohort report. Analytics use locally resolved reviewed UUIDs,
+including delivered student merge aliases. Partial review leaves person metrics
+unknown while preserving exact work hours and monetary totals.
+
+## Analytics query consistency and performance
+
+Analytics execute five statements: repeatable-read configuration, business
+settings, source counts, one shared activity/summary/trend aggregate and the
+financial aggregate. One snapshot prevents imports/payment updates from mixing
+counts and money across statements. Shared activity materialization removes the
+second trend scan statement. Native monthly expected-value filtering compares
+raw `starts_at` against timezone-derived month bounds, preserving DST/local date
+behavior and making the existing monthly index eligible. Revenue still uses
+integer minor units and excludes simulated allocations and paid work declarations.
+
+`test/history-identity.test.ts` exercises duplicate names, spelling variants,
+ambiguity, revision conflicts/staleness, tenant/permission boundaries, canonical
+merge aliases and unchanged source bytes. `test/analytics-performance.test.ts`
+checks the five-statement bound and exact expectations on 4,000 synthetic native
+classes. Its EXPLAIN check disables sequential scans solely to prove index
+eligibility; it does not measure production latency or establish a production
+query planner choice. Run local ordinary-role suites with
+`node scripts/test-databases.mjs` from the repository root.

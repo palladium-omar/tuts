@@ -23,6 +23,7 @@ Common events:
 | queue_retry / queue_failed | Event processing retry or batch failure |
 | outbox_deferred | Publication failed; durable outbox remains retryable |
 | background_failed / cleanup_failed / database_failed | Background task or connection lifecycle failure |
+| auth_mail_provider_failed | System sender failed; inspect only the whitelisted failure category and numeric provider status |
 | password_mail_not_configured | System email configuration is disabled/incomplete |
 | password_mail_failed | Password-reset delivery attempt failed |
 

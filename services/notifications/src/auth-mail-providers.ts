@@ -22,7 +22,7 @@ export interface PortalInvitationMail {
 type AuthMessage = {recipientEmail: string; subject: string; text: string};
 
 export class AuthMailDeliveryError extends Error {
-  constructor(readonly retryable = false) {
+  constructor(readonly retryable = false, readonly category: "network" | "timeout" | "provider_rejected" | "invalid_response" | "response_limit" | "runtime_type_error" = "invalid_response", readonly providerStatus?: number) {
     super("Password reset email could not be accepted");
     this.name = "AuthMailDeliveryError";
   }
@@ -36,7 +36,7 @@ export class ResendAuthMailProvider implements AuthMailProvider {
   constructor(
     private readonly from: string,
     private readonly apiKey: string,
-    private readonly transport: typeof fetch = fetch,
+    private readonly transport: typeof fetch = globalThis.fetch.bind(globalThis),
   ) {}
 
   async sendPasswordReset(mail: PasswordResetMail): Promise<string> {
@@ -71,7 +71,7 @@ export class ResendAuthMailProvider implements AuthMailProvider {
         if (
           !(error instanceof AuthMailDeliveryError) || !error.retryable ||
           attempt === 1 || deadline.aborted
-        ) throw new AuthMailDeliveryError();
+        ) throw error instanceof AuthMailDeliveryError ? error : new AuthMailDeliveryError();
         // Repeat the same token only, under the same provider idempotency key.
         await new Promise<void>((resolve) => setTimeout(resolve, 100));
       }
@@ -84,8 +84,14 @@ export class ResendAuthMailProvider implements AuthMailProvider {
     idempotencyKey: string,
     deadline: AbortSignal,
   ): Promise<string> {
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    deadline.addEventListener("abort", abort, { once: true });
+    if (deadline.aborted) abort();
+    const timeout = setTimeout(abort, providerTimeoutMs);
     try {
-      const response = await this.transport("https://api.resend.com/emails", {
+      const transport = this.transport;
+      const response = await transport("https://api.resend.com/emails", {
         method: "POST",
         headers: {
           Accept: "application/json",
@@ -100,12 +106,13 @@ export class ResendAuthMailProvider implements AuthMailProvider {
           text: mail.text,
         }),
         redirect: "manual",
-        signal: AbortSignal.any([deadline, AbortSignal.timeout(providerTimeoutMs)]),
+        signal: controller.signal,
       });
       if (!response.ok || !response.body) {
         await response.body?.cancel();
         throw new AuthMailDeliveryError(
           response.status === 408 || response.status === 429 || response.status >= 500,
+          "provider_rejected", response.status,
         );
       }
       const reader = response.body.getReader();
@@ -118,7 +125,7 @@ export class ResendAuthMailProvider implements AuthMailProvider {
           size += value.length;
           if (size > responseLimit) {
             await reader.cancel();
-            throw new AuthMailDeliveryError();
+            throw new AuthMailDeliveryError(false, "response_limit", response.status);
           }
           chunks.push(Buffer.from(value));
         }
@@ -138,7 +145,10 @@ export class ResendAuthMailProvider implements AuthMailProvider {
       if (error instanceof AuthMailDeliveryError) throw error;
       // A network failure may follow acceptance; repeating this token uses the
       // same key so the provider can return the first accepted message.
-      throw new AuthMailDeliveryError(true);
+      throw new AuthMailDeliveryError(true, controller.signal.aborted ? "timeout" : error instanceof TypeError ? "runtime_type_error" : "network");
+    } finally {
+      clearTimeout(timeout);
+      deadline.removeEventListener("abort", abort);
     }
   }
 }

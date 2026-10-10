@@ -4,7 +4,8 @@ import type { NestExpressApplication } from '@nestjs/platform-express';
 import { createServiceApplication } from './index.js';
 import { EventBus } from './events.js';
 import type { ServiceOptions } from './auth.js';
-import { withCloudflareInvocation, type CloudflareBindings } from './runtime.js';
+import { registerBackgroundTask, withCloudflareInvocation, type CloudflareBindings } from './runtime.js';
+import { boundedRequest, readBoundedResponse, shouldPublishMutation, RequestBodyLimitError } from './http-limits.js';
 import { diagnosticId, logDiagnostic, withDiagnostics } from './diagnostics.js';
 
 export interface WorkerServiceOptions extends Omit<ServiceOptions, 'migrationsDir'> {
@@ -72,26 +73,37 @@ export function createWorkerService(options: WorkerServiceOptions) {
         if (tick) {
           await options.scheduled?.(app);
           await events.flushOutbox();
+          await events.prunePublishedOutbox();
           return Response.json({ status: 'ok' });
         }
-        const response = await bridge.fetch(request, bindings, context);
+        const targetStarted = Date.now();
+        const response = await bridge.fetch(boundedRequest(request), bindings, context);
+        logDiagnostic('info', 'target_completed', { durationMs: Date.now() - targetStarted });
         // The bridge may return headers before the Node response body finishes.
         // Keep database scope alive until every controller has completed its work.
-        const body = response.body ? await response.arrayBuffer() : null;
-        if (response.status < 400) {
-          try { await events.flushOutbox(); }
-          catch (error) { logDiagnostic('warn', 'outbox_deferred', { error }); }
+        const body = response.body ? await readBoundedResponse(response) : null;
+        if (shouldPublishMutation(request.method, response.status, options.name, new URL(request.url).pathname)) {
+          registerBackgroundTask((async () => {
+            const started = Date.now();
+            try { await events.flushOutbox(); }
+            catch (error) { logDiagnostic('warn', 'outbox_deferred', { error }); }
+            finally { logDiagnostic('info', 'outbox_completed', { durationMs: Date.now() - started }); }
+          })());
         }
         return new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers });
       }, tickRequest ? undefined : backgroundContext);
       status = result.status;
       const headers = new Headers(result.headers);
       headers.set('x-request-id', requestId);
+      headers.set('cache-control', 'private, no-store');
+      headers.append('vary', 'Origin, Authorization, Cookie');
       return new Response(result.body, { status, statusText: result.statusText, headers });
       } catch (error) {
         logDiagnostic('error', tickRequest ? 'tick_failed' : 'request_failed', { error });
-        // Cloudflare also records uncaught exceptions: never rethrow raw SQL or provider text.
-        throw new Error('Tuts service invocation failed; consult structured diagnostics');
+        status = error instanceof RequestBodyLimitError ? 413 : 500;
+        return Response.json({ error: { code: status === 413 ? 'body_too_large' : 'internal_error', message: status === 413 ? 'Request body exceeds transport limit' : 'Request could not be completed' }, requestId }, {
+          status, headers: { 'cache-control': 'private, no-store', vary: 'Origin, Authorization, Cookie', 'x-request-id': requestId },
+        });
       } finally {
         logDiagnostic(status >= 500 ? 'error' : status >= 400 ? 'warn' : 'info', 'request_completed', { status, method: request.method, route: new URL(request.url).pathname, durationMs: Date.now() - started });
       }

@@ -8,7 +8,7 @@ type BackgroundContext = { waitUntil(promise: Promise<unknown>): void };
 const invocation = new AsyncLocalStorage<Invocation>();
 const nodeBackgroundTasks = new Set<Promise<void>>();
 
-/** Keep asynchronous identity delivery alive after the HTTP response. */
+/** Keep registered delivery/publication work alive after the HTTP response. */
 export function registerBackgroundTask(promise: Promise<unknown>): void {
   const tasks = invocation.getStore()?.backgroundTasks ?? nodeBackgroundTasks;
   const retained = promise.then(() => {}, (error) => {

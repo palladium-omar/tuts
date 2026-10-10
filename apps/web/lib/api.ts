@@ -27,20 +27,43 @@ export function supportReference(response: Response): string {
     ? ` Reference: ${id}`
     : "";
 }
+const requestCaches = new WeakMap<Api, RequestCache>();
+export function clearApi(api: Api, reason: "access" | "dispose" = "dispose") {
+  requestCaches.get(api)?.clear();
+  invalidators.get(api)?.forEach(invalidate => invalidate(() => true, reason));
+}
+const invalidators = new WeakMap<Api, Set<(matches: (path: string) => boolean, reason?: "access" | "dispose") => void>>();
+export function onApiInvalidation(api: Api, invalidate: (matches: (path: string) => boolean, reason?: "access" | "dispose") => void) {
+  const subscribers = invalidators.get(api) ?? new Set();
+  subscribers.add(invalidate);
+  invalidators.set(api, subscribers);
+}
+// Reporting composes these domains; unrelated domain lists retain their snapshots.
+export function affectedRead(mutation: string, read: string) {
+  const domain = mutation.split("/")[0];
+  return domain === "platform" || read.split("/")[0] === domain ||
+    (["clients", "scheduling", "learning", "billing", "payments", "reporting"].includes(domain!) && read.startsWith("reporting/"));
+}
 export function createApi(businessId?: string): Api {
   const cache = new RequestCache();
-  return async (path, method = "GET", body, key, options) => {
+  const api: Api = async (path, method = "GET", body, key, options) => {
     const readOnly =
       method === "GET" ||
       (method === "POST" &&
         !path.startsWith("billing/v1/history-imports/") &&
         /\/summaries$|\/preview$|\/parse$/.test(path));
-    if (!readOnly) cache.clear();
+    const mutatesWorkspace = !readOnly && path !== "platform/v1/client-diagnostics";
+    if (mutatesWorkspace) {
+      const matches = (read: string) => affectedRead(path, read.split(" ")[1] ?? read);
+      cache.invalidate(matches);
+      invalidators.get(api)?.forEach(invalidate => invalidate(read => affectedRead(path, read)));
+    }
     const cachedRead =
-      method === "GET" &&
+      (method === "GET" || (method === "POST" && path === "reporting/v1/summaries")) &&
       businessId &&
-      !options?.fresh &&
       !path.startsWith("platform/");
+    const readKey = `${method} ${path} ${body === undefined ? "" : JSON.stringify(body)}`;
+    if (cachedRead && options?.fresh) cache.invalidate(candidate => candidate === readKey);
     const load = async () => {
       const multipart = body instanceof FormData;
       const timeout = AbortSignal.timeout(25000);
@@ -66,6 +89,7 @@ export function createApi(businessId?: string): Api {
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
+        if (response.status === 401 || response.status === 403) clearApi(api, "access");
         const message =
           data.error?.message ??
           data.message ??
@@ -75,12 +99,16 @@ export function createApi(businessId?: string): Api {
             supportReference(response),
         );
       }
+      if (mutatesWorkspace) {
+        cache.invalidate(read => affectedRead(path, read.split(" ")[1] ?? read));
+        invalidators.get(api)?.forEach(invalidate => invalidate(read => affectedRead(path, read)));
+      }
       return data;
     };
     try {
       // Identity and authorization reads always reach the server. No data is persisted.
       return cachedRead
-        ? await waitForRead(cache.read(path, load), options?.signal)
+        ? await waitForRead(cache.read(readKey, load), options?.signal)
         : await load();
     } catch (error) {
       if (error instanceof Error && error.name === "TimeoutError")
@@ -88,6 +116,8 @@ export function createApi(businessId?: string): Api {
       throw error;
     }
   };
+  requestCaches.set(api, cache);
+  return api;
 }
 export async function downloadFile(
   path: string,

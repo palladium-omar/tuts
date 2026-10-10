@@ -16,7 +16,7 @@
     "@nestjs/swagger": "^11.0.0",
     "@palladium/contracts": "workspace:*",
     "@palladium/service-kit": "workspace:*",
-    "csv-parse": "^6.2.1",
+    "csv-parse": "^7.0.3",
     "exceljs": "^4.4.0",
     "pg": "^8.13.1",
     "reflect-metadata": "^0.2.2",

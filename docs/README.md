@@ -1,13 +1,14 @@
 # Tuts documentation
 
-Reviewed against application commit `2a44213` and live Cloudflare/Neon configuration on **10 October 2026**. Historical review files describe their own release; they are not current deployment guarantees.
+Updated for the **10 October 2026** audit remediation; the release receipt records deployment and validation evidence. Historical review files describe their own release; they are not current deployment guarantees.
 
 ## Start here
 
 - [Current system and feature ownership](architecture/system.md): deployment, domains, main workflows, extension rules and account hierarchy.
-- [API and schema inventory](service-inventory.md): 175 declared controller routes, their access metadata, source links, and all service migrations. Regenerate rather than hand-edit.
+- [API and schema inventory](service-inventory.md): generated controller routes, their access metadata, source links, and all service migrations. Regenerate rather than hand-edit.
 - [Security model](architecture/security.md): trust boundaries, authorization, credentials, uploads and threat controls.
 - [Performance model](architecture/performance.md): request paths, batching, caches, database lifecycle and measurable budgets.
+- [Audit remediation and release receipt](reviews/2026-10-10-audit-remediation.md): completed changes and remaining operational limits.
 - [Current audit and remediation order](reviews/2026-10-10-platform-audit.md): measured evidence, vulnerabilities, limitations and open work.
 - [Operations and documentation maintenance](operations.md): checks, releases, recovery and review requirements.
 
@@ -33,4 +34,4 @@ Reviewed against application commit `2a44213` and live Cloudflare/Neon configura
 
 ## Current delivery limits
 
-System recovery/invitation mail is **disabled in the inspected production configuration**. Live payments and outbound campaigns are disabled. Arbitrary customer API/SMTP/AI egress is unsupported in the Workers adapter. Enterprise administration/licensing and direct Beacons conversion writes are future work. See the audit for the OpenAPI endpoint defect and the remaining performance/security work.
+System mail is enabled through the verified Resend sender, and production recovery delivery was confirmed from the live form. Real student invitation delivery was not exercised. Live payments and outbound campaigns are disabled. Arbitrary customer API/SMTP/AI egress is unsupported in the Workers adapter. Enterprise administration/licensing and direct Beacons conversion writes are future work. The OpenAPI route is repaired. See the remediation receipt for validation and remaining operational limits.

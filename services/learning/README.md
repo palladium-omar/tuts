@@ -142,3 +142,37 @@ so an alias cannot transfer access. Remapped rows increment revisions and emit
 projection fields. Reporting can rebuild without cross-service SQL. Resources
 retain their private storage keys; assignment/resource IDs and historical content
 are preserved.
+
+
+## Assignment page batching and passive upload checks
+
+Assignment lists collect unique material and submission resource IDs for the
+entire bounded page and read their metadata once. A page of 1, 50, 100 or 200
+assignments with resources uses three statements: count, assignment rows and
+resource metadata. Empty/no-resource pages omit the final query. Optional
+explicit student filtering may first resolve the authorized canonical student;
+that extra lookup does not scale with the number of assignments. Detail and
+mutation responses reuse the same resource validation for their single row.
+Every assignment and referenced resource still checks signed student scope and
+requires the resource's client to match the assignment's client. Tenant RLS
+remains enforced; batching does not widen access.
+
+`test/assignment-batch.test.ts` covers the page-size query bound, assignment and
+resource authorization, mismatched resource identities, and a real PostgreSQL
+100-card/shared-resource page with tenant isolation.
+
+PDF validation additionally rejects known JavaScript/JS, Launch, embedded file,
+RichMedia, XFA and encryption markers, including escaped PDF names and bounded
+Flate-compressed object content. Compressed object streams that cannot be
+inspected are rejected. Office validation rejects macro/ActiveX parts, embedded
+objects, external embed/template relationships and XML entity declarations;
+ordinary external hyperlinks remain supported. These are format and known
+active-content rejection checks, not complete malware detection, quarantine or
+an external scanner. Private attachment downloads remain the delivery path.
+
+`test/upload-hardening.test.ts` includes ordinary PDF, DOCX, PPTX and image
+fixtures plus escaped/compressed PDF actions, Office macros/embedded objects and
+external relationships. Valid passive documents still upload. Run
+`node scripts/test-databases.mjs` from the repository root for the local
+ordinary-role suite. Production R2 behavior and full malware scanning require
+separate evidence.

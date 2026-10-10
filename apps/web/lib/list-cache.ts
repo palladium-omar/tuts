@@ -4,13 +4,38 @@ export type ListData = { items: Row[]; total?: number; offset?: number };
 type Entry = { path: string; data: ListData; time: number };
 const MAX_AGE = 30_000;
 const MAX_ENTRIES = 30;
-// One instance per mounted list/API identity. Never persisted or shared between
-// accounts, spaces or permission contexts. Mutations replace the instance.
+// Retained only within one authenticated API/scope identity. Never persisted or
+// shared between accounts, spaces or permission contexts. Mutations invalidate resources.
 export class ListCache {
+  accessRevoked = false;
+  private versions = new Map<string, object>();
+  private listeners = new Map<string, Set<() => void>>();
+  version(path: string) { return this.versions.get(path); }
+  subscribe(path: string, listener: () => void) {
+    const listeners = this.listeners.get(path) ?? new Set();
+    listeners.add(listener); this.listeners.set(path, listeners);
+    return () => { listeners.delete(listener); if (!listeners.size) { this.listeners.delete(path); this.versions.delete(path); } };
+  }
   private entries = new Map<string, Entry>();
   last?: Entry;
 
+  invalidate(matches: (path: string) => boolean, accessRevoked = false) {
+    if (accessRevoked) this.accessRevoked = true;
+    for (const path of new Set([...this.entries.keys(), ...this.listeners.keys()])) {
+      if (!matches(path)) continue;
+      this.entries.delete(path);
+      if (this.listeners.has(path)) this.versions.set(path, {});
+      this.listeners.get(path)?.forEach(listener => listener());
+    }
+    if (this.last && matches(this.last.path)) this.last = undefined;
+  }
+  snapshot(path: string, now = Date.now()): Entry | undefined {
+    if (this.accessRevoked) return undefined;
+    const entry = this.entries.get(path);
+    return entry && now - entry.time < 120_000 ? entry : undefined;
+  }
   get(path: string, now = Date.now()): Entry | undefined {
+    if (this.accessRevoked) return undefined;
     const exact = this.entries.get(path);
     if (exact && now - exact.time < MAX_AGE) return exact;
     // Related identities participate in server search. Only exact filters are cached.

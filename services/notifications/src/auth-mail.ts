@@ -15,7 +15,7 @@ import {
   UnauthorizedException,
 } from "@nestjs/common";
 import { ApiExcludeController } from "@nestjs/swagger";
-import { Public } from "@palladium/service-kit";
+import { Public, logDiagnostic } from "@palladium/service-kit";
 import { z } from "zod";
 import {
   AuthMailDeliveryError,
@@ -98,7 +98,12 @@ export class AuthMailService {
       const messageId = await config.provider.sendPasswordReset({ recipientEmail, token, resetUrl });
       if (!messageId) throw new AuthMailDeliveryError();
       return { accepted: true, messageId };
-    } catch {
+    } catch (error) {
+      logDiagnostic('error', 'auth_mail_provider_failed', {
+        error,
+        failureCategory: error instanceof AuthMailDeliveryError ? error.category : 'invalid_response',
+        providerStatus: error instanceof AuthMailDeliveryError ? error.providerStatus : undefined,
+      });
       throw new BadGatewayException("Password reset email could not be accepted");
     }
   }
@@ -116,7 +121,12 @@ export class AuthMailService {
       const messageId = await config.provider.sendPortalInvitation({recipientEmail, invitationId, deliveryRevision, inviteUrl});
       if (!messageId) throw new AuthMailDeliveryError();
       return {accepted: true, messageId};
-    } catch {
+    } catch (error) {
+      logDiagnostic('error', 'auth_mail_provider_failed', {
+        error,
+        failureCategory: error instanceof AuthMailDeliveryError ? error.category : 'invalid_response',
+        providerStatus: error instanceof AuthMailDeliveryError ? error.providerStatus : undefined,
+      });
       throw new BadGatewayException('Portal invitation email could not be accepted');
     }
   }

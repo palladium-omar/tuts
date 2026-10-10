@@ -46,7 +46,7 @@ export class ReportingService {
         const requested = [...new Set(ids)];
         for (const id of requested) assertStudentAccess(ctx, id);
         return this.db.withTenant(ctx.businessId, async (tx) => {
-            await lockReports(tx, ctx.businessId);
+            await lockReports(tx, ctx.businessId, 'read');
             if (!requested.length) return { items: [], asOf: null };
             const aliases = await tx.query<{ requested_id: string; student_id: string; depth: number; cycle: boolean }>(`
                 WITH RECURSIVE roots AS (
@@ -226,7 +226,7 @@ export class ReportingService {
     }
     async activityHistory(ctx: RequestContext, id: string, period: Period, limit: number, offset: number) {
         return this.db.withTenant(ctx.businessId, async (tx) => {
-            await lockReports(tx, ctx.businessId);
+            await lockReports(tx, ctx.businessId, 'read');
             const studentId = await authorizedRoot(tx, ctx, id), values = [studentId, period.timeZone, period.month];
             const where = `student_id=$1 AND (received_at AT TIME ZONE $2)::date>=($3||'-01')::date AND (received_at AT TIME ZONE $2)::date<(($3||'-01')::date+interval '1 month')`;
             const count = await tx.query<{

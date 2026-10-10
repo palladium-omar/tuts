@@ -17,8 +17,11 @@ const resourceSchema = z.object({
 const invoiceSchema = z.object({
     invoiceId: z.uuid(), clientId: student, studentId: student, status: z.string().max(30), amountMinor: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER), paidMinor: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER), currency: z.string().regex(/^[A-Z]{3}$/), issuedAt: z.string().datetime().nullable().optional(), serviceMonth: z.string().nullable().optional(), eventAt: z.string().datetime().optional(), revision
 });
-export async function lockReports(tx: PoolClient, businessId: string) {
-    await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`reporting:${businessId}`]);
+// Shared locks allow summaries to overlap while excluding alias/projection writes
+// for the full tenant transaction, preserving one canonical identity throughout.
+export async function lockReports(tx: PoolClient, businessId: string, mode: 'read' | 'write' = 'write') {
+    const lock = mode === 'read' ? 'pg_advisory_xact_lock_shared' : 'pg_advisory_xact_lock';
+    await tx.query(`SELECT ${lock}(hashtextextended($1,0))`, [`reporting:${businessId}`]);
 }
 export async function studentRoot(tx: PoolClient, id: string): Promise<string> {
     const seen = new Set<string>();

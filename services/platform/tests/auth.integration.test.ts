@@ -12,8 +12,10 @@ test('real Better Auth persists hashed credentials, validates login and revokes 
   const identity = new IdentityService({ pool } as Database);
   const email = `synthetic-${randomUUID()}@example.invalid`;
   const password = `Synthetic-${randomUUID()}`;
+  // Isolate fixtures in Better Auth's real IP quota without weakening production limits.
+  const ip = `2001:db8:${randomUUID().replace(/-/g, '').match(/.{4}/g)!.slice(0, 6).join(':')}`;
   const send = (path: string, body: object, cookie?: string) => identity.auth.handler(new Request(`${identity.gatewayUrl}/api/platform/auth/${path}`, {
-    method: 'POST', headers: { 'content-type': 'application/json', origin: identity.trustedOrigins[0]!, ...(cookie ? { cookie } : {}) }, body: JSON.stringify(body),
+    method: 'POST', headers: { 'content-type': 'application/json', origin: identity.trustedOrigins[0]!, 'x-real-ip': ip, ...(cookie ? { cookie } : {}) }, body: JSON.stringify(body),
   }));
   try {
     const registration = await send('sign-up/email', { name: 'Synthetic authentication fixture', email, password });

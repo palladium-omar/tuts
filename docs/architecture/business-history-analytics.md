@@ -56,6 +56,46 @@ Imported paid assertions are labelled historical declarations, not processor
 verified payments. Native invoices/payments remain authoritative and immutable
 through the history editor. Importing never sends invoices or charges clients.
 
+## Manual review of historical student identity
+
+Migration `008_history_identity.sql` adds tenant-isolated, row-level associations
+owned by Billing. Importing never infers a contact from a name. Each Work tracker
+row shows whether identity is unknown, ambiguous, reviewed or needs another
+review. In **Monthly work**, staff use **Review identity** to choose a canonical
+CRM student after checking evidence, or explicitly retain an unknown/ambiguous
+result. The original name, raw cells and source bytes remain unchanged.
+
+`PATCH billing/v1/work-log/:id/identity` accepts
+`{status:'linked'|'unknown'|'ambiguous',studentId?:UUID|null,
+expectedWorkRevision:positiveInteger,expectedIdentityRevision:nonnegativeInteger,
+reason?:string}`. Linking requires `studentId`; other statuses forbid a nonnull
+ID. Reason length is at most 500. Missing reviews have identity revision zero;
+concurrent edits/reviews return 409. A successful response returns
+`{item:{workId,status,studentId,revision,reason,reviewedAt}}`.
+
+Business financial write permissions are required. Linking also requires Clients
+entitlement and `clients.read`; Billing verifies the selected student through
+private Clients GET `/v1/clients/:id` with the original signed authorization,
+bounded to five seconds and 64 KiB. No cross-service SQL or external identity
+provider is used. Unknown/ambiguous reviews make no contact lookup. Worker
+`CLIENTS` binding or Node `CLIENTS_URL` must be configured; verification fails
+closed when unavailable.
+
+Work list records add `identity:{status,studentId,revision,reason,reviewedAt}`.
+Read statuses also include `unreviewed` and `stale`. Any edit of a reviewed work
+row invalidates that review until it is repeated against the new work revision.
+Associations resolve delivered Billing student aliases, preserving the survivor
+after a CRM merge. Distinct people with equal names stay distinct; spelling
+variants combine only through explicit reviewed UUID associations.
+
+Imported engagement uses reviewed canonical work-row IDs. Any unreviewed,
+ambiguous or stale row in the selected activity source keeps aggregate person
+metrics unknown; a month's trend student count is unknown when that month has
+unresolved rows. Hours and exact currency totals remain available. The all-time
+work summary continues grouping source labels and is labelled as a ledger table,
+not a person-level cohort report. Billing coverage reports fully reviewed or
+partial work identity status, and Reporting preserves these coverage values.
+
 ## Query contracts
 
 - `GET work-log?month=YYYY-MM&status=unsent|pending|paid|unpaid&search=&limit=50&offset=0`
@@ -63,7 +103,8 @@ through the history editor. Importing never sends invoices or charges clients.
 - `GET work-log/summary` returns `{item:{students:[{studentName,totalHours,
   totalMinor,unsentMinor,pendingMinor,paidMinor,lastDate,currency}],
   currencies:[{currency,totalHours,totalMinor,unsentMinor,pendingMinor,paidMinor}]}}`.
-  Separate currencies never sum into one amount.
+  Separate currencies never sum into one amount. These are source-label ledger
+  groups, not canonical person/cohort counts.
 - `GET invoice-history` uses the same month/status/search pagination and returns
   imported invoice records plus native invoice rows labelled `origin:native`.
   Native statuses draft/issued/settled display as unsent/pending/paid.
@@ -101,10 +142,26 @@ the mounted authenticated business API, reset on mutations/context changes,
 and never reused as proof of authorization. Requests have bounded timeouts.
 Reporting student summaries resolve aliases for the whole requested page in one
 recursive query, aggregate classes/homework/resources/activity together, and
-read coverage in one query. Including the merge lock this is four SQL statements
+read coverage in one query. Including the shared advisory read lock this is four SQL statements
 for 1, 50 or 100 students; finance adds one snapshot query. Forced tenant RLS and
 requested plus canonical student scope checks still apply. Local PostgreSQL
 regression checks compare all 50 results against the previous implementation.
+Summary and activity-history readers hold shared tenant advisory locks until
+their transactions finish; merge/projection/activity writers hold exclusive
+locks. Readers overlap while alias, aggregate and coverage state stay coherent.
+Billing analytics use one repeatable snapshot and five statements, sharing
+activity/summary/trend materialization. Monthly native expected-value filtering
+uses raw timestamps against timezone-derived boundaries, allowing the existing
+index to filter the month without changing monetary calculations. A synthetic
+4,000-class EXPLAIN check proves index eligibility with sequential scans disabled;
+it is not a production latency benchmark.
+
+Learning assignment pages batch resource metadata across the entire page. Count,
+assignment rows and one deduplicated resource read use three statements for up to
+200 cards with resources; an optional explicit student filter can add one
+canonical lookup. Both assignment and resource scope/client checks remain in
+place. Single-detail routes reuse the same checks.
+
 Calendar pages render as they arrive within a bounded date range; changing the
 range cancels obsolete requests, while refresh preserves the current calendar.
 
@@ -184,8 +241,21 @@ by commit. The client sends only explicit matching/status corrections. Changing
 a file or worksheet clears obsolete mappings, and review must refresh after
 edits before commit. No tenant, permission or service ownership changes are made.
 
-## Audit clarification (10 October 2026)
+## Audit follow-up validation (10 October 2026)
 
-The performance section above documents existing batching and intended interaction behavior. It does not mean all navigation paths retain snapshots: caches/state are mounted-view scoped, summary POST reads are not included in GET coalescing, and Worker responses still await outbox work. The [audit](../reviews/2026-10-10-platform-audit.md) records these open issues and the missing pooling binding.
+The [audit](../reviews/2026-10-10-platform-audit.md) records the inspection snapshot
+before these follow-up changes. Local checks use ordinary PostgreSQL roles
+without superuser or BYPASSRLS privileges. Billing tests cover duplicate names,
+spelling variants, review conflicts/staleness, aliases, untouched source bytes
+and exact financial totals. Reporting tests cover overlapping readers, writer
+exclusion and 50-result parity. Learning tests cover bounded assignment resource
+queries and authorization. Full malware scanning, hosted backup/restore and
+production latency require separate operational evidence.
 
-Imported engagement groups by source `studentName`; no canonical CRM link is inferred. Identical names can combine and name changes can split activity. These are source-history metrics with explicit coverage, not reliable person-level retention. Linking reviewed rows to canonical student IDs is recommended before cohort/business decisions.
+From the repository root, `node scripts/test-databases.mjs` migrates the local
+service databases and runs each of the ten domain suites. It fails on missing
+test scripts, nonzero/terminated test processes and skipped tests in TAP or
+Node's Unicode pretty output. The 10 October follow-up run passed 154 domain
+tests, with zero failures and zero skips. This is local synthetic test evidence;
+it does not assert deployment or visual browser verification of the identity
+review modal.

@@ -23,7 +23,7 @@ function stub(aliases?:{student_id?:string;depth?:number;cycle?:boolean}){
 test('one, 50 and 100 cards use four queries or five with finance, preserving null gaps',async()=>{
  for(const financial of [false,true])for(const size of [1,50,100]){
   const {service,calls}=stub(),ids=Array.from({length:size},()=>randomUUID()),result=await service.summaries(ctx,ids,period,financial);
-  assert.equal(calls.length,financial?5:4);assert.match(calls[0]!.sql,/pg_advisory_xact_lock/);
+  assert.equal(calls.length,financial?5:4);assert.match(calls[0]!.sql,/pg_advisory_xact_lock_shared/);
   assert.deepEqual(result.items.map(item=>item.studentId),ids);
   for(const item of result.items){assert.equal(item.bookings.completed,null);assert.equal(item.homework.completed,null);assert.equal(item.resources.materials,null);assert.equal(item.activity.activeSeconds,0);assert.equal(item.partial,true);assert.equal(item.asOf,null);assert.equal('financial' in item,financial);}
   assert.equal(calls.some(call=>call.sql.includes('report_finance_snapshots')),financial);

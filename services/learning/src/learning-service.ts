@@ -26,19 +26,29 @@ export class LearningService {
         assertStudentAccess(ctx, row.client_id);
         return row;
     }
-    private async assignmentDetail(tx: PoolClient, ctx: RequestContext, row: AssignmentRow) {
+    private assignmentViewWithResources(ctx: RequestContext, row: AssignmentRow, resources: Map<string, ResourceRow>) {
         assertStudentAccess(ctx, row.client_id);
         const ids = [...row.resource_ids ?? [], ...row.submission_resource_ids ?? []];
-        const resources = ids.length ? (await tx.query<ResourceRow>('SELECT * FROM resources WHERE id=ANY($1::uuid[])', [ids])).rows : [];
-        for (const resource of resources) {
+        for (const id of ids) {
+            const resource = resources.get(id);
+            if (!resource) continue;
             assertStudentAccess(ctx, resource.client_id);
             if (resource.client_id !== row.client_id)
                 throw new ConflictException('Assignment resource identity needs reconciliation');
         }
-        const byId = new Map(resources.map(r => [r.id, resourceView(r)]));
-        return {
-            ...assignmentView(row), resources: (row.resource_ids ?? []).map(id => byId.get(id)).filter(Boolean), submissionResources: (row.submission_resource_ids ?? []).map(id => byId.get(id)).filter(Boolean)
-        };
+        return { ...assignmentView(row),
+            resources: (row.resource_ids ?? []).flatMap(id => resources.has(id) ? [resourceView(resources.get(id)!)] : []),
+            submissionResources: (row.submission_resource_ids ?? []).flatMap(id => resources.has(id) ? [resourceView(resources.get(id)!)] : []) };
+    }
+    private async assignmentDetails(tx: PoolClient, ctx: RequestContext, rows: AssignmentRow[]) {
+        for (const row of rows) assertStudentAccess(ctx, row.client_id);
+        const ids = [...new Set(rows.flatMap(row => [...row.resource_ids ?? [], ...row.submission_resource_ids ?? []]))];
+        const resources = ids.length ? (await tx.query<ResourceRow>('SELECT * FROM resources WHERE id=ANY($1::uuid[])', [ids])).rows : [];
+        const byId = new Map(resources.map(resource => [resource.id, resource]));
+        return rows.map(row => this.assignmentViewWithResources(ctx, row, byId));
+    }
+    private async assignmentDetail(tx: PoolClient, ctx: RequestContext, row: AssignmentRow) {
+        return (await this.assignmentDetails(tx, ctx, [row]))[0]!;
     }
     private async assignmentEvent(tx: PoolClient, ctx: RequestContext, row: AssignmentRow, type: string) {
         await emitEvent(tx, {
@@ -65,7 +75,7 @@ export class LearningService {
             }>(`SELECT count(*) total FROM assignments a WHERE ${where}`, values);
             const order = portal ? "CASE WHEN a.status IN ('assigned','needs_revision') THEN 0 WHEN a.status='submitted' THEN 1 ELSE 2 END,a.due_at ASC NULLS LAST,a.created_at DESC,a.id" : 'a.created_at DESC,a.id';
             const rows = await tx.query<AssignmentRow>(`${withResources} WHERE ${where} ORDER BY ${order} LIMIT $5 OFFSET $6`, [...values, q.limit, q.offset]);
-            const items = await Promise.all(rows.rows.map(r => this.assignmentDetail(tx, ctx, r)));
+            const items = await this.assignmentDetails(tx, ctx, rows.rows);
             return {
                 items, total: Number(count.rows[0]!.total), limit: q.limit, offset: q.offset
             };

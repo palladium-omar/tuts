@@ -32,7 +32,9 @@ For Cloudflare, add the private sender fields to `.cloudflare/secrets.json` and 
 
 Migration `services/platform/migrations/004_auth_rate_limit.sql` must precede the Platform rollout. BetterAuth stores shared rate limits in PostgreSQL: reset requests allow three per client IP in five minutes and reset submissions allow five in five minutes. This avoids per-isolate counters on Workers. Database copies must use matching migration versions; the earlier recovery snapshot predates this table and remains a historical backup.
 
-Availability is not an inbox-delivery receipt. BetterAuth preserves its account-neutral confirmation if background delivery fails after readiness checking; only a fixed redacted warning is logged. A generic confirmation must never be reported as proof of delivery. Review provider acceptance and delivery records when diagnosing missing mail. The shipped sender remains disabled until a real provider is configured; the existing demo business connector is not usable for system email.
+Availability is not an inbox-delivery receipt. BetterAuth preserves its account-neutral confirmation if background delivery fails after readiness checking; only a fixed redacted warning is logged. A generic confirmation must never be reported as proof of delivery. Review provider acceptance and delivery records when diagnosing missing mail. Production now uses a verified dedicated Resend sender with a domain-restricted sending-only credential stored as a deployment secret. The live Forgot password form produced a provider-confirmed delivered email on 10 October 2026. The existing demo business connector is not used for system email. Provider delivery is separate from the owner completing a password change.
+
+The provider binds native fetch to its global receiver and combines deadlines with an AbortController and cleaned timer, without depending on AbortSignal.any. Failures log only a fixed category and numeric provider status; response bodies, recipient addresses and tokens are never logged.
 
 ## Authorized manual recovery
 

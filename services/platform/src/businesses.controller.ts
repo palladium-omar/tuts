@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   ForbiddenException,
@@ -10,7 +11,7 @@ import {
   Req,
 } from "@nestjs/common";
 import { ApiOperation, ApiTags } from "@nestjs/swagger";
-import { Database, emitEvent, parseBody, Public } from "@palladium/service-kit";
+import { Database, emitEvent, logDiagnostic, parseBody, Public } from "@palladium/service-kit";
 import { defaultPermissions, hasPermission, type RequestContext } from "@palladium/contracts";
 import type { Request } from "express";
 import { randomUUID } from "node:crypto";
@@ -19,6 +20,7 @@ import { IdentityService } from "./identity.service.js";
 import { membershipPolicy, type MembershipPolicy, type MembershipPolicyRow } from "./membership-policy.js";
 import {
   businessIdSchema,
+  clientDiagnosticsSchema,
   businessSchema,
   internalContextSchema,
   settingsSchema,
@@ -81,29 +83,68 @@ export class BusinessesController {
     };
   }
 
+  @Post("client-diagnostics")
+  @ApiOperation({ summary: "Record bounded, categorical browser error diagnostics" })
+  async clientDiagnostics(@Req() req: Request, @Body() body: unknown) {
+    await this.identity.requireSession(req);
+    this.identity.assertMutationOrigin(req);
+    const contentType = req.headers['content-type'];
+    const length = req.headers['content-length'];
+    const rawBody = (req as Request & {rawBody?: Buffer}).rawBody;
+    if (typeof contentType !== 'string' || !/^application\/json(?:;|$)/i.test(contentType) ||
+        (length !== undefined && (typeof length !== 'string' || !/^\d+$/.test(length) || Number(length) > 2048)) || (Buffer.isBuffer(rawBody) && rawBody.length > 2048))
+      throw new BadRequestException('Diagnostics require a bounded JSON body');
+    const input = parseBody(clientDiagnosticsSchema, body);
+    const categories = new Map<string, { event: typeof input.events[number]; count: number }>();
+    for (const event of input.events) {
+      const key = `${event.kind}:${event.source}:${event.view}`, previous = categories.get(key);
+      categories.set(key, { event, count: (previous?.count ?? 0) + 1 });
+    }
+    for (const { event, count } of categories.values())
+      logDiagnostic('warn', 'browser_error', { browserKind: event.kind, source: event.source, view: event.view, count });
+    return { item: { accepted: input.events.length } };
+  }
+
   @Get("businesses")
   @ApiOperation({
     summary: "List up to 100 businesses the signed-in user belongs to",
   })
   async list(@Req() req: Request) {
     const session = await this.identity.requireSession(req);
+    return this.businessesForUser(session.user.id);
+  }
+
+  @Get("bootstrap")
+  @ApiOperation({ summary: "Get session and authorized businesses in one request" })
+  async bootstrap(@Req() req: Request) {
+    const session = await this.identity.requireSession(req);
+    return { item: { user: session.user, expiresAt: session.session.expiresAt },
+      ...await this.businessesForUser(session.user.id) };
+  }
+
+  private async businessesForUser(userId: string) {
     const directory = await this.db.pool.query<{ business_id: string }>(
       "SELECT business_id FROM identity_business_directory WHERE user_id = $1 ORDER BY business_id LIMIT 100",
-      [session.user.id],
+      [userId],
     );
-    const items = [];
-    for (const entry of directory.rows) {
-      const item = await this.db.withTenant(entry.business_id, async (tx) => {
-        const result = await tx.query<BusinessRow>(
-          "SELECT b.*, m.role,m.permissions_override,m.access_scope FROM businesses b JOIN memberships m USING (business_id) WHERE m.user_id = $1",
-          [session.user.id],
-        );
-        const row = result.rows[0];
-        return row ? businessItem(row, await membershipPolicy(tx, session.user.id, row)) : null;
-      });
-      if (item) items.push(item);
-    }
-    return { items };
+    // Each worker still verifies current membership and policy under tenant RLS.
+    // A small fixed bound avoids exhausting the invocation's PostgreSQL pool.
+    const items: Array<ReturnType<typeof businessItem> | null> = new Array(directory.rows.length);
+    let cursor = 0;
+    await Promise.all(Array.from({ length: Math.min(4, directory.rows.length) }, async () => {
+      while (cursor < directory.rows.length) {
+        const index = cursor++, entry = directory.rows[index]!;
+        items[index] = await this.db.withTenant(entry.business_id, async (tx) => {
+          const result = await tx.query<BusinessRow>(
+            "SELECT b.*, m.role,m.permissions_override,m.access_scope FROM businesses b JOIN memberships m USING (business_id) WHERE m.user_id = $1",
+            [userId],
+          );
+          const row = result.rows[0];
+          return row ? businessItem(row, await membershipPolicy(tx, userId, row)) : null;
+        });
+      }
+    }));
+    return { items: items.filter((item): item is ReturnType<typeof businessItem> => item !== null) };
   }
 
   @Post("businesses")

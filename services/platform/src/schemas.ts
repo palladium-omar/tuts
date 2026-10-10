@@ -227,3 +227,12 @@ export function mergeSettings(
   }
   return next;
 }
+
+// Browser telemetry accepts categorical signals only, never exception text or URLs.
+export const clientDiagnosticsSchema = z.object({
+  events: z.array(z.object({
+    kind: z.enum(['Error', 'TypeError', 'RangeError', 'SyntaxError', 'AbortError', 'TimeoutError', 'UnknownError']),
+    source: z.enum(['window', 'promise']),
+    view: z.enum(['dashboard', 'crm', 'tracker', 'scheduling', 'learning', 'planning', 'other']),
+  }).strict()).min(1).max(10),
+}).strict();

@@ -17,5 +17,5 @@ test('Controller metadata requires financial/read capability and write on every 
  const reflector=new Reflector();
  for(const type of [HistoryImportsController,WorkLogController,InvoiceHistoryController,BusinessAnalyticsController]){
  assert.deepEqual(reflector.get('palladium.roles',type),['owner','admin','tutor']);assert.equal(reflector.get('palladium.student-scoped',type),undefined);assert.deepEqual(reflector.get('palladium.permissions',type),['billing.read','reporting.financial']);}
- for(const handler of [HistoryImportsController.prototype.preview,HistoryImportsController.prototype.commit,WorkLogController.prototype.edit,InvoiceHistoryController.prototype.create,InvoiceHistoryController.prototype.edit])assert.deepEqual(reflector.get('palladium.permissions',handler),['billing.read','reporting.financial','billing.write']);
+ for(const handler of [HistoryImportsController.prototype.preview,HistoryImportsController.prototype.commit,WorkLogController.prototype.edit,WorkLogController.prototype.identity,InvoiceHistoryController.prototype.create,InvoiceHistoryController.prototype.edit])assert.deepEqual(reflector.get('palladium.permissions',handler),['billing.read','reporting.financial','billing.write']);
 });

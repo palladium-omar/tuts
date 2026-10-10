@@ -1,59 +1,48 @@
 # Performance architecture
 
-Baseline `2a44213`, reviewed 10 October 2026. The [audit](../reviews/2026-10-10-platform-audit.md) separates measurements from source-based hypotheses. The browser was inspected visually, but raw browser debugging permission was declined; no Lighthouse/Core Web Vitals results are claimed.
+Updated for the 10 October 2026 audit remediation. The [baseline audit](../reviews/2026-10-10-platform-audit.md) and [remediation receipt](../reviews/2026-10-10-audit-remediation.md) distinguish source changes, local measurements and verified deployment. Independent services/databases remain the architecture.
 
-## Loading paths today
+## Request and loading path
 
-1. Static Next/React assets load through Cloudflare.
-2. Initial tutor page awaits session, then business list, then mounts the selected feature and starts its data requests.
-3. A domain request asks Platform to validate session/membership before calling its private service Worker.
-4. Each Worker invocation creates its own PostgreSQL pool (maximum two sockets), executes tenant transactions, buffers the response, attempts outbox publication after every successful request, then closes its pool.
-5. Feature state is mostly component-local. Unmount/revisit may recreate loading state even when a short API cache has recent data.
+1. Cloudflare serves the static Next/React shell. Feature screens load in separate chunks when selected.
+2. `/api/platform/v1/bootstrap` checks the session once and returns its authorized business directory. Each subsequent protected request still verifies membership/capabilities on the backend.
+3. Gateway forwards the authorized context to a private domain Worker. PostgreSQL pools remain invocation-owned (two sockets maximum), with optional per-service Hyperdrive **connection pooling, SQL query caching disabled**. No client accesses PostgreSQL directly; no Worker shares a socket from an ended invocation.
+4. A read performs its controller work and bounded response transport; GET/HEAD/OPTIONS do not publish the outbox. Successful mutations register publication as background work. The invocation lifetime includes that work and pool cleanup. Queue consumption waits for durable processing/publication before acknowledgment. A gateway cron ticks every domain for recovery.
+5. Exact view snapshots and GET/read-only Reporting summary results live in bounded browser memory. Returning to a screen retains authorized data while refreshing. Mutation starts and completion invalidate dependent snapshots; a generation check prevents an older in-flight read repopulating an invalidated cache.
 
-The browser calls APIs; it does not read PostgreSQL directly. Independent databases/services should remain. Performance improvements belong at transport, query, aggregate and interaction boundaries.
+## Cache contract
 
-## Existing protections and improvements
+- Identity is the API instance: account, business, role, permissions, entitlements and student scope. Student portal identities also include author/access scope.
+- Snapshot retention is two minutes, freshness thirty seconds. Reads coalesce by exact query/body; capacity is bounded. These are browser caches, not shared edge/SQL caches.
+- API disposal, logout, context/policy changes and 401/403 clear private state. Backend authorization is always authoritative.
+- Mutations invalidate their own domain and dependent Reporting reads before and after the write; diagnostics do not invalidate product data. Errors remain visible with safe retry behavior.
+- General API success/error responses declare private/no-store. Static resources retain their independent immutable caching policy.
 
-- CRM/tracker server pagination normally requests 50 rows, not the entire database. Search filters/debounce/cancellation prevent obsolete filtered results winning.
-- Reporting student batches use four SQL statements (five with finance) for 1–100 requested students. They do not perform one query/source fetch per card during normal load.
-- Dashboard overview uses one Reporting request; Reporting fetches Clients counts and Billing analytics concurrently.
-- API GET caches are memory-only, scoped to the mounted business API, expire after 15 seconds and coalesce identical pending reads. Writes invalidate the current business cache. They never replace backend authorization.
-- List refresh retains previous successful results within the mounted view. Kanban has immediate local updates and ordered background persistence with visible recoverable errors.
-- Domain Workers use targeted placement near the manifest's Neon region; gateway/assets stay at the edge. Gateway emits `Server-Timing` and sanitized identity/upstream/total durations.
+## Query and concurrency contracts
 
-## Remaining expensive work
+| Operation | Contract |
+| --- | --- |
+| Workspace directory | Up to 100 actor-authorized memberships; at most four tenant transactions concurrently, retaining each tenant's RLS/policy resolution |
+| CRM/tracker list | Pagination, usually 50 rows; filtering/debounce/cancellation prevent obsolete results winning |
+| Student summaries | Four domain statements for 1–100 IDs, five with finance; alias/coverage checks before reads. Shared tenant advisory locks permit overlapping readers; projections/merges/activity use exclusive locks |
+| Dashboard | One browser aggregate request; Clients/Billing source calls concurrent and independently report unavailable coverage |
+| Billing history analytics | Five aggregate statements in a repeatable-read snapshot; monthly class timestamp ranges permit index use. Exact money and separate currencies. Unreviewed source names produce unknown person metrics |
+| Assignment list | One batched resources query per page; three domain statements for 1/50/100/200 cards |
+| Tracker reconcile | Explicit, bounded concurrent operation; never automatically triggered to render a page |
+| Kanban | Immediate local updates, ordered background persistence and recoverable errors; reading/writing remains through Planning APIs |
 
-| Boundary | Current cost | Planned remedy and correctness requirement |
-| --- | --- | --- |
-| Worker response → outbox | Even reads await BEGIN/select/COMMIT and may publish unrelated backlog | Publish mutations/consumer effects through registered background tasks; preserve periodic recovery and invocation-owned sockets; measure durable retry before rollout |
-| Invocation → PostgreSQL | Fresh pools/sockets and cleanup per invocation; no live Hyperdrive bindings | Trial Hyperdrive pooling with **query caching disabled**, verified TLS and tenant/session tests; measure before broader rollout |
-| Browser bootstrap | Session → businesses → view waterfall; eager imports of all main-page features | Composed authorized bootstrap and lazy feature chunks; avoid introducing stale grants or extra security round trips |
-| Workspace list | Platform loops over up to 100 memberships, awaiting a tenant transaction and policy resolution for each | Return a bounded actor-authorized directory projection and resolve selected-workspace policy separately; preserve revocation and avoid bypassing RLS for a broad join |
-| Navigation cache | View state disappears; POST summary reads are not cached/coalesced by the GET cache | Per-account/business/student/query snapshots with bounded expiry, targeted invalidation and retained data during refresh |
-| Reporting tenant lock | Read summaries take the same exclusive tenant lock as projection/activity writes | Snapshot/repeatable-read or immutable projection revisions; preserve merge consistency and test concurrent merges before narrowing locks |
-| Billing analytics | Several serial queries, all-history aggregates/trend grouping | Measure plans/row counts; build owner-service daily/monthly aggregates updated by work/invoice mutations and events, with rebuild/coverage contracts |
-| Tracker reconcile | Explicit per-student historical reconciliation with bounded concurrent fanout | Separate queued/batched reconciliation job and progress; do not start it merely to render a page |
-| XLSX/files | In-memory parser and response copies, archived source bytes in PostgreSQL | Profile max-sized workloads; preserve private raw sources in owner-controlled object storage and decouple heavy parsing if measurements justify it |
+Statement counts exclude transaction setup, authorization, transport and request-budget transactions. An index-forced synthetic plan proves eligibility, not production speed. No incremental financial aggregate store is needed until actual-volume measurements justify its extra consistency/rebuild cost.
 
-[Hyperdrive pooling](https://developers.cloudflare.com/hyperdrive/concepts/how-hyperdrive-works/) uses transaction boundaries. [Query caching](https://developers.cloudflare.com/hyperdrive/concepts/query-caching/) is a separate behavior and is not assumed safe for transaction-local tenant state, revocation or financial reads. A shared SQL-result cache is not the same as connection pooling.
+## Resource limits
 
-## Proposed budgets
+Request transport is capped at 32 MiB, responses at 64 MiB; domain upload limits are lower (5 MB CRM/history, 20 MB Learning). Transport still buffers completed responses to preserve controller/socket lifetime. This is bounded buffering, not streaming/queued ingestion. Expensive requests have durable per-minute actor/tenant budgets and Retry-After responses; [security](security.md) lists the limits. These are rate budgets, not a simultaneous-job scheduler.
 
-These are targets, **not measured guarantees**:
+Large-file parsing and explicit history reconciliation remain candidates for owner-service jobs if measured load requires them. A service-owned job should persist idempotency, progress, retry/expiry, result and source identity; publish completion through the same outbox. Do not share domain tables or weaken RLS to make a screen faster.
 
-| Interaction | Target | Measurement |
-| --- | --- | --- |
-| Card drop/row selection | Local feedback in <100 ms, no global blocking state | Browser interaction trace, delayed-response test |
-| Returning to a visited view | Retained scoped snapshot immediately; refresh in background | Authenticated navigation test with slow API |
-| Warm protected page aggregate | p95 <1 s server-side, excluding provider sync | Gateway identity/upstream timing across representative production traffic |
-| Warm first data display | p95 <2 s on defined reference device/network | Authenticated browser cold/warm trace |
-| Cold compute/database request | Measured and separately reported, bounded timeout | First request after verified idle period; provider/database phase spans |
-| 50-card tracker | One paginated list and one summary batch, constant SQL count | Integration assertions plus realistic query plans |
+## Evidence and monitoring
 
-Do not hide stale/missing financial data behind a cache. Keep `asOf`, source coverage and explicit Refresh. Invalidate after tenant/account/student permission changes; clear on logout. Avoid arbitrary fixed minimum loading delays.
+The final referenced homepage JavaScript fell from 1,391,360 to 992,567 raw bytes in comparable builds (28.7%). This is a build payload measurement, not a measured improvement in real-user time-to-data. Maximum archive corruption/concurrency tests exercise the XLSX Worker runtime. Database suites exercise ordinary roles and Reporting reader/writer concurrency.
 
-## Measurement protocol
+Gateway identity/upstream/total durations and domain connection/transaction/target/outbox phases are sanitized structured logs. Browser diagnostics report only enumerated error kind, coarse section/source and capped counts; no messages, stacks, URLs or private input.
 
-Keep public asset timings, anonymous errors, local authenticated requests and production authenticated interactions separate. Record release, date, sample count, network/device, cold/warm definition, status, body size and server timings. Five samples are a diagnostic snapshot, not a p95 benchmark. Compute browser metrics only from a real trace; source inspection cannot establish LCP/INP/CLS.
-
-Profile Clients/Billing/Reporting inside their own database with ordinary-role tenant transactions and `EXPLAIN (ANALYZE, BUFFERS)` on synthetic or authorized data. Aggregate timing/counts can be shared; customer rows, tokens and raw SQL parameter logs must remain private. Test realistic history volumes, concurrent users, student aliases and slow/unavailable optional services. Re-run baseline and changed implementation on the same dataset.
+Operational targets, not current guarantees: retained navigation feedback immediately; warm server aggregate p95 below one second; first data below two seconds on a defined reference device/network. Collect representative authenticated timings before asserting these targets. Raw browser debugger permission was declined in the baseline review; no Core Web Vitals, Lighthouse or production p95 is claimed. Hyperdrive removes origin connection setup costs, but region/idle database/queries/provider calls still matter. See [Cloudflare pooling](https://developers.cloudflare.com/hyperdrive/concepts/how-hyperdrive-works/).

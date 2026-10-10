@@ -1,6 +1,21 @@
 import { useEffect, useMemo, useState, type SetStateAction } from "react";
-import { errorMessage, type Api } from "./api";
+import { errorMessage, onApiInvalidation, type Api } from "./api";
 import { ListCache, type ListData } from "./list-cache";
+
+const snapshots = new WeakMap<Api, Map<string, ListCache>>();
+function scopedCache(api: Api, scope: string) {
+  let scopes = snapshots.get(api);
+  if (!scopes) {
+    scopes = new Map(); snapshots.set(api, scopes);
+    onApiInvalidation(api, (matches, reason) => scopes!.forEach(cache => cache.invalidate(matches, reason === "access")));
+  }
+  let cache = scopes.get(scope);
+  if (!cache) {
+    if (scopes.size >= 30) scopes.delete(scopes.keys().next().value!);
+    cache = new ListCache(); scopes.set(scope, cache);
+  }
+  return cache;
+}
 
 /** Reset pagination in the same render as filters, before a request can start. */
 export function useListOffset(key: string) {
@@ -32,7 +47,7 @@ export function useListQuery(
     delay?: number;
   } = {},
 ) {
-  const cache = useMemo(() => new ListCache(), [api, enabled, revision, scope]);
+  const cache = useMemo(() => scopedCache(api, scope), [api, scope]);
   const [result, setResult] = useState<{
     api: Api;
     scope: string;
@@ -41,29 +56,33 @@ export function useListQuery(
     path: string;
     error: string;
   }>();
-  const [, refresh] = useState(0);
+  const [refreshVersion, refresh] = useState(0);
+  useEffect(() => cache.subscribe(path, () => {
+    setResult(previous => cache.accessRevoked ? undefined : previous ? {...previous, path: ""} : undefined);
+    refresh(value => value + 1);
+  }), [cache, path]);
   const cached = enabled ? cache.get(path) : undefined;
   const current = result?.cache === cache && result.path === path;
-  const error = current ? result.error : "";
+  const error = cache.accessRevoked ? "Your access changed. Refresh your workspace to continue." : current ? result.error : "";
   const previous =
     result?.api === api && result.scope === scope ? result.data : undefined;
-  const data = enabled ? ((cached ?? cache.last)?.data ?? previous) : undefined;
-  const loading = enabled && !cached && !current;
+  const data = enabled && !cache.accessRevoked ? ((cached ?? cache.snapshot(path))?.data ?? previous) : undefined;
+  const loading = enabled && !cache.accessRevoked && !cached && !current;
 
   useEffect(() => {
-    if (!enabled) return;
-    if (cache.get(path)) return;
+    if (!enabled || cache.accessRevoked) return;
+    if (!revision && cache.get(path)) return;
     const controller = new AbortController();
+    const version = cache.version(path);
     const timer = setTimeout(() => {
       api(path, "GET", undefined, undefined, {
         signal: controller.signal,
         fresh: revision > 0,
       })
         .then((data) => {
-          if (controller.signal.aborted) return;
+          if (controller.signal.aborted || cache.version(path) !== version) return;
           cache.put(path, data);
           setResult({ api, scope, data, cache, path, error: "" });
-          refresh((value) => value + 1);
         })
         .catch((e) => {
           if (!controller.signal.aborted)
@@ -71,7 +90,7 @@ export function useListQuery(
               api,
               scope,
               data:
-                previous?.api === api && previous.scope === scope
+                !cache.accessRevoked && previous?.api === api && previous.scope === scope
                   ? previous.data
                   : undefined,
               cache,
@@ -84,7 +103,7 @@ export function useListQuery(
       clearTimeout(timer);
       controller.abort();
     };
-  }, [api, path, enabled, cache, delay, revision, scope]);
+  }, [api, path, enabled, cache, delay, revision, scope, refreshVersion]);
 
   return {
     data,

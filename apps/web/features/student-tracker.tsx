@@ -59,7 +59,7 @@ export function StudentTracker({ api, business, onOpenLearning, onOpenPlanning, 
     let cancelled = false; setSummaryError("");
     if (!canRead || !reportingEnabled || !rows.length || (view === "groups" && !group) || loading) { setSummaryLoading(false); return; }
     setSummaryLoading(true);
-    api("reporting/v1/summaries", "POST", { studentIds: rows.map((row) => row.id), month, timeZone: zone, includeFinancial }).then((data) => { if (!cancelled) setSummaries(Object.fromEntries((data.items ?? []).map((item: Row) => [item.studentId, item]))); }).catch((e) => { if (!cancelled) setSummaryError(errorMessage(e)); }).finally(() => { if (!cancelled) setSummaryLoading(false); });
+    api("reporting/v1/summaries", "POST", { studentIds: rows.map((row) => row.id), month, timeZone: zone, includeFinancial }, undefined, {fresh: summaryRevision > 0}).then((data) => { if (!cancelled) setSummaries(Object.fromEntries((data.items ?? []).map((item: Row) => [item.studentId, item]))); }).catch((e) => { if (!cancelled) setSummaryError(errorMessage(e)); }).finally(() => { if (!cancelled) setSummaryLoading(false); });
     return () => { cancelled = true; };
   }, [api, canRead, reportingEnabled, includeFinancial, studentKey, month, zone, loading, view, group?.id, summaryRevision]);
   async function reconcilePage() { if (!reportingEnabled || !hasPermission(business, "reporting.write")) return; setReconciling(true); setSummaryError(""); try { for (let at = 0; at < rows.length; at += 4) await Promise.all(rows.slice(at, at + 4).map((row) => api(`reporting/v1/students/${row.id}/reconcile`, "POST", { month, timeZone: zone, includeFinancial }))); setSummaryRevision((n) => n + 1); } catch (e) { setSummaryError(errorMessage(e)); } finally { setReconciling(false); } }

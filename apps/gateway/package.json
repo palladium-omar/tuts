@@ -8,13 +8,11 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "start": "node dist/main.js",
-    "test": "tsx --test test/worker.test.mjs"
+    "test": "tsx --test test/*.test.mjs"
   },
   "dependencies": {
     "@palladium/contracts": "workspace:*",
-    "express": "^5.1.0",
     "jose": "^6.0.0",
-    "http-proxy-middleware": "^3.0.5",
     "@palladium/service-kit": "workspace:*"
   }
 }

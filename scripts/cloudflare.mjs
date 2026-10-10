@@ -1,4 +1,4 @@
-import { generateKeyPairSync, randomBytes, createPublicKey } from 'node:crypto';
+import { generateKeyPairSync, randomBytes, createPublicKey, createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { chmod, copyFile, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
@@ -29,6 +29,7 @@ export function validateDeployment(input, remote = false) {
   const config = { prefix: 'tuts', accountId: '', ingress: 'worker', ...input };
   if (!/^[a-z][a-z0-9-]{0,29}$/.test(config.prefix)) fail('prefix must be a lowercase resource name, at most 30 characters');
   if (!['worker', 'pages'].includes(config.ingress)) fail('ingress must be worker or pages');
+  if (config.hyperdrive !== undefined && (typeof config.hyperdrive !== 'object' || !config.hyperdrive || Object.entries(config.hyperdrive).some(([name,id]) => !serviceNames.includes(name) || !/^[a-f\d]{32}$/.test(id)))) fail('Invalid per-service Hyperdrive bindings');
   if (config.authMailEnabled !== undefined && typeof config.authMailEnabled !== 'boolean') fail('authMailEnabled must be a boolean');
   if (config.databaseRegion !== undefined && !/^(aws|gcp|azure):[a-z][a-z0-9-]{1,63}$/.test(config.databaseRegion)) fail('databaseRegion must be a supported cloud provider region');
   if (config.ingress === 'pages') {
@@ -87,7 +88,16 @@ async function settings(remote = false) {
 }
 export function queueName(config, name, deadLetter = false) { return `${config.prefix}-events-${name}${deadLetter ? '-dead' : ''}`; }
 export function sqlName(config, service) { return `${config.prefix.replace(/-/g, '_')}_${service}`; }
-export function createConfigs(configInput, subscriptions, projectRoot = root) {
+/** Deployment must not undo a coordinated maintenance pause. Missing state
+ * keeps the normal schedule; malformed or foreign state fails closed. */
+export function gatewayCrons(config, maintenanceState) {
+  if(maintenanceState===null || maintenanceState===undefined)return ['*/15 * * * *'];
+  if(maintenanceState.version!==1 || !['pausing','paused','resuming','resumed'].includes(maintenanceState.phase))fail('Invalid maintenance state; resolve it before generating deployment configuration');
+  if(maintenanceState.accountId!==config.accountId || maintenanceState.prefix!==config.prefix || maintenanceState.publicUrl!==config.publicUrl)fail('Maintenance state belongs to another deployment; schedule generation refused');
+  // Resuming remains paused until the maintenance tool completes its checks.
+  return maintenanceState.phase==='resumed'?['*/15 * * * *']:[];
+}
+export function createConfigs(configInput, subscriptions, projectRoot = root, maintenanceState) {
   const config = validateDeployment(configInput);
   const common = {
     compatibility_date: '2026-10-04',
@@ -119,11 +129,12 @@ export function createConfigs(configInput, subscriptions, projectRoot = root) {
       // the first request. Workers has Node compatibility; select that entry.
       ...(['clients', 'billing'].includes(name) ? { alias: { ...common.alias, exceljs: join(projectRoot, 'services', name, 'node_modules/exceljs/excel.js') } } : {}),
       ...(config.databaseRegion ? { placement: { region: config.databaseRegion } } : {}),
+      ...(config.hyperdrive?.[name] ? { hyperdrive: [{binding:'HYPERDRIVE', id:config.hyperdrive[name]}] } : {}),
       ...(['platform', 'notifications'].includes(name) ? { vars: { ...common.vars, AUTH_MAIL_ENABLED: config.authMailEnabled ? 'true' : 'false' } } : {}),
       queues: { ...(producers.length ? { producers } : {}), ...(consumes ? { consumers: [{ queue: queueName(config, name), max_batch_size: 5, max_batch_timeout: 5, max_retries: 5, dead_letter_queue: queueName(config, name, true) }] } : {}) },
       r2_buckets: [{ binding: 'EVENT_PAYLOADS', bucket_name: `${config.prefix}-event-payloads` }, ...(name === 'learning' ? [{ binding: 'UPLOADS', bucket_name: `${config.prefix}-uploads` }] : [])],
       ...(name === 'reporting' ? { services: ['scheduling', 'learning', 'billing', 'clients'].map(service => ({ binding: service.toUpperCase(), service: `${config.prefix}-${service}` })) } : {}),
-      ...(name === 'billing' ? { services: [{ binding: 'SCHEDULING', service: `${config.prefix}-scheduling` }] } : {}),
+      ...(name === 'billing' ? { services: ['scheduling', 'clients'].map(service => ({ binding: service.toUpperCase(), service: `${config.prefix}-${service}` })) } : {}),
       ...(['integrations', 'planning'].includes(name) ? { services: [{ binding: 'CLIENTS', service: `${config.prefix}-clients` }] } : {}),
       ...(name === 'notifications' ? { services: [{ binding: 'CLIENTS', service: `${config.prefix}-clients` }] } : {}),
       ...(name === 'platform' ? { services: [{ binding: 'NOTIFICATIONS', service: `${config.prefix}-notifications` }, { binding: 'CLIENTS', service: `${config.prefix}-clients` }] } : {}),
@@ -133,7 +144,8 @@ export function createConfigs(configInput, subscriptions, projectRoot = root) {
     ...common, name: `${config.prefix}-gateway`, main: join(projectRoot, 'apps/gateway/dist/worker.js'), workers_dev: config.ingress === 'worker',
     assets: { directory: join(projectRoot, 'apps/web/out'), binding: 'ASSETS', run_worker_first: true },
     services: serviceNames.map(name => ({ binding: name.toUpperCase(), service: `${config.prefix}-${name}` })),
-    triggers: { crons: ['*/15 * * * *'] },
+    triggers: { crons: gatewayCrons(config, maintenanceState) },
+    ...(config.contentSecurityPolicy ? { vars: { ...common.vars, CONTENT_SECURITY_POLICY: config.contentSecurityPolicy } } : {}),
     ...(config.customDomain && config.ingress === 'worker' ? { routes: [{ pattern: config.customDomain, custom_domain: true }] } : {}),
   };
   if (config.ingress === 'pages') {
@@ -153,9 +165,29 @@ async function contracts() {
   try { return await import('../packages/contracts/dist/index.js'); }
   catch { fail('Build @palladium/contracts before generating deployment config'); }
 }
+export async function staticContentSecurityPolicy(directory) {
+  const hashes = new Set();
+  async function walk(path) {
+    for (const entry of await readdir(path, { withFileTypes: true })) {
+      const next = join(path, entry.name);
+      if (entry.isDirectory()) await walk(next);
+      else if (entry.name.endsWith('.html')) {
+        const html = await readFile(next, 'utf8');
+        for (const match of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)) {
+          if (!/\bsrc\s*=/i.test(match[1]) && match[2]) hashes.add("'sha256-" + createHash('sha256').update(match[2]).digest('base64') + "'");
+        }
+      }
+    }
+  }
+  try { await walk(directory); } catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+  // Generated static Next hydration is hash-allowed; arbitrary inline script is not.
+  return ["default-src 'self'", "script-src 'self' " + [...hashes].sort().join(' '), "style-src 'self' 'unsafe-inline'", "img-src 'self' data: blob: https:", "font-src 'self' data:", "connect-src 'self'", "frame-src https://cal.com https://app.cal.com https://calendly.com https://docs.google.com", "object-src 'none'", "base-uri 'self'", "form-action 'self'", "frame-ancestors 'none'", "upgrade-insecure-requests"].join('; ');
+}
 async function generate(config) {
   const { eventConsumerSubscriptions } = await contracts();
-  const configs = createConfigs(config, eventConsumerSubscriptions);
+  const policy = await staticContentSecurityPolicy(join(root, 'apps/web/out'));
+  const maintenanceState = await json(join(directory,'recovery/maintenance-state.json'), null);
+  const configs = createConfigs({ ...config, ...(policy ? {contentSecurityPolicy: policy} : {}) }, eventConsumerSubscriptions, root, maintenanceState);
   for (const [name, value] of Object.entries(configs)) await save(join(directory, 'generated', name, 'wrangler.json'), value);
   if (configs.pages) {
     const outputDirectory = configs.pages.pages_build_output_dir;
@@ -369,6 +401,9 @@ async function migrationTables(tx, migrationsDirectory) {
   await tx.query("SELECT pg_advisory_xact_lock(hashtext('palladium-migrations'))");
   await tx.query(`CREATE TABLE IF NOT EXISTS service_migrations (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now());
     CREATE TABLE IF NOT EXISTS service_outbox (id uuid PRIMARY KEY, event jsonb NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), published_at timestamptz);
+    CREATE INDEX IF NOT EXISTS service_outbox_published ON service_outbox(published_at) WHERE published_at IS NOT NULL;
+    CREATE TABLE IF NOT EXISTS service_request_budgets (scope text NOT NULL, window_start timestamptz NOT NULL, used integer NOT NULL, PRIMARY KEY(scope,window_start));
+    CREATE INDEX IF NOT EXISTS service_request_budgets_expiry ON service_request_budgets(window_start);
     CREATE INDEX IF NOT EXISTS service_outbox_pending ON service_outbox(created_at) WHERE published_at IS NULL;
     CREATE TABLE IF NOT EXISTS service_inbox (consumer text NOT NULL, event_id uuid NOT NULL, received_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY(consumer,event_id));`);
   for (const name of (await readdir(migrationsDirectory)).filter(name => name.endsWith('.sql')).sort()) {
@@ -481,19 +516,23 @@ export function validateServiceDatabaseUrls(config, secrets) {
       fail(`${name} database URL must select its own ordinary SQL role/database and require TLS`);
   }
 }
-async function deploy(config, secrets) {
+async function deploy(config, secrets, scope = 'all') {
   validateServiceDatabaseUrls(config, secrets);
-  await generate(config);
+  const configs = await generate(config);
+  if (!configs.gateway.vars.CONTENT_SECURITY_POLICY) fail('Build the static application before deployment; CSP hashes are required');
   // Validate every credential before changing any remote Worker.
-  for (const name of deployOrder) secretsFor(name, secrets);
-  if (config.ingress === 'pages') await ensurePagesProject(config, secrets);
-  for (const name of deployOrder) {
+  const targets = scope === 'web' ? ['gateway'] : scope === 'mail' ? ['notifications', 'platform'] : deployOrder;
+  for (const name of targets) secretsFor(name, secrets);
+  if (scope !== 'mail' && config.ingress === 'pages') await ensurePagesProject(config, secrets);
+  for (const name of targets) {
     console.log(`Publishing ${name}`);
     await wrangler(['secret', 'bulk', '--config', configPath(name)], { input: JSON.stringify(secretsFor(name, secrets)), quiet: true, secrets, env: { CLOUDFLARE_ACCOUNT_ID: config.accountId } });
     await wrangler(['deploy', '--config', configPath(name)], { quiet: true, secrets, env: { CLOUDFLARE_ACCOUNT_ID: config.accountId } });
     console.log(`${name} deployed`);
   }
-  if (config.ingress === 'pages') {
+  if (scope === 'mail') {
+    console.log('Identity and notification mail configuration published; verify real delivery before reporting it operational');
+  } else if (config.ingress === 'pages') {
     console.log('Publishing Pages ingress');
     await wrangler(['pages', 'deploy', '--project-name', config.pagesProject,
       '--branch', 'main', '--force', '--cwd', join(directory, 'generated/pages')],
@@ -532,15 +571,17 @@ export async function main(argv = process.argv.slice(2)) {
     console.log('Cloudflare deployment settings initialized; existing credentials preserved. Fill accountId and adminDatabaseUrl before remote commands.');
     return;
   }
-  if (!['config', 'build', 'bundle', 'provision', 'migrate', 'deploy'].includes(command)) fail('Usage: node scripts/cloudflare.mjs init --public-url HTTPS_ORIGIN [--account-id ID] [--prefix tuts] [--custom-domain HOST] [--ingress worker|pages] [--pages-project NAME] | config | build | bundle | provision | migrate | deploy');
+  if (!['config', 'build', 'bundle', 'provision', 'migrate', 'deploy', 'deploy-web', 'deploy-mail'].includes(command)) fail('Usage: node scripts/cloudflare.mjs init --public-url HTTPS_ORIGIN [--account-id ID] [--prefix tuts] [--custom-domain HOST] [--ingress worker|pages] [--pages-project NAME] | config | build | bundle | provision | migrate | deploy | deploy-web | deploy-mail');
   if (args.length) fail('Only init accepts options; edit .cloudflare/deployment.json for subsequent commands');
-  const { config, secrets } = await settings(['provision', 'deploy'].includes(command));
+  const { config, secrets } = await settings(['provision', 'deploy', 'deploy-web', 'deploy-mail'].includes(command));
   if (command === 'config') { const configs = await generate(config); console.log(`${Object.keys(configs).length} Wrangler configurations generated without secrets`); }
   if (command === 'build') await build();
   if (command === 'bundle') await bundle(config);
   if (command === 'provision') await provision(config, secrets);
   if (command === 'migrate') await migrate(config, secrets);
   if (command === 'deploy') await deploy(config, secrets);
+  if (command === 'deploy-web') await deploy(config, secrets, 'web');
+  if (command === 'deploy-mail') await deploy(config, secrets, 'mail');
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main().catch(error => { console.error(error.message); process.exitCode = 1; });

@@ -326,7 +326,7 @@ test("every public response receives the existing security headers without mergi
   assert.deepEqual(responses.map((response) => response.status), [200, 200, 404, 400, 403, 403, 201, 503]);
   for (const [index, response] of responses.entries())
     for (const [name, value] of Object.entries(expected))
-      assert.equal(response.headers.get(name), name === "referrer-policy" && [4,5,6].includes(index) ? "no-referrer" : value);
+      assert.equal(response.headers.get(name), name === "referrer-policy" && [3,4,5,6].includes(index) ? "no-referrer" : value);
   const cookies = responses[6].headers.getSetCookie();
   assert.deepEqual(cookies, [
     "session=one; Path=/; Expires=Wed, 21 Oct 2026 07:28:00 GMT",
@@ -342,4 +342,12 @@ test('response timings distinguish verified identity from service work without e
  assert.match(response.headers.get('server-timing'),/^gateway;dur=\d+, identity;dur=\d+, service;dur=\d+$/);
  assert.doesNotMatch(response.headers.get('server-timing'),/private-session|11111111/);
  assert.match(response.headers.get('access-control-expose-headers'),/Server-Timing/);
+});
+
+test('all API successes and errors are private and HTML supports a generated hash CSP', async()=>{
+ const f=fixture();f.env.CONTENT_SECURITY_POLICY="default-src 'self'; script-src 'self' 'sha256-test'";
+ for(const path of ['/api/platform/v1/session','/api/clients/v1/clients','/api/missing/v1/items']){
+  const response=await worker.fetch(f.request(path),f.env);assert.equal(response.headers.get('cache-control'),'no-store');assert.match(response.headers.get('content-security-policy'),/sha256-test/);
+ }
+ const html=await worker.fetch(f.request('/'),f.env);assert.match(html.headers.get('content-security-policy'),/default-src/);assert.equal(html.headers.get('permissions-policy'),'camera=(), microphone=(), geolocation=()');
 });

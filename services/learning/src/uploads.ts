@@ -1,6 +1,6 @@
 import { BadRequestException } from "@nestjs/common";
 import { extname } from "node:path";
-import { inflateRawSync } from "node:zlib";
+import { inflateRawSync, inflateSync } from "node:zlib";
 export const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
 export type UploadedResourceFile = {
   originalname: string;
@@ -90,7 +90,7 @@ function validOfficeZip(bytes: Buffer, kind: "docx" | "pptx"): boolean {
         name.includes("\\") ||
         name.startsWith("/") ||
         name.split("/").includes("..") ||
-        /vbaproject|\.exe$|\.dll$/i.test(name)
+        /vbaproject|(?:^|\/)(?:embeddings|activex)\/|\.exe$|\.dll$/i.test(name)
       )
         return false;
       names.add(name);
@@ -124,6 +124,19 @@ function validOfficeZip(bytes: Buffer, kind: "docx" | "pptx"): boolean {
             })
           : bytes.subarray(data, data + compressed);
       if (content.length !== size) return false;
+      // Office packages may contain active relationships even with a .docx suffix.
+      if (/\.(?:xml|rels)$/i.test(name)) {
+        const xml = content.toString("utf8").replace(/&#(?:x([0-9a-f]+)|(\d+));/gi,
+          (_all, hex, decimal) => String.fromCodePoint(parseInt(hex ?? decimal, hex ? 16 : 10)));
+        if (/<!DOCTYPE|<!ENTITY|macroEnabled|vbaProject|oleObject|activeX|attachedTemplate|altChunk|externalLink/i.test(xml)) return false;
+        if (/\.rels$/i.test(name)) {
+          for (const relation of xml.match(/<(?:[\w.-]+:)?Relationship\b[^>]*>/gi) ?? []) {
+            if (/TargetMode\s*=\s*["']External["']/i.test(relation) &&
+                !/Type\s*=\s*["'][^"']*\/hyperlink["']/i.test(relation)) return false;
+          }
+        }
+      }
+
       if (
         (name === "[Content_Types].xml" || name === required) &&
         (!size || !content.toString("utf8").includes("<"))
@@ -140,6 +153,37 @@ function validOfficeZip(bytes: Buffer, kind: "docx" | "pptx"): boolean {
   } catch {
     return false;
   }
+}
+/** Reject known PDF active content; this is format hardening, not malware scanning. */
+function passivePdf(bytes: Buffer): boolean {
+  const blocked = /\/(?:JavaScript|JS|Launch|EmbeddedFile|EmbeddedFiles|RichMedia|XFA|Encrypt)\b/;
+  const names = (text: string) => text.replace(/#([0-9a-f]{2})/gi, (_all, hex) => String.fromCharCode(parseInt(hex, 16)));
+  const source = bytes.toString("latin1");
+  if (blocked.test(names(source))) return false;
+  let expanded = 0;
+  for (const match of source.matchAll(/(?<![A-Za-z])stream\r?\n/g)) {
+    const start = match.index! + match[0].length, end = source.indexOf('endstream', start);
+    if (end < 0) return false;
+    // Match the outer dictionary, including nested DecodeParms dictionaries.
+    let depth = 0, dictionaryStart = -1;
+    for (let i = source.lastIndexOf('>>', match.index); i >= 0; i--) {
+      if (source.slice(i, i + 2) === '>>') depth++;
+      else if (source.slice(i, i + 2) === '<<' && --depth === 0) {dictionaryStart = i; break;}
+    }
+    if (dictionaryStart < 0) return false;
+    const dictionary = names(source.slice(dictionaryStart, match.index));
+    if (!/\/FlateDecode\b/.test(dictionary)) {
+      // Compressed object dictionaries must be inspectable before accepting them.
+      if (/\/ObjStm\b/.test(dictionary)) return false;
+      continue;
+    }
+    try {
+      const content = inflateSync(bytes.subarray(start, end), {maxOutputLength: MAX_UPLOAD_BYTES});
+      expanded += content.length;
+      if (expanded > 50 * 1024 * 1024 || blocked.test(names(content.toString('latin1')))) return false;
+    } catch { return false; }
+  }
+  return true;
 }
 export function validateUpload(file: UploadedResourceFile | undefined): {
   fileName: string;
@@ -172,7 +216,7 @@ export function validateUpload(file: UploadedResourceFile | undefined): {
       /^%PDF-1\.[0-9]|^%PDF-2\.0/.test(bytes.toString("ascii", 0, 8)) &&
       bytes
         .subarray(Math.max(0, bytes.length - 2048))
-        .includes(Buffer.from("%%EOF"));
+        .includes(Buffer.from("%%EOF")) && passivePdf(bytes);
   else if (extension === ".png")
     valid =
       bytes.length >= 24 &&

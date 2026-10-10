@@ -76,7 +76,7 @@ CRM CSV/XLSX import is distinct from Billing history import. Billing preserves s
 
 ### Groups, portal and learning
 
-Groups belong to Clients; selecting unassigned students uses server filters. Portal access belongs to Platform and requires explicit student grants. Adding students can request invitations through the separate system sender, but production mail is currently disabled. Tutor cards compose CRM, Reporting and optional financial data. Student screens show homework, resources/essays, booking, sessions and planning. **Tutor billing, financial summaries and administrative activity reporting are excluded from student access by backend policy.** Google Docs links are validated references; Google controls document sharing/editing. Tuts does not measure time in an external Google document.
+Groups belong to Clients; selecting unassigned students uses server filters. Portal access belongs to Platform and requires explicit student grants. Adding students can request invitations through the separate system sender, with a verified production sender now enabled. Live password-recovery delivery is confirmed; this release did not send a real student invitation. Tutor cards compose CRM, Reporting and optional financial data. Student screens show homework, resources/essays, booking, sessions and planning. **Tutor billing, financial summaries and administrative activity reporting are excluded from student access by backend policy.** Google Docs links are validated references; Google controls document sharing/editing. Tuts does not measure time in an external Google document.
 
 ### Calendars and billing
 

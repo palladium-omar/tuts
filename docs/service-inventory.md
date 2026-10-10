@@ -13,11 +13,13 @@ Local port: 4001. [Service guide](../services/platform/README.md).
 | Method | Service path | Declared access metadata | Controller |
 | --- | --- | --- | --- |
 | ALL | `/auth/*path` | Public | [AuthController.handle](../services/platform/src/auth.controller.ts#L16) |
-| GET | `/v1/session` | Public | [BusinessesController.session](../services/platform/src/businesses.controller.ts#L73) |
-| GET | `/v1/businesses` | Public | [BusinessesController.list](../services/platform/src/businesses.controller.ts#L84) |
-| POST | `/v1/businesses` | Public | [BusinessesController.create](../services/platform/src/businesses.controller.ts#L109) |
-| PATCH | `/v1/businesses/:businessId/settings` | Public | [BusinessesController.settings](../services/platform/src/businesses.controller.ts#L169) |
-| POST | `/internal/context` | Public | [ContextController.context](../services/platform/src/businesses.controller.ts#L229) |
+| GET | `/v1/session` | Public | [BusinessesController.session](../services/platform/src/businesses.controller.ts#L75) |
+| POST | `/v1/client-diagnostics` | Public | [BusinessesController.clientDiagnostics](../services/platform/src/businesses.controller.ts#L86) |
+| GET | `/v1/businesses` | Public | [BusinessesController.list](../services/platform/src/businesses.controller.ts#L108) |
+| GET | `/v1/bootstrap` | Public | [BusinessesController.bootstrap](../services/platform/src/businesses.controller.ts#L117) |
+| POST | `/v1/businesses` | Public | [BusinessesController.create](../services/platform/src/businesses.controller.ts#L150) |
+| PATCH | `/v1/businesses/:businessId/settings` | Public | [BusinessesController.settings](../services/platform/src/businesses.controller.ts#L210) |
+| POST | `/internal/context` | Public | [ContextController.context](../services/platform/src/businesses.controller.ts#L270) |
 | GET | `/v1/portal/sender-status` | Public | [PortalController.senderStatus](../services/platform/src/portal.controller.ts#L17) |
 | GET | `/v1/portal/invitations` | Public | [PortalController.list](../services/platform/src/portal.controller.ts#L25) |
 | POST | `/v1/portal/invitations` | Public | [PortalController.create](../services/platform/src/portal.controller.ts#L32) |
@@ -163,17 +165,18 @@ Local port: 4005. [Service guide](../services/billing/README.md).
 | GET | `/v1/invoices/:id` | Roles(owner, admin, tutor) | [BillingController.get](../services/billing/src/billing.ts#L261) |
 | POST | `/v1/invoices` | Roles(owner, admin, tutor) | [BillingController.create](../services/billing/src/billing.ts#L267) |
 | POST | `/v1/invoices/:id/issue` | Roles(owner, admin, tutor) | [BillingController.issue](../services/billing/src/billing.ts#L310) |
-| POST | `/v1/history-imports/preview` | Roles(owner, admin, tutor); Permissions(billing.read, reporting.financial); Permissions(billing.read, reporting.financial, billing.write) | [HistoryImportsController.preview](../services/billing/src/history.controller.ts#L15) |
-| POST | `/v1/history-imports/commit` | Roles(owner, admin, tutor); Permissions(billing.read, reporting.financial); Permissions(billing.read, reporting.financial, billing.write) | [HistoryImportsController.commit](../services/billing/src/history.controller.ts#L19) |
-| GET | `/v1/history-imports` | Roles(owner, admin, tutor); Permissions(billing.read, reporting.financial) | [HistoryImportsController.list](../services/billing/src/history.controller.ts#L22) |
-| GET | `/v1/history-imports/:id/download` | Roles(owner, admin, tutor); Permissions(billing.read, reporting.financial) | [HistoryImportsController.download](../services/billing/src/history.controller.ts#L23) |
-| GET | `/v1/work-log` | Roles(owner, admin, tutor); Permissions(billing.read, reporting.financial) | [WorkLogController.list](../services/billing/src/history.controller.ts#L34) |
-| GET | `/v1/work-log/summary` | Roles(owner, admin, tutor); Permissions(billing.read, reporting.financial) | [WorkLogController.summary](../services/billing/src/history.controller.ts#L35) |
-| PATCH | `/v1/work-log/:id` | Roles(owner, admin, tutor); Permissions(billing.read, reporting.financial); Permissions(billing.read, reporting.financial, billing.write) | [WorkLogController.edit](../services/billing/src/history.controller.ts#L36) |
-| GET | `/v1/invoice-history` | Roles(owner, admin, tutor); Permissions(billing.read, reporting.financial) | [InvoiceHistoryController.list](../services/billing/src/history.controller.ts#L44) |
-| POST | `/v1/invoice-history` | Roles(owner, admin, tutor); Permissions(billing.read, reporting.financial); Permissions(billing.read, reporting.financial, billing.write) | [InvoiceHistoryController.create](../services/billing/src/history.controller.ts#L45) |
-| PATCH | `/v1/invoice-history/:id` | Roles(owner, admin, tutor); Permissions(billing.read, reporting.financial); Permissions(billing.read, reporting.financial, billing.write) | [InvoiceHistoryController.edit](../services/billing/src/history.controller.ts#L47) |
-| GET | `/v1/business-analytics` | Roles(owner, admin, tutor); Permissions(billing.read, reporting.financial) | [BusinessAnalyticsController.get](../services/billing/src/history.controller.ts#L55) |
+| POST | `/v1/history-imports/preview` | Roles(owner, admin, tutor); Permissions(billing.read, reporting.financial); Permissions(billing.read, reporting.financial, billing.write) | [HistoryImportsController.preview](../services/billing/src/history.controller.ts#L16) |
+| POST | `/v1/history-imports/commit` | Roles(owner, admin, tutor); Permissions(billing.read, reporting.financial); Permissions(billing.read, reporting.financial, billing.write) | [HistoryImportsController.commit](../services/billing/src/history.controller.ts#L20) |
+| GET | `/v1/history-imports` | Roles(owner, admin, tutor); Permissions(billing.read, reporting.financial) | [HistoryImportsController.list](../services/billing/src/history.controller.ts#L23) |
+| GET | `/v1/history-imports/:id/download` | Roles(owner, admin, tutor); Permissions(billing.read, reporting.financial) | [HistoryImportsController.download](../services/billing/src/history.controller.ts#L24) |
+| PATCH | `/v1/work-log/:id/identity` | Roles(owner, admin, tutor); Permissions(billing.read, reporting.financial); Permissions(billing.read, reporting.financial, billing.write) | [WorkLogController.identity](../services/billing/src/history.controller.ts#L35) |
+| GET | `/v1/work-log` | Roles(owner, admin, tutor); Permissions(billing.read, reporting.financial) | [WorkLogController.list](../services/billing/src/history.controller.ts#L37) |
+| GET | `/v1/work-log/summary` | Roles(owner, admin, tutor); Permissions(billing.read, reporting.financial) | [WorkLogController.summary](../services/billing/src/history.controller.ts#L38) |
+| PATCH | `/v1/work-log/:id` | Roles(owner, admin, tutor); Permissions(billing.read, reporting.financial); Permissions(billing.read, reporting.financial, billing.write) | [WorkLogController.edit](../services/billing/src/history.controller.ts#L39) |
+| GET | `/v1/invoice-history` | Roles(owner, admin, tutor); Permissions(billing.read, reporting.financial) | [InvoiceHistoryController.list](../services/billing/src/history.controller.ts#L47) |
+| POST | `/v1/invoice-history` | Roles(owner, admin, tutor); Permissions(billing.read, reporting.financial); Permissions(billing.read, reporting.financial, billing.write) | [InvoiceHistoryController.create](../services/billing/src/history.controller.ts#L48) |
+| PATCH | `/v1/invoice-history/:id` | Roles(owner, admin, tutor); Permissions(billing.read, reporting.financial); Permissions(billing.read, reporting.financial, billing.write) | [InvoiceHistoryController.edit](../services/billing/src/history.controller.ts#L50) |
+| GET | `/v1/business-analytics` | Roles(owner, admin, tutor); Permissions(billing.read, reporting.financial) | [BusinessAnalyticsController.get](../services/billing/src/history.controller.ts#L58) |
 | GET | `/v1/billing-settings` | Roles(owner, admin, tutor) | [MonthlyController.settings](../services/billing/src/monthly.ts#L692) |
 | PUT | `/v1/billing-settings` | Roles(owner, admin, tutor); Roles(owner, admin) | [MonthlyController.saveSettings](../services/billing/src/monthly.ts#L699) |
 | GET | `/v1/student-rates` | Roles(owner, admin, tutor) | [MonthlyController.rates](../services/billing/src/monthly.ts#L709) |
@@ -196,6 +199,7 @@ Local port: 4005. [Service guide](../services/billing/README.md).
 | [005_attendance_status.sql](../services/billing/migrations/005_attendance_status.sql) | Alters existing schema/policies |
 | [006_student_finance.sql](../services/billing/migrations/006_student_finance.sql) | `billing_student_aliases` |
 | [007_business_history.sql](../services/billing/migrations/007_business_history.sql) | `billing_history_sources`, `billing_work_log`, `billing_invoice_history` |
+| [008_history_identity.sql](../services/billing/migrations/008_history_identity.sql) | `billing_work_identities` |
 
 ## payments
 

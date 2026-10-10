@@ -5,6 +5,7 @@ import type { PoolClient } from 'pg';
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { idempotent, requestHash } from './idempotency.js';
+import { identityView } from './history-identity.js';
 import { monthSchema } from './monthly.js';
 import { historyHours, historyOptionsSchema, historyStatus, parseHistoryDate, parseHistoryFile, workAmount, type HistoryPreview, type HistoryValues, type RawSheet } from './history-parser.js';
 
@@ -28,7 +29,7 @@ export function safeHistoryMinor(value:unknown):number {
 }
 export const dayView=(value:unknown):string=>value instanceof Date?`${value.getFullYear()}-${String(value.getMonth()+1).padStart(2,'0')}-${String(value.getDate()).padStart(2,'0')}`:String(value).slice(0,10);
 export function historyRecord(row:Record<string,any>,kind:'work'|'invoices') {
-  return {id:row.id,origin:'imported',importId:row.import_id??null,sourceRow:row.source_row??null,date:dayView(kind==='work'?row.work_date:row.invoice_date),studentName:row.student_name,serviceType:row.service_type,invoiceNumber:row.invoice_number??null,amountMinor:safeHistoryMinor(row.amount_minor),currency:row.currency,status:row.status,paidDate:row.paid_date?dayView(row.paid_date):null,notes:row.notes,revision:row.revision,rawColumns:row.raw_columns,paymentEvidence:row.status==='paid'?'historical_declaration':'none',createdAt:row.created_at,updatedAt:row.updated_at,...(kind==='work'?{hours:Number(row.hours),rateMinor:safeHistoryMinor(row.rate_minor),countAsClasses:row.count_as_classes}:{})};
+  return {id:row.id,origin:'imported',importId:row.import_id??null,sourceRow:row.source_row??null,date:dayView(kind==='work'?row.work_date:row.invoice_date),studentName:row.student_name,serviceType:row.service_type,invoiceNumber:row.invoice_number??null,amountMinor:safeHistoryMinor(row.amount_minor),currency:row.currency,status:row.status,paidDate:row.paid_date?dayView(row.paid_date):null,notes:row.notes,revision:row.revision,rawColumns:row.raw_columns,paymentEvidence:row.status==='paid'?'historical_declaration':'none',createdAt:row.created_at,updatedAt:row.updated_at,...(kind==='work'?{hours:Number(row.hours),rateMinor:safeHistoryMinor(row.rate_minor),countAsClasses:row.count_as_classes,identity:identityView(row,row.revision)}:{})};
 }
 export const sourceRecord=(row:Record<string,any>)=>({id:row.id,fileName:row.file_name,kind:row.kind,status:row.committed_at?'committed':'staged',contentType:row.content_type,sizeBytes:Number(row.size_bytes),createdAt:row.created_at,committedAt:row.committed_at??null,summary:row.preview?.summary??null,sheetName:row.preview?.sheetName??null,downloadPath:`/billing/v1/history-imports/${row.id}/download`});
 function filters(input:z.infer<typeof historyQuerySchema>|z.infer<typeof summaryQuerySchema>,dateField:string,nameField:string,alias='') {
@@ -128,10 +129,10 @@ export class HistoryService {
     });
   }
   async workLog(ctx:RequestContext,query:unknown) {
-    assertHistoryAccess(ctx);const input=parseBody(historyQuerySchema,query),filter=filters(input,'work_date','student_name');
+    assertHistoryAccess(ctx);const input=parseBody(historyQuerySchema,query),filter=filters(input,'work_date','student_name','w');
     return this.db.withTenant(ctx.businessId,async tx=>{
-      const count=await tx.query(`SELECT count(*) total FROM billing_work_log ${filter.where}`,filter.values);
-      const selected=await tx.query(`SELECT * FROM billing_work_log ${filter.where} ORDER BY work_date DESC,id LIMIT $${filter.values.length+1} OFFSET $${filter.values.length+2}`,[...filter.values,input.limit,input.offset]);
+      const count=await tx.query(`SELECT count(*) total FROM billing_work_log w ${filter.where}`,filter.values);
+      const selected=await tx.query(`SELECT w.*,i.status identity_status,billing_student_root(i.student_id) identity_student_id,i.work_revision identity_work_revision,i.revision identity_revision,i.reason identity_reason,i.reviewed_at identity_reviewed_at FROM billing_work_log w LEFT JOIN billing_work_identities i ON i.business_id=w.business_id AND i.work_id=w.id ${filter.where} ORDER BY w.work_date DESC,w.id LIMIT $${filter.values.length+1} OFFSET $${filter.values.length+2}`,[...filter.values,input.limit,input.offset]);
       return {items:selected.rows.map(row=>historyRecord(row,'work')),total:Number(count.rows[0].total),limit:input.limit,offset:input.offset};
     });
   }

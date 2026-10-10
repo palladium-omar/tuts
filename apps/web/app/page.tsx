@@ -29,31 +29,36 @@ import {
 } from "lucide-react";
 import {
   createApi,
+  clearApi,
   errorMessage,
   type Api,
   type Business,
   type Row,
 } from "../lib/api";
 import { Notice } from "../components/shared";
-import { Registration } from "../features/registration";
-import { BusinessProfile, defaultPalette } from "../features/business-profile";
-import {DecisionDashboard} from "../features/decision-dashboard";
-import {WorkHistory} from "../features/work-history";
-import { CRM } from "../features/crm";
-import { PlanningWorkspace } from "../features/planning-workspace";
-import { StudentTracker } from "../features/student-tracker";
+import dynamic from "next/dynamic";
+import { installClientDiagnostics } from "../lib/client-diagnostics";
+import { defaultPalette } from "../lib/palette";
 import { canNavigateTutor, navigateTutor, tutorLocationKeys } from "../lib/tutor-workspace";
-import {
-  CampaignComposer,
-  CommunicationConnections,
-  type Audience,
-} from "../features/communications";
-import { Connectors } from "../features/connectors";
-import { AttributionSettings } from "../features/attribution-settings";
-import { StudentBookingSettings } from "../features/student-booking-settings";
-import { Sessions } from "../features/sessions-calendar";
-import { Learning } from "../features/learning";
-import { Activity, Invoices, Payments } from "../features/finance";
+import type { Audience } from "../features/communications";
+function ScreenLoading() { return <p role="status">Opening this view…</p>; }
+const Registration = dynamic(() => import("../features/registration").then(m => m.Registration), { loading: ScreenLoading });
+const BusinessProfile = dynamic(() => import("../features/business-profile").then(m => m.BusinessProfile), { loading: ScreenLoading });
+const DecisionDashboard = dynamic(() => import("../features/decision-dashboard").then(m => m.DecisionDashboard), { loading: ScreenLoading });
+const WorkHistory = dynamic(() => import("../features/work-history").then(m => m.WorkHistory), { loading: ScreenLoading });
+const CRM = dynamic(() => import("../features/crm").then(m => m.CRM), { loading: ScreenLoading });
+const PlanningWorkspace = dynamic(() => import("../features/planning-workspace").then(m => m.PlanningWorkspace), { loading: ScreenLoading });
+const StudentTracker = dynamic(() => import("../features/student-tracker").then(m => m.StudentTracker), { loading: ScreenLoading });
+const CampaignComposer = dynamic(() => import("../features/communications").then(m => m.CampaignComposer), { loading: ScreenLoading });
+const CommunicationConnections = dynamic(() => import("../features/communications").then(m => m.CommunicationConnections), { loading: ScreenLoading });
+const Connectors = dynamic(() => import("../features/connectors").then(m => m.Connectors), { loading: ScreenLoading });
+const AttributionSettings = dynamic(() => import("../features/attribution-settings").then(m => m.AttributionSettings), { loading: ScreenLoading });
+const StudentBookingSettings = dynamic(() => import("../features/student-booking-settings").then(m => m.StudentBookingSettings), { loading: ScreenLoading });
+const Sessions = dynamic(() => import("../features/sessions-calendar").then(m => m.Sessions), { loading: ScreenLoading });
+const Learning = dynamic(() => import("../features/learning").then(m => m.Learning), { loading: ScreenLoading });
+const Activity = dynamic(() => import("../features/finance").then(m => m.Activity), { loading: ScreenLoading });
+const Invoices = dynamic(() => import("../features/finance").then(m => m.Invoices), { loading: ScreenLoading });
+const Payments = dynamic(() => import("../features/finance").then(m => m.Payments), { loading: ScreenLoading });
 const icons: Record<string, any> = {
   planning: ClipboardList,
   tracker: Users,
@@ -132,8 +137,8 @@ export default function Home() {
       filter: "all",
     }),
     [draftPalette, setDraftPalette] = useState<Row>(defaultPalette);
-  async function loadBusinesses(preferred?: string) {
-    const { items } = await platform("platform/v1/businesses");
+  async function loadBusinesses(preferred?: string, loaded?: Business[]) {
+    const items = loaded ?? (await platform("platform/v1/businesses")).items;
     setBusinesses(items);
     const requestedId = new URLSearchParams(window.location.search).get(
       "business",
@@ -171,9 +176,9 @@ export default function Home() {
   useEffect(() => {
     (async () => {
       try {
-        const { item } = await platform("platform/v1/session");
+        const { item, items } = await platform("platform/v1/bootstrap");
+        await loadBusinesses(undefined, items);
         setSession(item);
-        await loadBusinesses();
       } catch {
       } finally {
         setLoading(false);
@@ -181,9 +186,9 @@ export default function Home() {
     })();
   }, [platform]);
   async function signedIn() {
-    const { item } = await platform("platform/v1/session");
+    const { item, items } = await platform("platform/v1/bootstrap");
+    await loadBusinesses(undefined, items);
     setSession(item);
-    await loadBusinesses();
   }
   async function saved(created: Business) {
     await loadBusinesses(created.id);
@@ -230,6 +235,7 @@ export default function Home() {
       onAddBusiness={() => setNewBusiness(true)}
       onSignOut={async () => {
         await platform("platform/auth/sign-out", "POST", {});
+        clearApi(platform);
         setSession(null);
         setBusiness(null);
         setBusinesses([]);
@@ -263,9 +269,13 @@ function Workspace({
   route: WorkspaceRoute;
   onNavigate: (route: WorkspaceRoute) => void;
 }) {
-  const capabilityKey = JSON.stringify([business.role,business.permissions,business.entitlements,business.accessScope,business.studentIds]);
+  const capabilityKey = JSON.stringify([user.id,business.role,business.permissions,business.entitlements,business.accessScope,business.studentIds]);
   const api = useMemo(() => createApi(business.id), [business.id,capabilityKey]);
+  useEffect(() => () => clearApi(api), [api]);
   const { view, filter } = route;
+  const diagnosticView = useRef(view);
+  diagnosticView.current = view;
+  useEffect(() => installClientDiagnostics(api, () => diagnosticView.current), [api]);
   const [historyFile,setHistoryFile]=useState<File|null>(null);
   const [dashboardTab,setDashboardTab]=useState<"overview"|"work">("overview");
   const [planningStudentId, setPlanningStudentId] = useState<string | undefined>();

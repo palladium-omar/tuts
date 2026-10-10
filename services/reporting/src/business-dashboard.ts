@@ -38,7 +38,7 @@ const analyticsResponse = z.object({ item: z.object({
   coverage: z.object({
     workRows: nullableCount, importedInvoices: nullableCount, nativeInvoices: nullableCount,
     confirmedClasses: nullableCount, sourceFiles: nullableCount,
-    studentIdentity: z.literal('unlinked_source_names_and_native_student_ids'),
+    studentIdentity: z.enum(['unlinked_source_names_and_native_student_ids','reviewed_work_rows_and_native_student_ids','partial_reviewed_work_identities']),
     payments: z.literal('verified_allocations_excluding_simulated'),
     churn: z.literal('inactivity'), provisional: z.boolean(),
     notes: z.array(z.string().max(300)).max(20),

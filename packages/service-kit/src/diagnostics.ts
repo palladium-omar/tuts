@@ -36,8 +36,8 @@ export function safeDiagnosticError(error: unknown) {
   }).slice(0, 6) : [];
   return { kind, ...(code ? { code } : {}), locations };
 }
-type Event = 'request_completed' | 'request_failed' | 'api_error' | 'identity_failed' | 'upstream_failed' | 'tick_failed' | 'tick_completed' | 'queue_retry' | 'queue_failed' | 'outbox_deferred' | 'background_failed' | 'cleanup_failed' | 'database_failed' | 'password_mail_failed' | 'password_mail_not_configured';
-type Fields = { status?: number; durationMs?: number; identityMs?: number; upstreamMs?: number; method?: string; route?: string; target?: string; error?: unknown };
+type Event = 'auth_mail_provider_failed' | 'browser_error' | 'outbox_completed' | 'target_completed' | 'database_connected' | 'database_transaction' | 'request_completed' | 'request_failed' | 'api_error' | 'identity_failed' | 'upstream_failed' | 'tick_failed' | 'tick_completed' | 'queue_retry' | 'queue_failed' | 'outbox_deferred' | 'background_failed' | 'cleanup_failed' | 'database_failed' | 'password_mail_failed' | 'password_mail_not_configured';
+type Fields = { providerStatus?: number; failureCategory?: string; browserKind?: string; source?: string; view?: string; count?: number; status?: number; durationMs?: number; identityMs?: number; upstreamMs?: number; method?: string; route?: string; target?: string; error?: unknown };
 /** Deliberately whitelist fields; never spread an error/request/provider result. */
 export function logDiagnostic(level: 'info' | 'warn' | 'error', event: Event, fields: Fields = {}): void {
   const scope = scopes.getStore();
@@ -45,6 +45,12 @@ export function logDiagnostic(level: 'info' | 'warn' | 'error', event: Event, fi
     schema: 'tuts.diagnostic.v1', timestamp: new Date().toISOString(), level, event,
     service: scope?.service ?? 'runtime', requestId: scope?.requestId ?? null,
     trigger: scope?.trigger ?? null, businessId: scope?.businessId ?? null,
+    ...(fields.browserKind && ['Error','TypeError','RangeError','SyntaxError','AbortError','TimeoutError','UnknownError'].includes(fields.browserKind) ? {browserKind:fields.browserKind} : {}),
+    ...(fields.source && ['window','promise'].includes(fields.source) ? {source:fields.source} : {}),
+    ...(fields.view && ['dashboard','crm','tracker','scheduling','learning','planning','other'].includes(fields.view) ? {view:fields.view} : {}),
+    ...(Number.isInteger(fields.count) && fields.count!>0 && fields.count!<=10 ? {count:fields.count} : {}),
+    ...(Number.isInteger(fields.providerStatus) && fields.providerStatus! >= 100 && fields.providerStatus! <= 599 ? {providerStatus: fields.providerStatus} : {}),
+    ...(fields.failureCategory && ['network','timeout','provider_rejected','invalid_response','response_limit','runtime_type_error'].includes(fields.failureCategory) ? {failureCategory: fields.failureCategory} : {}),
     ...(Number.isInteger(fields.status) ? { status: fields.status } : {}),
     ...(Number.isFinite(fields.durationMs) ? { durationMs: Math.max(0, Math.round(fields.durationMs!)) } : {}),
     ...(Number.isFinite(fields.identityMs) ? { identityMs: Math.max(0, Math.round(fields.identityMs!)) } : {}),

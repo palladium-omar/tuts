@@ -30,7 +30,7 @@ in the selected timezone. No wall-clock timestamp is accepted from the browser.
 
 Batch summaries use four tenant-scoped SQL statements regardless of whether the
 request contains one or 100 student IDs; financial summaries use five. This
-includes the merge advisory lock, one bounded recursive alias resolution, one
+includes a shared tenant advisory read lock, one bounded recursive alias resolution, one
 set aggregate for classes/homework/resources/activity, one coverage read, and the
 optional financial snapshot read. Both requested IDs and resolved canonical IDs
 are checked against signed student access before aggregate reads. Repeated
@@ -307,8 +307,10 @@ uses exact signed student IDs. Every financial query requires the extra financia
 capabilities before reading snapshots. Out-of-order updates compare record
 revisions and resolve aliases; stale invoice events do not invalidate newer
 snapshots. Merge invalidates combined historical coverage and preserves resource
-associations. Reporting reads now take the same tenant advisory lock as merge,
-preventing a merge between identity lookup and aggregate reads. Learning link
+associations. Reporting summaries and activity-history reads now share the tenant advisory
+lock, while merge/projection/activity mutations take it exclusively. Concurrent
+readers can overlap; a writer cannot change aliases between identity lookup and
+aggregate/coverage reads. Learning link
 and submission URL validation now also rejects embedded credentials.
 
 Review fixes also distinguish CSV booking/homework metric names (previously both
@@ -318,3 +320,27 @@ SQL execution or deployment validation were performed by this agent. R2/provider
 runtime behavior and bot resistance remain unverified. First activity heartbeat
 credits zero; guardian/tutor activity is intentionally excluded. Private uploaded
 Office/PDF files are format validated, not malware scanned.
+
+
+## Read concurrency and reviewed Billing identities
+
+`lockReports` defaults to an exclusive write lock. Summary and activity-history
+paths explicitly request the shared read mode and retain it until the tenant
+transaction finishes. Projection, reconciliation, merge and activity writes keep
+the exclusive mode, so a response cannot mix canonical aliases with a different
+projection/coverage state. Different businesses use different lock keys.
+
+`test/read-lock.test.ts` uses real PostgreSQL connections to prove overlapping
+readers, exclusive writer exclusion until both readers finish, and independent
+tenant progress. `test/summary-batch.test.ts` compares all 50 card results against
+the previous summary implementation, including multi-hop aliases, forced RLS,
+timezones, permissions and coverage. The four/five query bound remains unchanged.
+
+Business Dashboard accepts Billing identity coverage values
+`unlinked_source_names_and_native_student_ids`,
+`reviewed_work_rows_and_native_student_ids` and
+`partial_reviewed_work_identities`. It preserves null student/engagement measures
+when reviewed identity coverage is incomplete. Billing owns the review workflow;
+Reporting neither matches names nor stores imported work associations. Run the
+ordinary-role PostgreSQL suites with `node scripts/test-databases.mjs` from the
+repository root.

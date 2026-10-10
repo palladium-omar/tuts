@@ -77,3 +77,27 @@ test('Node service destinations reject embedded credentials and unsupported sche
     else process.env.BILLING_URL = oldUrl;
   }
 });
+
+test('registered mutation work retains invocation pools until background publication completes', async () => {
+  const { registerBackgroundTask } = await import('../src/runtime.js');
+  const oldEnd = Pool.prototype.end;
+  const stages: string[] = [];
+  let release!: () => void;
+  const block = new Promise<void>(resolve => { release = resolve; });
+  const retained: Promise<unknown>[] = [];
+  Pool.prototype.end = async function () { stages.push('pool closed'); } as typeof oldEnd;
+  try {
+    const response = await withCloudflareInvocation({ DATABASE_URL: 'postgres://background/db' }, async () => {
+      const db = new Database();
+      void db.pool.options;
+      registerBackgroundTask((async () => { await block; assert.equal(db.pool.options.connectionString, 'postgres://background/db'); stages.push('published'); })());
+      return 'response';
+    }, { waitUntil(promise) { retained.push(promise); } });
+    assert.equal(response, 'response');
+    assert.deepEqual(stages, []);
+    assert.equal(retained.length, 1);
+    release();
+    await Promise.all(retained);
+    assert.deepEqual(stages, ['published', 'pool closed']);
+  } finally { Pool.prototype.end = oldEnd; }
+});

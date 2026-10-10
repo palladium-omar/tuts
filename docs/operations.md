@@ -27,6 +27,11 @@ node scripts/document-service-inventory.mjs --check
 pnpm -r --no-bail --if-present test
 node --test infra/cloudflare/deployment.test.mjs
 node scripts/test-workbook-runtime.mjs
+node scripts/test-databases.mjs
+node --test infra/cloudflare/deployment.test.mjs scripts/tests/static-csp.test.mjs
+RECOVERY_TEST_LOCAL=1 node --test scripts/tests/recovery.test.mjs
+node --test scripts/tests/encrypted-backup.test.mjs
+pnpm audit --prod --audit-level moderate
 pnpm audit --prod
 ```
 
@@ -59,3 +64,9 @@ Preserve database snapshots, private learning objects and stable signing/encrypt
 Outbox/inbox cleanup, expired previews, activity retention and archived customer-source deletion need documented policies. Never prune pending events or dedup state arbitrarily. Transport R2 payloads expire after seven days, so stalled queues/outboxes require timely investigation and recovery from producer state.
 
 Roll back code only when migrations remain compatible. For incompatible schema changes, restore a consistent database/file/key set through a reviewed recovery procedure. Do not delete database volumes, rotate encryption keys blindly, force-push history or remove active feature branches as cleanup.
+
+## Current recovery
+
+Use the complete ten-service [recovery procedure](../scripts/RECOVERY.md); the legacy eight-service migration script now refuses operations. Backup verification includes lossless SQL, exact catalogs/migrations, both R2 buckets and stable configuration/encryption keys. Restore targets are new loopback databases, providers/brokers are not started, and authentication/hash checks happen before extracted files become usable. Consult the remediation receipt for the actual hosted capture/local restore; do not infer a recurring schedule or hosted RTO from a tool/test.
+
+The CI database job runs all domains against ordinary local roles and treats skipped/missing suites as failures. Recovery tests use a local administrator only for new synthetic databases. Dependency advisories, service boundaries, generated inventory, type checking, tests, static export and workbook Worker regressions are separate gates. Required branch protection still depends on repository administrator permissions; green workflows alone are not branch protection.

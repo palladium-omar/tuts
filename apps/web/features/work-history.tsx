@@ -57,9 +57,11 @@ export function WorkHistory({
     [notice, setNotice] = useState(""),
     [busy, setBusy] = useState(false),
     [editing, setEditing] = useState<Row | null>(null),
+    [reviewingIdentity, setReviewingIdentity] = useState<Row | null>(null),
     [manual, setManual] = useState(false),
     [summary, setSummary] = useState<Row | null>(null),
     [summaryLoading, setSummaryLoading] = useState(false);
+  useEffect(() => { setReviewingIdentity(null); }, [business.id]);
   const canRead =
       canReadFinancial(business) && business.entitlements.includes("billing"),
     canWrite = canRead && hasPermission(business, "billing.write");
@@ -191,7 +193,7 @@ export function WorkHistory({
             aria-selected={view === "aggregate"}
             onClick={() => setView("aggregate")}
           >
-            All-time student totals
+            All-time work totals
           </button>
         )}
         <button
@@ -213,7 +215,7 @@ export function WorkHistory({
         <>
           <p className="work-help">
             Totals include recorded work only. These amounts are separate from
-            issued invoices and verified payments.
+            issued invoices and verified payments. The table groups source labels; identical names can describe different people. Review identities in Monthly work before using student counts.
           </p>
           {summaryLoading && (
             <p role="status">
@@ -239,7 +241,7 @@ export function WorkHistory({
               <thead>
                 <tr>
                   {[
-                    "Student",
+                    "Source name",
                     "Total hours",
                     "Total value",
                     "Unsent",
@@ -267,7 +269,7 @@ export function WorkHistory({
             </table>
           </div>
           {!summaryLoading && !summary?.students?.length && (
-            <Empty>Import a time tracker to see student totals.</Empty>
+            <Empty>Import a time tracker to see recorded work totals.</Empty>
           )}
         </>
       ) : (
@@ -427,7 +429,7 @@ export function WorkHistory({
                     ) : (
                       <>
                         <td>{row.date?.slice(0, 10)}</td>
-                        <td>{row.studentName}</td>
+                        <td>{row.studentName}<br/><small>{row.identity?.status === 'linked' ? 'Identity reviewed' : row.identity?.status === 'ambiguous' ? 'Identity ambiguous' : row.identity?.status === 'stale' ? 'Identity needs another review' : 'Identity unknown'}</small></td>
                         <td>{row.serviceType || "—"}</td>
                         <td>{row.hours}</td>
                         <td>{money(row.rateMinor, row.currency)}</td>
@@ -447,6 +449,7 @@ export function WorkHistory({
                               Edit
                             </button>
                           )}
+                          {canWrite && <button disabled={busy || list.loading} onClick={() => setReviewingIdentity(row)}>Review identity</button>}
                         </td>
                       </>
                     )}
@@ -505,6 +508,8 @@ export function WorkHistory({
           }}
         />
       )}
+      {reviewingIdentity && <WorkIdentityReview api={api} business={business} row={reviewingIdentity}
+        onClose={() => setReviewingIdentity(null)} onSaved={() => {setReviewingIdentity(null);setRevision(n => n + 1);setNotice('Work row identity review saved.');}}/>}
       {editing && (
         <Modal
           title={
@@ -652,6 +657,43 @@ export function WorkHistory({
       )}
     </section>
   );
+}
+function WorkIdentityReview({api,business,row,onClose,onSaved}:{api:Api;business:Business;row:Row;onClose:()=>void;onSaved:()=>void}) {
+  const canLink=business.entitlements.includes('clients') && hasPermission(business,'clients.read');
+  const [status,setStatus]=useState(canLink && row.identity?.status === 'linked' ? 'linked' : row.identity?.status === 'ambiguous' ? 'ambiguous' : 'unknown');
+  const [search,setSearch]=useState(''),[studentId,setStudentId]=useState(row.identity?.studentId || ''),[error,setError]=useState(''),[busy,setBusy]=useState(false);
+  const students=useListQuery(api,`clients/v1/clients?kind=student&limit=20&offset=0&search=${encodeURIComponent(search)}`,{enabled:canLink && status==='linked',scope:business.id,delay:250});
+  const options:Row[]=students.data?.items || [];
+  return <Modal title="Review work row identity" onClose={() => !busy && onClose()}>
+    <p>Source name: <strong>{row.studentName}</strong> · {row.date?.slice(0,10)} · {row.hours} hours</p>
+    <p>Review this row individually. A matching name alone does not establish who did the work. The original name and file stay preserved.</p>
+    <Notice error={error || students.error}/>
+    <form onSubmit={async event => {
+      event.preventDefault();const fields=new FormData(event.currentTarget);setBusy(true);setError('');
+      try {await api(`billing/v1/work-log/${row.id}/identity`,'PATCH',{status,studentId:status==='linked'?studentId:null,expectedWorkRevision:row.revision,expectedIdentityRevision:row.identity?.revision || 0,reason:String(fields.get('reason') || '')});onSaved();}
+      catch(failure){setError(errorMessage(failure));}finally{setBusy(false);}
+    }}>
+      <fieldset disabled={busy}>
+        <label>Review result<select value={status} onChange={event=>setStatus(event.target.value)}>
+          <option value="unknown">Identity unknown</option><option value="ambiguous">More than one possible student</option>
+          {canLink && <option value="linked">Link to a verified CRM student</option>}
+        </select></label>
+        {status==='linked' && <>
+          <label>Find the student<input value={search} maxLength={160} onChange={event=>setSearch(event.target.value)} placeholder="Search CRM students"/></label>
+          {students.loading && <p role="status">Finding students…</p>}
+          <label>Choose the student<select required value={studentId} onChange={event=>setStudentId(event.target.value)}>
+            <option value="">Choose after checking the record</option>
+            {studentId && !options.some(option=>option.id===studentId) && <option value={studentId}>Selected CRM student · {studentId.slice(0,8)}</option>}
+            {options.map(option=><option key={option.id} value={option.id}>{option.displayName}{option.email ? ` · ${option.email}` : ` · ${option.id.slice(0,8)}`}</option>)}
+          </select></label>
+          <label className="work-checkbox"><input key={studentId} type="checkbox" required/>I checked that this work row belongs to the selected student.</label>
+        </>}
+        {!canLink && <p>Linking requires access to CRM students. You can record this row as unknown or ambiguous.</p>}
+        <label>Review note<textarea name="reason" maxLength={500} defaultValue={row.identity?.reason || ''} placeholder="Optional evidence or reason for uncertainty"/></label>
+      </fieldset>
+      <div className="work-actions"><button type="submit" disabled={busy || (status==='linked' && !studentId)}>{busy?'Saving…':'Save review'}</button><button type="button" disabled={busy} onClick={onClose}>Cancel</button></div>
+    </form>
+  </Modal>;
 }
 function PastInvoice({
   api,

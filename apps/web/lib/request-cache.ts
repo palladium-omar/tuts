@@ -1,6 +1,13 @@
 /** Private, short-lived cache. One instance belongs to one authenticated API context. */
 export class RequestCache {
   private generation = 0;
+  invalidate(matches: (key: string) => boolean) {
+    for (const key of new Set([...this.entries.keys(), ...this.pending.keys()])) {
+      if (!matches(key)) continue;
+      this.entries.delete(key);
+      this.pending.delete(key);
+    }
+  }
   private entries = new Map<string, { value: unknown; expires: number }>();
   private pending = new Map<string, Promise<unknown>>();
   clear() {
@@ -21,7 +28,7 @@ export class RequestCache {
       const generation = this.generation;
       task = load()
         .then((value) => {
-          if (generation === this.generation) {
+          if (generation === this.generation && this.pending.get(key) === task) {
             if (this.entries.size >= 60)
               this.entries.delete(this.entries.keys().next().value!);
             this.entries.set(key, {

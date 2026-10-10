@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createPublicKey } from 'node:crypto';
 import { eventConsumerSubscriptions } from '../../packages/contracts/dist/index.js';
-import { createConfigs, freshSecrets, serviceNames, secretsFor, validateDeployment, databaseUrl, sqlName, deployOrder, validateServiceDatabaseUrls, verifyRole } from '../../scripts/cloudflare.mjs';
+import { gatewayCrons, createConfigs, freshSecrets, serviceNames, secretsFor, validateDeployment, databaseUrl, sqlName, deployOrder, validateServiceDatabaseUrls, verifyRole } from '../../scripts/cloudflare.mjs';
 const deployment = { prefix: 'tuts', accountId: 'a'.repeat(32), publicUrl: 'https://tuts-gateway.synthetic.workers.dev' };
 
 test('manifest requires a secure canonical URL and valid account/resource identity', () => {
@@ -29,7 +29,7 @@ test('all ten domains remain private with minimal bindings and no credentials in
     assert.equal(config.r2_buckets.some(bucket => bucket.binding === 'UPLOADS'), name === 'learning');
     assert.equal(config.r2_buckets.length, name === 'learning' ? 2 : 1);
   }
-  assert.deepEqual(configs.billing.services, [{ binding: 'SCHEDULING', service: 'tuts-scheduling' }]);
+  assert.deepEqual(configs.billing.services, [{ binding: 'SCHEDULING', service: 'tuts-scheduling' }, { binding: 'CLIENTS', service: 'tuts-clients' }]);
   assert.deepEqual(configs.notifications.services, [{ binding: 'CLIENTS', service: 'tuts-clients' }]);
   for (const name of serviceNames.filter(name => !['billing', 'notifications','platform','reporting','integrations','planning'].includes(name))) assert.equal(configs[name].services, undefined);
   assert.equal(configs.gateway.workers_dev, true);
@@ -128,4 +128,27 @@ test('XLSX import Workers select the Node ExcelJS entry instead of the embedded 
   assert.equal(configs[name].alias.exceljs,['clients','billing'].includes(name)?`/synthetic/repo/services/${name}/node_modules/exceljs/excel.js`:undefined);
  }
  assert.equal(configs.gateway.alias.exceljs,undefined);
+});
+
+test('pool bindings are service-specific and query caches never become implicit',()=>{
+ const input={...deployment,hyperdrive:{platform:'a'.repeat(32),billing:'b'.repeat(32)}};
+ const configs=createConfigs(input,eventConsumerSubscriptions);
+ assert.equal(configs.platform.hyperdrive[0].id,'a'.repeat(32));
+ assert.equal(configs.billing.hyperdrive[0].id,'b'.repeat(32));
+ assert.equal(configs.clients.hyperdrive,undefined);
+ assert.throws(()=>createConfigs({...deployment,hyperdrive:{unrelated:'a'.repeat(32)}},eventConsumerSubscriptions),/Hyperdrive/);
+});
+
+test('deployment config preserves a paused gateway schedule until maintenance is fully resumed',()=>{
+  const state={version:1,accountId:deployment.accountId,prefix:deployment.prefix,publicUrl:deployment.publicUrl,phase:'paused'};
+  for(const phase of ['pausing','paused','resuming']){
+    assert.deepEqual(gatewayCrons(deployment,{...state,phase}),[]);
+    const configs=createConfigs(deployment,eventConsumerSubscriptions,'/synthetic/repo',{...state,phase});
+    assert.deepEqual(configs.gateway.triggers.crons,[]);
+  }
+  assert.deepEqual(gatewayCrons(deployment,{...state,phase:'resumed'}),['*/15 * * * *']);
+  assert.deepEqual(gatewayCrons(deployment,null),['*/15 * * * *']);
+  assert.throws(()=>gatewayCrons(deployment,{...state,phase:'unknown'}),/Invalid maintenance/);
+  assert.throws(()=>gatewayCrons(deployment,{...state,accountId:'b'.repeat(32)}),/another deployment/);
+  assert.throws(()=>gatewayCrons(deployment,{...state,prefix:'other'}),/another deployment/);
 });

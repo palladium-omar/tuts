@@ -52,6 +52,10 @@ const qi = name => {
 const tableName = name => `public.${qi(name)}`;
 const safeError = message => Object.assign(new Error(message), { recoverySafe: true });
 const fail = message => { throw safeError(message); };
+// Historical October 4 cutover only. Current schema has ten services and must
+// use the complete snapshot/isolated restore workflow. Do not disable parity.
+console.error('Deprecated eight-service cutover tool: use snapshot-hosted-data.mjs and restore-hosted-snapshot.mjs for the current ten-service schema. Historical snapshots are retained; this command refuses all operations.');
+process.exit(1);
 const args = process.argv.slice(2);
 const command = args[0] && !args[0].startsWith('--') ? args.shift() : 'audit';
 let snapshotPath, frozen = false, archiveOrphanTenants = false;

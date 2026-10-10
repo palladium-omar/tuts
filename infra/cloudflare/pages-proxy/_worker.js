@@ -8,6 +8,7 @@ export default {
       return Response.json({ error: { code: 'service_unavailable', message: 'Gateway is unavailable' } }, {
         status: 503,
         headers: {
+          'Cache-Control': 'private, no-store',
           'Strict-Transport-Security': 'max-age=31536000',
           'X-Content-Type-Options': 'nosniff',
           'X-Frame-Options': 'DENY',

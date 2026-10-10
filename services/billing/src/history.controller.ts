@@ -5,6 +5,7 @@ import type { RequestContext } from '@palladium/contracts';
 import type { Response } from 'express';
 import { MAX_HISTORY_BYTES } from './history-parser.js';
 import { HistoryService } from './history.js';
+import { HistoryIdentityService } from './history-identity.js';
 import { HistoryAnalyticsService } from './history-analytics.js';
 
 @Controller('v1/history-imports')
@@ -30,7 +31,9 @@ export class HistoryImportsController {
 @Roles('owner','admin','tutor')
 @Permissions('billing.read','reporting.financial')
 export class WorkLogController {
-  constructor(@Inject(HistoryService) private readonly service:HistoryService){}
+  constructor(@Inject(HistoryService) private readonly service:HistoryService, @Inject(HistoryIdentityService) private readonly identities:HistoryIdentityService){}
+  @Patch(':id/identity') @Permissions('billing.read','reporting.financial','billing.write')
+  async identity(@CurrentContext() ctx:RequestContext,@Param('id') id:string,@Body() body:unknown,@Headers('authorization') authorization:unknown){return {item:await this.identities.review(ctx,id,body,authorization)};}
   @Get() list(@CurrentContext() ctx:RequestContext,@Query() query:unknown){return this.service.workLog(ctx,query);}
   @Get('summary') async summary(@CurrentContext() ctx:RequestContext,@Query() query:unknown){return {item:await this.service.workSummary(ctx,query)};}
   @Patch(':id') @Permissions('billing.read','reporting.financial','billing.write')

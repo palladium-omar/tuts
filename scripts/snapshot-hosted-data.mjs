@@ -2,23 +2,26 @@
 // current deployed migration sources and catalog definitions alongside data.
 // Table owners bypass forced RLS only inside a rolled-back, isolated transaction.
 import { readFile, writeFile, mkdir, chmod } from 'node:fs/promises';
-import { join, relative } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { checkServerIdentity } from 'node:tls';
 import pg from 'pg';
+import { fileURLToPath } from 'node:url';
 import { root, serviceNames } from './cloudflare.mjs';
 const quote = value => `"${String(value).replaceAll('"', '""')}"`;
 const sha = value => createHash('sha256').update(value).digest('hex');
 const save = async (path, value) => writeFile(path, typeof value === 'string' ? value : JSON.stringify(value, null, 2), { mode: 0o600, flag: 'wx' });
+export async function snapshotHosted() {
 if (process.argv.slice(2).join(' ') !== '--writers-frozen') throw new Error('Pause hosted ingress, cron and all queue deliveries first; then pass --writers-frozen.');
 const secrets = JSON.parse(await readFile(join(root, '.cloudflare/secrets.json'), 'utf8'));
+if (serviceNames.some(name => !secrets.databaseUrls?.[name])) throw new Error('All ten service database URLs are required; partial archives are refused.');
 const directory = join(root, '.cloudflare/recovery', `hosted-${new Date().toISOString().replaceAll(':','-')}`);
 await mkdir(directory, { recursive: true, mode: 0o700 });
 await chmod(directory, 0o700);
 let phase = 'setup';
 const manifest = { version: 1, createdAt: new Date().toISOString(), format: 'jsonl-lossless', services: {} };
 try {
- for (const service of serviceNames.filter(name => secrets.databaseUrls[name])) {
+ for (const service of serviceNames) {
   phase = service;
   const target = new URL(secrets.databaseUrls[service]);
   const url = new URL(target);
@@ -38,6 +41,7 @@ try {
    phase = `${service} catalog capture`;
    const schema = await metadata(client);
    schema.sequences = (await client.query("SELECT sequencename,start_value,min_value,max_value,increment_by,cycle,cache_size,last_value::text FROM pg_sequences WHERE schemaname='public'")).rows;
+   for (const sequence of schema.sequences) Object.assign(sequence, (await client.query(`SELECT last_value::text,is_called FROM public.${quote(sequence.sequencename)}`)).rows[0]);
    schema.roles = (await client.query('SELECT current_database() database,current_user role,version() version')).rows;
    // Capture original RLS metadata first. ACCESS EXCLUSIVE table locks and the
    // rollback keep temporary owner visibility isolated from other sessions.
@@ -71,12 +75,17 @@ try {
   } finally { await client.query('ROLLBACK').catch(()=>{}); await client.end(); }
  }
  await save(join(directory,'manifest.json'),manifest);
- await save(join(directory,'RESTORE.md'),'This is a private pre-migration data archive. Recreate an isolated database using the exact archived applied migrations and service-kit base tables; compare catalog.json before loading. Load each JSONL row via jsonb_populate_record into its matching table under an administrator, respecting FK order, then restore sequences and validate row counts and hashes. Do not replay outbox events or send emails during recovery. Restore production only after reviewing newer writes. Database credentials are stored separately in the existing private deployment secrets. Original R2 objects are preserved in their existing private buckets. This archive is not a tested automatic rollback.\n');
+ await save(join(directory,'RESTORE.md'),'This is a private database-only archive. Use scripts/restore-hosted-snapshot.mjs --snapshot PATH --admin-url LOCAL_POSTGRES_URL --prefix restore_NAME to create new isolated local databases, then inspect its verification receipt. Keys/config and R2 objects are NOT included; no automatic scheduler or recovery guarantee is established. This is a private pre-migration data archive. Recreate an isolated database using the exact archived applied migrations and service-kit base tables; compare catalog.json before loading. Load each JSONL row via jsonb_populate_record into its matching table under an administrator, respecting FK order, then restore sequences and validate row counts and hashes. Do not replay outbox events or send emails during recovery. Restore production only after reviewing newer writes. Database credentials are stored separately in the existing private deployment secrets. Original R2 objects are preserved in their existing private buckets. This archive is not a tested automatic rollback.\n');
  await save(join(directory,'COMPLETE'),new Date().toISOString());
  console.log(`Complete private archive: ${relative(root,directory)}`);
 } catch(error) { console.error(`Hosted archive failed during ${phase}${error.code ? ` (${error.code})`:''}; no migration performed by this command.`); process.exitCode=1; }
 
-async function metadata(client) {
+}
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  snapshotHosted().catch(() => { console.error('Snapshot setup failed; private error details withheld.'); process.exitCode = 1; });
+}
+
+export async function metadata(client) {
   const queries = {
     tables: `SELECT c.relname AS name,c.relrowsecurity AS rls,c.relforcerowsecurity AS force_rls FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind IN ('r','p')`,
     columns: `SELECT c.relname AS table_name,a.attname AS name,a.attnum AS position,format_type(a.atttypid,a.atttypmod) AS type,a.attnotnull AS not_null,a.attidentity AS identity,a.attgenerated AS generated,pg_get_expr(d.adbin,d.adrelid) AS default_value FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid JOIN pg_namespace n ON n.oid=c.relnamespace LEFT JOIN pg_attrdef d ON d.adrelid=a.attrelid AND d.adnum=a.attnum WHERE n.nspname='public' AND c.relkind IN ('r','p') AND a.attnum>0 AND NOT a.attisdropped`,

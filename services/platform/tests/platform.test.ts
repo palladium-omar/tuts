@@ -81,3 +81,15 @@ test('explicit identity migration contains the installed Better Auth core schema
     }
   }
 });
+
+test('bootstrap authenticates once, verifies tenants with at most four workers and preserves directory order', async () => {
+  const entries=Array.from({length:12},(_,i)=>({business_id:String(i)}));let active=0,peak=0,sessions=0;
+  const db={pool:{query:async()=>({rows:entries})},withTenant:async(id:string,work:any)=>{
+    active++;peak=Math.max(peak,active);await new Promise(resolve=>setTimeout(resolve,Number(id)%3));
+    try{return await work({query:async()=>({rows:id==='5'?[]:[{business_id:id,name:`Tenant ${id}`,role:'tutor',access_scope:'business',permissions_override:['clients.read'],settings:{},entitlements:['clients']}]})});}finally{active--;}
+  }} as unknown as Database;
+  const identity={requireSession:async()=>{sessions++;return {user:{id:'synthetic'},session:{expiresAt:'later'}};}} as unknown as IdentityService;
+  const result=await new BusinessesController(db,identity).bootstrap({} as Request);
+  assert.equal(sessions,1);assert.equal(peak,4);assert.deepEqual(result.items.map(row=>row.id),entries.filter(row=>row.business_id!=='5').map(row=>row.business_id));
+  assert.deepEqual(result.items[0]!.permissions,['clients.read']);assert.equal(result.item.user.id,'synthetic');
+});

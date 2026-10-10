@@ -18,9 +18,34 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm audit --prod --audit-level moderate
       - run: pnpm build
       - run: pnpm check:boundaries
       - run: node scripts/document-service-inventory.mjs --check
+      - run: pnpm exec tsx --tsconfig tsconfig.base.json scripts/document-input-schemas.mts --check
+      - run: pnpm exec tsx --tsconfig tsconfig.base.json --test scripts/tests/input-schemas.test.mts
       - run: pnpm typecheck
       - run: pnpm -r --no-bail --if-present test
       - run: node scripts/test-workbook-runtime.mjs
+      - run: node --test infra/cloudflare/deployment.test.mjs
+      - run: node --test scripts/tests/static-csp.test.mjs scripts/test-output.test.mjs
+      - run: TUTS_STATIC_EXPORT=true NEXT_PUBLIC_GATEWAY_URL='' pnpm --filter @palladium/web build
+
+  database-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm setup:local
+      - run: docker compose up -d --wait postgres
+      - run: pnpm --filter @palladium/contracts --filter @palladium/service-kit build
+      - run: node scripts/test-databases.mjs
+      - run: RECOVERY_TEST_LOCAL=1 node --test scripts/tests/recovery.test.mjs
+      - run: node --test scripts/tests/encrypted-backup.test.mjs
+      - if: always()
+        run: docker compose down

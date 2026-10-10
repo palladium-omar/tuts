@@ -39,3 +39,18 @@ test('log output only includes explicitly safe fields', () => {
     assert.equal(record.status,500);
   } finally { console.error = previous; }
 });
+
+test('auth mail diagnostics allow only known categories and HTTP status ranges', () => {
+  const records: string[] = [];
+  const previous = console.error;
+  console.error = (value: string) => { records.push(value); };
+  try {
+    logDiagnostic('error','auth_mail_provider_failed', {providerStatus:429, failureCategory:'provider_rejected'});
+    logDiagnostic('error','auth_mail_provider_failed', {providerStatus:999, failureCategory:'private-token@example.test'});
+    assert.equal(JSON.parse(records[0]!).providerStatus,429);
+    assert.equal(JSON.parse(records[0]!).failureCategory,'provider_rejected');
+    assert.equal(JSON.parse(records[1]!).providerStatus,undefined);
+    assert.equal(JSON.parse(records[1]!).failureCategory,undefined);
+    assert.ok(!records.join('').includes('private-token'));
+  } finally { console.error = previous; }
+});

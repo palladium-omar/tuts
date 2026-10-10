@@ -23,6 +23,7 @@ export class EventBus {
   private interval?: ReturnType<typeof setInterval>;
   private reconnect?: ReturnType<typeof setTimeout>;
   private busy = false;
+  private lastPrune = 0;
   private stopping = false;
   private starting = false;
   connected = false;
@@ -72,7 +73,13 @@ export class EventBus {
       }
       if (this.connection !== conn || this.channel !== channel || this.stopping) throw new Error('Event transport closed during setup');
       this.connected=true;
-      if (!this.interval) this.interval=setInterval(()=>void this.flush(),300);
+      if (!this.interval) this.interval=setInterval(()=> {
+        void this.flush();
+        if (Date.now() - this.lastPrune > 60 * 60 * 1000) {
+          this.lastPrune = Date.now();
+          void this.prunePublishedOutbox().catch(() => { /* Retry next hour. */ });
+        }
+      },300);
       console.log(`[${this.options.name}] event transport connected`);
     } catch {
       if (this.connection === connection) { this.connected=false; this.channel=undefined; this.connection=undefined; }
@@ -141,6 +148,19 @@ export class EventBus {
         }
         await tx.query('UPDATE service_outbox SET published_at=now() WHERE id=$1', [row.id]);
       }
+    });
+  }
+  /** Published payloads may expire; inbox IDs remain permanent replay tombstones.
+   * Pending payloads are never pruned, including failed/partially published fanout.
+   * Thirty days exceeds the seven-day transport pointer window. Pruned events
+   * cannot be replayed from the producer; historical replay needs a new event ID.
+   */
+  async prunePublishedOutbox(): Promise<void> {
+    await this.db.transaction(async tx => {
+      await tx.query(`DELETE FROM service_outbox WHERE id IN (
+        SELECT id FROM service_outbox WHERE published_at < now() - interval '30 days'
+        ORDER BY published_at FOR UPDATE SKIP LOCKED LIMIT 1000)`);
+      await tx.query(`DELETE FROM service_request_budgets WHERE window_start < now() - interval '1 day'`);
     });
   }
   private async flush() {
