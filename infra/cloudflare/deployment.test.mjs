@@ -121,3 +121,11 @@ test('database placement is explicit per backend while gateway stays at the edge
  assert.equal(configs.gateway.placement,undefined);
  assert.throws(()=>validateDeployment({...deployment,databaseRegion:'https://private-db.example'}));
 });
+
+test('XLSX import Workers select the Node ExcelJS entry instead of the embedded browser scheduler',()=>{
+ const configs=createConfigs(deployment,eventConsumerSubscriptions,'/synthetic/repo');
+ for(const name of serviceNames){
+  assert.equal(configs[name].alias.exceljs,['clients','billing'].includes(name)?`/synthetic/repo/services/${name}/node_modules/exceljs/excel.js`:undefined);
+ }
+ assert.equal(configs.gateway.alias.exceljs,undefined);
+});

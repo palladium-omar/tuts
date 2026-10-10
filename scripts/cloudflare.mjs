@@ -115,6 +115,9 @@ export function createConfigs(configInput, subscriptions, projectRoot = root) {
     const consumes = subscriptions.some(subscription => subscription.consumer === name);
     output[name] = {
       ...common, name: `${config.prefix}-${name}`, main: join(projectRoot, 'services', name, 'dist/worker.js'), workers_dev: false,
+      // ExcelJS's browser build embeds a nextTick queue that can stall after
+      // the first request. Workers has Node compatibility; select that entry.
+      ...(['clients', 'billing'].includes(name) ? { alias: { ...common.alias, exceljs: join(projectRoot, 'services', name, 'node_modules/exceljs/excel.js') } } : {}),
       ...(config.databaseRegion ? { placement: { region: config.databaseRegion } } : {}),
       ...(['platform', 'notifications'].includes(name) ? { vars: { ...common.vars, AUTH_MAIL_ENABLED: config.authMailEnabled ? 'true' : 'false' } } : {}),
       queues: { ...(producers.length ? { producers } : {}), ...(consumes ? { consumers: [{ queue: queueName(config, name), max_batch_size: 5, max_batch_timeout: 5, max_retries: 5, dead_letter_queue: queueName(config, name, true) }] } : {}) },

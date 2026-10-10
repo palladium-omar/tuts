@@ -169,7 +169,7 @@ export async function parseHistoryFile(fileName:string,bytes:Buffer,options:Hist
   if(/\.pdf$/i.test(fileName)){if(!bytes.subarray(0,5).equals(Buffer.from('%PDF-')))fail('PDF must have a valid PDF signature');contentType='application/pdf';}
   else if(/\.csv$/i.test(fileName)){sheets=[csvSheet(bytes)];contentType='text/csv';}
   else if(/\.xlsx$/i.test(fileName)) {
-    validateWorkbookArchive(bytes);contentType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    await validateWorkbookArchive(bytes);contentType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
     const book=new ExcelJS.Workbook();try{await book.xlsx.load(bytes as unknown as Parameters<typeof book.xlsx.load>[0]);}catch{fail('XLSX workbook could not be read');}
     if(book.worksheets.length>20)fail('At most 20 worksheets are supported');
     let totalCells=0;

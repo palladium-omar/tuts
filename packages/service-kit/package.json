@@ -4,6 +4,10 @@
   "version": "0.1.0",
   "type": "module",
   "exports": {
+    "./archive-inflate": {
+      "types": "./dist/archive-inflate.d.ts",
+      "import": "./dist/archive-inflate.js"
+    },
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"

@@ -1,7 +1,7 @@
 import { BadRequestException } from "@nestjs/common";
 import { parse } from "csv-parse/sync";
 import ExcelJS from "exceljs";
-import { inflateRawSync } from "node:zlib";
+import { inflateArchiveEntry } from "@palladium/service-kit/archive-inflate";
 export const MAX_FILE_BYTES = 5 * 1024 * 1024;
 const MAX_ROWS = 2000;
 const MAX_COLUMNS = 100;
@@ -82,7 +82,7 @@ function columnNumber(letters: string) {
 }
 // Validate every ZIP entry before ExcelJS expands the archive. This deliberately
 // rejects ZIP64/encrypted archives and spreadsheets with huge sparse dimensions.
-function validateWorkbookArchive(buffer: Buffer) {
+async function validateWorkbookArchive(buffer: Buffer) {
   let end = -1;
   for (
     let i = buffer.length - 22;
@@ -166,12 +166,7 @@ function validateWorkbookArchive(buffer: Buffer) {
       content =
         method === 0
           ? buffer.subarray(start, start + compressed)
-          : inflateRawSync(buffer.subarray(start, start + compressed), {
-              maxOutputLength: Math.max(
-                1,
-                Math.min(inflated, MAX_INFLATED_BYTES),
-              ),
-            });
+          : await inflateArchiveEntry(buffer.subarray(start, start + compressed), inflated);
     } catch {
       return invalid(
         "Workbook entry exceeds its declared size or cannot be expanded",
@@ -246,7 +241,7 @@ export async function parseImportFile(name: string, buffer: Buffer) {
     return invalid(
       "Choose a CSV or XLSX file; legacy XLS and macro workbooks are not supported",
     );
-  validateWorkbookArchive(buffer);
+  await validateWorkbookArchive(buffer);
   const workbook = new ExcelJS.Workbook();
   try {
     await workbook.xlsx.load(

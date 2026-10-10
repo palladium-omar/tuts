@@ -1,6 +1,6 @@
 // Adapted from the Clients bounded ZIP validator. Kept local to preserve service boundaries.
 import { BadRequestException } from '@nestjs/common';
-import { inflateRawSync } from 'node:zlib';
+import { inflateArchiveEntry } from '@palladium/service-kit/archive-inflate';
 const MAX_ROWS = 2000;
 const MAX_COLUMNS = 100;
 const MAX_INFLATED_BYTES = 20 * 1024 * 1024;
@@ -12,7 +12,7 @@ function columnNumber(letters: string) {
 }
 // Validate every ZIP entry before ExcelJS expands the archive. This deliberately
 // rejects ZIP64/encrypted archives and spreadsheets with huge sparse dimensions.
-export function validateWorkbookArchive(buffer: Buffer) {
+export async function validateWorkbookArchive(buffer: Buffer) {
   let end = -1;
   for (
     let i = buffer.length - 22;
@@ -96,12 +96,7 @@ export function validateWorkbookArchive(buffer: Buffer) {
       content =
         method === 0
           ? buffer.subarray(start, start + compressed)
-          : inflateRawSync(buffer.subarray(start, start + compressed), {
-              maxOutputLength: Math.max(
-                1,
-                Math.min(inflated, MAX_INFLATED_BYTES),
-              ),
-            });
+          : await inflateArchiveEntry(buffer.subarray(start, start + compressed), inflated);
     } catch {
       return invalid(
         "Workbook entry exceeds its declared size or cannot be expanded",

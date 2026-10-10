@@ -128,3 +128,32 @@ deploy existing backend Workers with database-region placement and the gateway
 after checks. No new paid Cloudflare resources are introduced. Preserve existing secrets,
 bindings, routes and unrelated working-tree changes. Real workbook rows are
 never committed or imported to production as part of implementation testing.
+
+## XLSX runtime contract
+
+CRM and Billing keep their own ZIP structure, archive size and row/column
+validation. They share only the infrastructure helper
+`@palladium/service-kit/archive-inflate`, which streams one raw-deflate entry,
+counts actual output before retaining it, stops on a forged declared size and
+always destroys the inflater. Each caller then requires an exact entry length.
+The 5 MB upload, 20 MB total expansion, XML declaration, encrypted archive,
+macro and sparse-dimension restrictions remain enforced before ExcelJS loads it.
+
+Both validators are asynchronous. Their callers must await validation before
+loading the workbook. Bounded streaming avoids a Cloudflare `inflateRawSync`
+`maxOutputLength` incompatibility that rejected a valid worksheet.
+
+Generated Clients and Billing Worker configurations explicitly resolve ExcelJS's
+Node entry. Its browser bundle embeds a global `process.nextTick` queue; a first
+request can leave callbacks queued when the invocation ends, preventing subsequent
+uploads from completing. No global timer patch or dependency-source patch is used.
+Node deployments keep their ordinary module resolution. Other Workers are unchanged.
+
+After building the affected services, run `node scripts/test-workbook-runtime.mjs`.
+This starts an isolated local Workers runtime with production compatibility flags
+and parser aliases, without production bindings or database access. It covers
+warm repeated requests, simultaneous different workbooks, compressed entries over
+64 KB, forged sizes, aggregate limits, malformed archives and a valid upload after
+rejection. CI runs it after the build. An optional local file argument validates a
+reported workbook and outputs only counts/row numbers; customer data stays out of
+fixtures and Git.
