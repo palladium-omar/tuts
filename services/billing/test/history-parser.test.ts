@@ -7,13 +7,13 @@ import { historyHours, historyMoney, historyOptionsSchema, parseHistoryFile, par
 const options=historyOptionsSchema.parse({kind:'work'});
 const csv=(rows:string)=>Buffer.from('Date,Student Name,Service Type,Hours Worked,Hourly Rate (€),Total (€),Invoice Status,Notes\n'+rows);
 
-test('Work CSV preserves raw unknown columns and uses exact fractional hours with explicit legacy status mapping',async()=>{
+test('Work CSV preserves raw unknown columns and uses exact fractional hours with consistent status defaults',async()=>{
   const parsed=await parseHistoryFile('work.csv',csv('2026-09-03,Synthetic learner,Lesson,1.5,40,60,Paid,review\n2026-09-04,Synthetic learner,Coaching,0.25,15,,Sent,missing total\n2026-09-05,Other learner,Lesson,2,40,80,Pending,note\n'),options);
   assert.deepEqual(parsed.preview.summary,{valid:3,invalid:0,skipped:0});
   assert.equal(parsed.preview.rows[0]!.values.amountMinor,6000);
   assert.equal(parsed.preview.rows[0]!.values.status,'paid');
   assert.equal(parsed.preview.rows[1]!.values.status,'pending');
-  assert.equal(parsed.preview.rows[2]!.values.status,'unsent');
+  assert.equal(parsed.preview.rows[2]!.values.status,'pending');
   assert.equal(parsed.preview.rows[1]!.values.amountMinor,375);
   assert.match(parsed.preview.rows[1]!.warnings[0]!,/Missing total/);
   assert.equal(parsed.rawSource.sheets[0]!.rows[1]!.columns.Notes,'review');
@@ -76,4 +76,76 @@ test('Sparse workbook dimensions are bounded before loading the archive',async()
  const book=new ExcelJS.Workbook();book.addWorksheet('Huge').getCell('A2002').value='Synthetic';
  const bytes=Buffer.from(await book.xlsx.writeBuffer());
  await assert.rejects(()=>parseHistoryFile('oversize.xlsx',bytes,options),/rows|dimensions/);
+});
+
+test('Statuses group only observed variants using case, Unicode spacing and NFKC normalization',async()=>{
+  const labels=['pending','Pending',' PENDING ','\u00a0Pending\u00a0','Ｐｅｎｄｉｎｇ','Sent','Unpaid','Outstanding','Unsent','Draft','not_sent','NOT-SENT','not\u00a0 sent','Paid','settled','Approved','Part paid'];
+  const source=csv(labels.map(label=>`2026-09-03,Synthetic,Lesson,1,40,40,${label},`).join('\n'));
+  const {preview,rawSource}=await parseHistoryFile('variants.csv',source,options);
+  assert.deepEqual(preview.summary,{valid:15,invalid:2,skipped:0});
+  assert.deepEqual(preview.rows.map(row=>row.values.status),['pending','pending','pending','pending','pending','pending','pending','pending','unsent','unsent','unsent','unsent','unsent','paid','paid',undefined,undefined]);
+  assert.deepEqual(preview.statusLabels[0],{key:'pending',labels:labels.slice(0,5),count:5,status:'pending'});
+  assert.deepEqual(preview.statusLabels.find(group=>group.key==='not sent'),{key:'not sent',labels:labels.slice(10,13),count:3,status:'unsent'});
+  assert.deepEqual(preview.statusLabels.find(group=>group.key==='approved'),{key:'approved',labels:['Approved'],count:1,status:null});
+  assert.equal(preview.statusLabels.some(group=>group.key==='payment received'),false);
+  assert.equal(rawSource.sheets[0]!.rows[4]!.columns['Invoice Status'],'\u00a0Pending\u00a0');
+});
+
+test('One explicit override applies to every normalized spelling including custom and blank choices',async()=>{
+  const {preview}=await parseHistoryFile('overrides.csv',csv('2026-09-03,A,Lesson,1,40,40,pending,\n2026-09-03,B,Lesson,1,40,40, PENDING ,\n2026-09-03,C,Lesson,1,40,40,review_required,\n2026-09-03,D,Lesson,1,40,40, REVIEW-REQUIRED ,\n2026-09-03,E,Lesson,1,40,40,PAID,'),historyOptionsSchema.parse({kind:'work',statusMap:{' Pending ':'unsent','Review required':'paid',Paid:''}}));
+  assert.deepEqual(preview.rows.map(row=>row.values.status),['unsent','unsent','paid','paid',undefined]);
+  assert.equal(preview.statusMap.Pending,'unsent');assert.equal(preview.statusMap.pending,'unsent');
+  assert.equal(preview.statusMap.paid,'');assert.equal(preview.statusMap.Paid,'');
+  assert.deepEqual(preview.statusLabels.map(group=>[group.key,group.count,group.status]),[['pending',2,'unsent'],['review required',2,'paid'],['paid',1,null]]);
+});
+
+test('Conflicting normalized explicit overrides fail clearly while identical overrides are allowed',async()=>{
+  const source=csv('2026-09-03,A,Lesson,1,40,40,Pending,');
+  for(const statusMap of [{Pending:'unsent',pending:'pending'},{'Review_required':'paid','review-required':'pending'},{Paid:'paid','\u00a0ＰＡＩＤ ':''}] as const) {
+    await assert.rejects(()=>parseHistoryFile('conflict.csv',source,historyOptionsSchema.parse({kind:'work',statusMap})),error=>error instanceof Error&&error.name==='BadRequestException'&&/Conflicting status overrides.*same source status/.test(error.message));
+  }
+  const {preview}=await parseHistoryFile('same.csv',source,historyOptionsSchema.parse({kind:'work',statusMap:{Pending:'unsent',' PENDING ':'unsent'}}));
+  assert.equal(preview.rows[0]!.values.status,'unsent');
+});
+
+test('Exact normalized header aliases recognize separators, Unicode spaces and monetary decorations',async()=>{
+  for(const studentHeader of ['Student Name','student_name','FULL-NAME','student\u00a0 name','Ｓｔｕｄｅｎｔ　Ｎａｍｅ']) {
+    const {preview}=await parseHistoryFile('headers.csv',Buffer.from(`work_date,${studentHeader},hours_worked,hourly_rate (GBP),total [GBP],invoice_status\n2026-09-03,Synthetic,1,GBP 40,40 GBP,Pending`),options);
+    assert.equal(preview.mapping.studentName,studentHeader);assert.equal(preview.mapping.rateMinor,'hourly_rate (GBP)');
+    assert.deepEqual(preview.summary,{valid:1,invalid:0,skipped:0});assert.equal(preview.rows[0]!.values.amountMinor,4000);
+    assert.equal(preview.detectedCurrency,'GBP');assert.equal(preview.currencyColumn,null);assert.deepEqual(preview.currencyVariants,[]);
+  }
+  const {preview}=await parseHistoryFile('unmatched.csv',Buffer.from('Date,Potential student name,Hours,Possible hourly rate (GBP),Total (GBP),Status\n2026-09-03,Synthetic,1,40,40,Paid'),options);
+  assert.equal(preview.mapping.studentName,undefined);assert.equal(preview.mapping.rateMinor,undefined);assert.equal(preview.summary.valid,0);
+});
+
+test('Currency header hints are unambiguous and explicit currency supplies or replaces the fallback',async()=>{
+  for(const [decoration,currency] of [['€','EUR'],['EUR','EUR'],['£','GBP'],['GBP','GBP'],['USD','USD']] as const) {
+    const source=Buffer.from(`Date,Full name,Hours,Hourly Rate (${decoration}),Total (${decoration}),Status\n2026-09-03,Synthetic,1,40,40,Paid`);
+    const {preview}=await parseHistoryFile('currency.csv',source,options);
+    assert.equal(preview.detectedCurrency,currency);assert.equal(preview.rows[0]!.values.currency,currency);assert.equal(preview.summary.valid,1);
+    const overridden=await parseHistoryFile('currency.csv',source,historyOptionsSchema.parse({kind:'work',currency:'CAD'}));
+    assert.equal(overridden.preview.detectedCurrency,currency);assert.equal(overridden.preview.rows[0]!.values.currency,'CAD');assert.equal(overridden.preview.mapping.currency,undefined);
+  }
+  for(const source of [Buffer.from('Date,Name,Hours,Rate ($),Total ($),Status\n2026-09-03,Synthetic,1,40,40,Paid'),Buffer.from('Date,Name,Hours,Rate (GBP),Total (USD),Status\n2026-09-03,Synthetic,1,40,40,Paid')]) {
+    const {preview}=await parseHistoryFile('uncertain.csv',source,options);
+    assert.equal(preview.detectedCurrency,null);assert.equal(preview.rows[0]!.values.currency,undefined);assert.match(preview.rows[0]!.errors.join(' '),/currency/);
+    const confirmed=await parseHistoryFile('uncertain.csv',source,historyOptionsSchema.parse({kind:'work',currency:'USD'}));
+    assert.equal(confirmed.preview.summary.valid,1);
+  }
+});
+
+test('Actual currency columns expose observed codes and take precedence over source fallback',async()=>{
+  const source=Buffer.from('Date,Name,Hours,Rate (EUR),Total (EUR),Status,CURRENCY\n2026-09-03,A,1,40,40,Paid, usd \n2026-09-03,B,1,40,40,Pending,GBP\n2026-09-03,C,1,40,40,Draft,\n2026-09-03,D,1,40,40,Paid,USD');
+  const {preview}=await parseHistoryFile('mixed.csv',source,historyOptionsSchema.parse({kind:'work',currency:'CAD'}));
+  assert.equal(preview.detectedCurrency,'EUR');assert.equal(preview.currencyColumn,'CURRENCY');assert.deepEqual(preview.currencyVariants,['USD','GBP']);
+  assert.deepEqual(preview.rows.map(row=>row.values.currency),['USD','GBP','CAD','USD']);assert.equal(preview.summary.valid,4);
+  const uniform=await parseHistoryFile('mixed.csv',source,historyOptionsSchema.parse({kind:'work',currency:'CAD',mapping:{currency:''}}));
+  assert.equal(uniform.preview.mapping.currency,undefined);assert.equal(uniform.preview.currencyColumn,'CURRENCY');assert.deepEqual(uniform.preview.currencyVariants,['USD','GBP']);
+  assert.deepEqual(uniform.preview.rows.map(row=>row.values.currency),['CAD','CAD','CAD','CAD']);
+});
+
+test('Archive previews expose empty interpretation metadata without creating rows',async()=>{
+  const {preview}=await parseHistoryFile('invoice.pdf',Buffer.from('%PDF-1.7\nSynthetic archive'),historyOptionsSchema.parse({kind:'archive'}));
+  assert.deepEqual(preview.statusLabels,[]);assert.equal(preview.detectedCurrency,null);assert.equal(preview.currencyColumn,null);assert.deepEqual(preview.currencyVariants,[]);
 });

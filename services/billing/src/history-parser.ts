@@ -29,6 +29,8 @@ export interface HistoryPreview {
   kind: 'work'|'invoices'|'archive'; fileName: string; sheetName: string|null;
   sheets: {name:string;headers:string[];rowCount:number}[]; headers: string[];
   mapping: Record<string,string>; statusMap: Record<string,HistoryStatus|''>; rows: PreviewRow[];
+  statusLabels: {key:string;labels:string[];count:number;status:HistoryStatus|null}[];
+  detectedCurrency: string|null; currencyColumn: string|null; currencyVariants: string[];
   summary: {valid:number;invalid:number;skipped:number}; warnings:string[];
 }
 const fail = (message:string):never => { throw new BadRequestException(message); };
@@ -44,21 +46,52 @@ const text = (value:unknown):string => {
   }
   return '';
 };
+const normalizedLabel = (value:string):string => value.normalize('NFKC').toLowerCase().replace(/[_-]+/g,' ').replace(/\s+/g,' ').trim();
+const currencyCodes = new Set(Intl.supportedValuesOf('currency'));
+const currencyCodePattern = new RegExp(`\\b(?:${[...currencyCodes].join('|')})\\b`,'gi');
 const aliases: Record<string,string[]> = {
-  date: ['date','work date','invoice date','service date'], studentName: ['student name','student','payer name','client name','name'],
+  date: ['date','work date','invoice date','service date'], studentName: ['student name','student','payer name','client name','name','full name','student full name'],
   serviceType: ['service type','service','description'], hours:['hours worked','hours','duration'],
-  rateMinor:['hourly rate (€)','hourly rate','rate','hourly rate (eur)','rate minor'],
-  amountMinor:['total (€)','total','amount','invoice amount','amount minor','total (eur)'],
+  rateMinor:['hourly rate','rate','rate minor'],
+  amountMinor:['total','amount','invoice amount','amount minor'],
   currency:['currency'],status:['invoice status','status','payment status'],invoiceNumber:['invoice number','invoice no','invoice #'],
   paidDate:['paid date','payment date'],notes:['notes','note'],
 };
 function inferredMapping(headers:string[]) {
   const mapping:Record<string,string> = {};
   for (const key of canonicalFields) {
-    const header = headers.find(h => aliases[key]!.includes(h.toLowerCase().trim()));
+    const header = headers.find(h => {
+      let label=normalizedLabel(h);
+      if(key==='rateMinor'||key==='amountMinor')label=label.replace(currencyCodePattern,' ').replace(/[€£$¥₹₩₽()\[\]]/g,' ').replace(/\s+/g,' ').trim();
+      return aliases[key]!.includes(label);
+    });
     if (header) mapping[key] = header;
   }
   return mapping;
+}
+const defaultStatusMap:Record<string,HistoryStatus> = {Paid:'paid',paid:'paid',Settled:'paid',Sent:'pending',Pending:'pending',pending:'pending',Unpaid:'pending',Outstanding:'pending',Unsent:'unsent',unsent:'unsent',Draft:'unsent','Not sent':'unsent'};
+function interpretedStatusMap(overrides:HistoryOptions['statusMap']) {
+  const normalized=new Map<string,HistoryStatus|''>(Object.entries(defaultStatusMap).map(([label,status])=>[normalizedLabel(label),status]));
+  const explicit=new Map<string,{label:string;status:HistoryStatus|''}>();
+  for(const [label,status] of Object.entries(overrides??{})) {
+    const key=normalizedLabel(label),previous=explicit.get(key);
+    if(previous&&previous.status!==status)fail(`Conflicting status overrides for "${previous.label}" and "${label}"; these labels mean the same source status`);
+    explicit.set(key,{label,status});normalized.set(key,status);
+  }
+  // Return legacy display keys as well as explicit keys, all using the same interpretation.
+  const statusMap=Object.fromEntries(Object.keys({...defaultStatusMap,...overrides}).map(label=>[label,normalized.get(normalizedLabel(label))!])) as Record<string,HistoryStatus|''>;
+  return {normalized,statusMap};
+}
+function detectedHeaderCurrency(mapping:Record<string,string>):string|null {
+  const detected=new Set<string>();
+  for(const key of ['rateMinor','amountMinor']) {
+    const header=(mapping[key]??'').normalize('NFKC');
+    for(const code of header.match(currencyCodePattern)??[])detected.add(code.toUpperCase());
+    if(header.includes('€'))detected.add('EUR');
+    if(header.includes('£'))detected.add('GBP');
+  }
+  // A dollar symbol alone can describe several currencies.
+  return detected.size===1?[...detected][0]!:null;
 }
 function rawSheet(name:string, matrix:{rowNumber:number;values:unknown[]}[]):RawSheet {
   if (matrix.length > 2001) fail('At most 2,000 data rows per sheet are supported');
@@ -101,8 +134,10 @@ export function parseHistoryDate(value:unknown):string|undefined {
   const date=new Date(Date.UTC(year,month-1,day));
   return date.getUTCFullYear()===year&&date.getUTCMonth()+1===month&&date.getUTCDate()===day?`${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`:undefined;
 }
-function decimal(value:unknown):{n:bigint;scale:bigint}|undefined {
-  let s=text(value).trim().replace(/[€£$\s]/g,'');
+function decimal(value:unknown,money=false):{n:bigint;scale:bigint}|undefined {
+  let s=text(value).normalize('NFKC').trim();
+  if(money)s=s.replace(currencyCodePattern,'');
+  s=s.replace(/[€£$\s]/g,'');
   if(/^\d{1,3}(,\d{3})+\.\d+$/.test(s))s=s.replace(/,/g,'');
   else if(/^\d{1,3}(\.\d{3})+,\d+$/.test(s))s=s.replace(/\./g,'').replace(',','.');
   else if(s.includes(',')&&!s.includes('.'))s=s.replace(',','.');
@@ -113,7 +148,7 @@ function decimal(value:unknown):{n:bigint;scale:bigint}|undefined {
 const round=(n:bigint,scale:bigint)=> (n+scale/2n)/scale;
 const safe=(n:bigint):number|undefined=> n<=BigInt(Number.MAX_SAFE_INTEGER)?Number(n):undefined;
 export function historyMoney(value:unknown,minor=false,currency='EUR'):number|undefined {
-  const d=decimal(value);if(!d)return undefined;
+  const d=decimal(value,true);if(!d)return undefined;
   if(minor&&d.n%d.scale!==0n)return undefined;
   let digits=2;try{digits=new Intl.NumberFormat('en',{style:'currency',currency}).resolvedOptions().maximumFractionDigits??2;}catch{return undefined;}
   return safe(minor?d.n/d.scale:round(d.n*(10n**BigInt(digits)),d.scale));
@@ -127,8 +162,9 @@ export function workAmount(hours:unknown,rateMinor:number):number|undefined {
   const d=decimal(hours);if(!d||!Number.isSafeInteger(rateMinor)||rateMinor<0)return undefined;
   return safe(round(d.n*BigInt(rateMinor),d.scale));
 }
-function normalize(sheet:RawSheet,kind:'work'|'invoices',mapping:Record<string,string>,currency:string|undefined,statusMap:Record<string,HistoryStatus|''>) {
+function normalize(sheet:RawSheet,kind:'work'|'invoices',mapping:Record<string,string>,currency:string|undefined,statusMap:Map<string,HistoryStatus|''>) {
   const rows:PreviewRow[]=[];let skipped=0;
+  const observedStatuses=new Map<string,HistoryPreview['statusLabels'][number]>();
   for(const raw of sheet.rows) {
     if(raw.rowNumber<=sheet.headerRow)continue;
     const get=(key:string)=>mapping[key]?raw.columns[mapping[key]!]:undefined;
@@ -141,8 +177,15 @@ function normalize(sheet:RawSheet,kind:'work'|'invoices',mapping:Record<string,s
     values.studentName=text(get('studentName')).trim();if(!values.studentName||values.studentName.length>200)errors.push('Student/payer name must contain 1–200 characters');
     values.serviceType=text(get('serviceType')).trim();if(values.serviceType.length>500)errors.push('Service type exceeds 500 characters');
     values.notes=text(get('notes')).trim();if(values.notes.length>4000)errors.push('Notes exceed 4,000 characters');
-    values.currency=(text(get('currency')).trim()||currency)?.toUpperCase();if(!values.currency||!/^[A-Z]{3}$/.test(values.currency))errors.push('Choose a three-letter currency');
-    const rawStatus=text(get('status')).trim();values.status=(statusMap[rawStatus]??Object.entries(statusMap).find(([label])=>label.toLowerCase()===rawStatus.toLowerCase())?.[1])||undefined;
+    values.currency=(text(get('currency')).normalize('NFKC').trim()||currency)?.toUpperCase();if(!values.currency||!/^[A-Z]{3}$/.test(values.currency))errors.push('Choose a three-letter currency');
+    const sourceStatus=text(get('status')),rawStatus=sourceStatus.trim(),statusKey=normalizedLabel(sourceStatus);
+    values.status=statusMap.get(statusKey)||undefined;
+    if(statusKey) {
+      let group=observedStatuses.get(statusKey);
+      if(!group){group={key:statusKey,labels:[],count:0,status:values.status??null};observedStatuses.set(statusKey,group);}
+      if(!group.labels.includes(sourceStatus))group.labels.push(sourceStatus);
+      group.count++;
+    }
     if(!rawStatus||!values.status)errors.push(rawStatus?`Review unknown status: ${rawStatus.slice(0,100)}`:'Review missing status');
     const paidDate=text(get('paidDate')).trim();if(paidDate){values.paidDate=parseHistoryDate(paidDate);if(!values.paidDate)errors.push('Paid date must be a valid date');if(values.status!=='paid')errors.push('Paid date is only valid for a paid declaration');}
     const invoiceNumber=text(get('invoiceNumber')).trim();if(invoiceNumber){values.invoiceNumber=invoiceNumber;if(invoiceNumber.length>200)errors.push('Invoice number exceeds 200 characters');}
@@ -160,7 +203,7 @@ function normalize(sheet:RawSheet,kind:'work'|'invoices',mapping:Record<string,s
     if(values.amountMinor===undefined)errors.push('A nonnegative total within the exact range is required');
     rows.push({rowNumber:raw.rowNumber,values,errors,warnings});
   }
-  return {rows,skipped};
+  return {rows,skipped,statusLabels:[...observedStatuses.values()]};
 }
 export async function parseHistoryFile(fileName:string,bytes:Buffer,options:HistoryOptions):Promise<{preview:HistoryPreview;rawSource:{sheets:RawSheet[]};contentType:string}> {
   if(!bytes.length||bytes.length>MAX_HISTORY_BYTES)fail('File must contain data and be at most 5 MB');
@@ -186,20 +229,23 @@ export async function parseHistoryFile(fileName:string,bytes:Buffer,options:Hist
   for(const key of Object.keys(mapping))if(mapping[key]==='')delete mapping[key];
   if(selected&&Object.values(mapping).some(header=>!selected.headers.includes(header)))fail('Mapped column does not exist in the selected sheet');
   const kind=options.kind==='archive'||!sheets.length?'archive':options.kind==='auto'?(mapping.hours?'work':mapping.amountMinor?'invoices':'archive'):options.kind;
-  const statusMap:Record<string,HistoryStatus|''>={Paid:'paid',Sent:'pending',Pending:'unsent',paid:'paid',pending:'pending',unsent:'unsent',...options.statusMap};
-  // Preserve the legacy label Pending -> unsent even though canonical pending means sent.
-  const currency=options.currency??(selected?.headers.some(h=>/€|\bEUR\b/i.test(h))?'EUR':undefined);
+  const {statusMap,normalized:normalizedStatuses}=interpretedStatusMap(options.statusMap);
+  const detectedCurrency=detectedHeaderCurrency(mapping);
+  const currency=options.currency??detectedCurrency??undefined;
+  const currencyColumn=mapping.currency??inferredMapping(selected?.headers??[]).currency??null;
+  const currencyVariants=currencyColumn&&selected?[...new Set(selected.rows.filter(row=>row.rowNumber>selected.headerRow).map(row=>text(row.columns[currencyColumn]).normalize('NFKC').trim().toUpperCase()).filter(code=>/^[A-Z]{3}$/.test(code)))]:[];
   const warnings=['Paid statuses are historical declarations, not verified payment transactions','Rows containing only templates or unmapped columns are preserved in the source archive'];
   if(kind!=='archive'&&!selected)fail('Choose a data sheet and column mapping; no data sheet was identified');
-  let rows:PreviewRow[]=[],skipped=0;
+  let rows:PreviewRow[]=[],skipped=0,statusLabels:HistoryPreview['statusLabels']=[];
   if(kind!=='archive'&&selected) {
     if(!mapping.date||!mapping.studentName||kind==='work'&&(!mapping.hours||!mapping.rateMinor)) {
       warnings.push('Required columns are unmapped; review column mapping before committing');
     }
-    const result=normalize(selected,kind,mapping,currency,statusMap);rows=result.rows;skipped=result.skipped;
+    const result=normalize(selected,kind,mapping,currency,normalizedStatuses);rows=result.rows;skipped=result.skipped;statusLabels=result.statusLabels;
+    for(const group of statusLabels)for(const label of group.labels)statusMap[label]=group.status??'';
   }
   if(sheets.length>1)warnings.push('Only the selected data sheet is normalized; other sheets are preserved in the archive');
   if(kind==='archive')warnings.push('Archive only: no work or invoice records will be created');
-  const preview:HistoryPreview={kind,fileName,sheetName:selected?.name??null,sheets:sheets.map(({name,headers,rowCount})=>({name,headers,rowCount})),headers:selected?.headers??[],mapping,statusMap,rows,summary:{valid:rows.filter(r=>!r.errors.length).length,invalid:rows.filter(r=>r.errors.length).length,skipped},warnings};
+  const preview:HistoryPreview={kind,fileName,sheetName:selected?.name??null,sheets:sheets.map(({name,headers,rowCount})=>({name,headers,rowCount})),headers:selected?.headers??[],mapping,statusMap,statusLabels,detectedCurrency,currencyColumn,currencyVariants,rows,summary:{valid:rows.filter(r=>!r.errors.length).length,invalid:rows.filter(r=>r.errors.length).length,skipped},warnings};
   return {preview,rawSource:{sheets},contentType};
 }

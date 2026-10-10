@@ -157,3 +157,29 @@ warm repeated requests, simultaneous different workbooks, compressed entries ove
 rejection. CI runs it after the build. An optional local file argument validates a
 reported workbook and outputs only counts/row numbers; customer data stays out of
 fixtures and Git.
+
+## Guided import and interpretation
+
+The web import is a short guided flow: upload, confirm currency, then review.
+Column names and common status labels are detected by Billing; the review shows
+those decisions and offers corrections without requiring every field to be filled.
+Case, Unicode spacing, underscores and hyphens do not change a status's meaning.
+`pending`, `Pending` and ` PENDING ` all mean awaiting payment; `Sent` and `Unpaid`
+have the same default. `Unsent`/`Draft` mean not sent, and `Paid` means paid.
+Explicit overrides apply to every spelling of the same normalized source label.
+Conflicting case variants in an override are rejected instead of selecting one
+arbitrarily. Already-staged/imported previews keep their recorded interpretation.
+
+Currency is confirmed once per source. A selected currency applies to the whole
+file unless the user chooses the file's actual currency column for mixed currency
+rows. A currency-column picker is only useful when such a column exists, and is
+hidden from the ordinary matching controls. Source currency symbols/codes and the
+business's saved currency guide the initial suggestion; uncertain values require
+confirmation. Amounts still use integer minor units on the server.
+
+Billing preview exposes grouped observed status labels/counts and the detected
+currency metadata. These are hints for the composition client; Billing remains
+responsible for normalization, validation and the immutable staged preview used
+by commit. The client sends only explicit matching/status corrections. Changing
+a file or worksheet clears obsolete mappings, and review must refresh after
+edits before commit. No tenant, permission or service ownership changes are made.
