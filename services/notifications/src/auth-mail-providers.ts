@@ -9,7 +9,17 @@ export interface PasswordResetMail {
 
 export interface AuthMailProvider {
   sendPasswordReset(mail: PasswordResetMail): Promise<string>;
+  sendPortalInvitation(mail: PortalInvitationMail): Promise<string>;
 }
+
+export interface PortalInvitationMail {
+  recipientEmail: string;
+  invitationId: string;
+  deliveryRevision: number;
+  inviteUrl: string;
+}
+
+type AuthMessage = {recipientEmail: string; subject: string; text: string};
 
 export class AuthMailDeliveryError extends Error {
   constructor(readonly retryable = false) {
@@ -33,6 +43,26 @@ export class ResendAuthMailProvider implements AuthMailProvider {
     const idempotencyKey = createHash("sha256")
       .update(JSON.stringify([mail.recipientEmail, mail.token]))
       .digest("hex");
+    return this.sendMessage({recipientEmail: mail.recipientEmail, subject: 'Reset your Tuts password', text: [
+      'A password reset was requested for your Tuts account.', '',
+      'Use this link to choose a new password:', mail.resetUrl, '',
+      'This link expires in 30 minutes.',
+      'If you did not request this, you can ignore this email.',
+    ].join('\n')}, `tuts-password-reset-${idempotencyKey}`);
+  }
+
+  async sendPortalInvitation(mail: PortalInvitationMail): Promise<string> {
+    // Retries of one delivery revision use exactly the same message and key.
+    // An explicit resend rotates the token and increments the revision.
+    return this.sendMessage({recipientEmail: mail.recipientEmail, subject: 'Your Tuts student portal invitation', text: [
+      'You have been invited to access a student workspace in Tuts.', '',
+      'Sign in or create an account using this email address, then accept:', mail.inviteUrl, '',
+      'This link expires in 7 days.',
+      'If you were not expecting this invitation, you can ignore this email.',
+    ].join('\n')}, `tuts-portal-invite-${mail.invitationId}-${mail.deliveryRevision}`);
+  }
+
+  private async sendMessage(mail: AuthMessage, idempotencyKey: string): Promise<string> {
     const deadline = AbortSignal.timeout(12_000);
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
@@ -50,7 +80,7 @@ export class ResendAuthMailProvider implements AuthMailProvider {
   }
 
   private async sendAttempt(
-    mail: PasswordResetMail,
+    mail: AuthMessage,
     idempotencyKey: string,
     deadline: AbortSignal,
   ): Promise<string> {
@@ -61,21 +91,13 @@ export class ResendAuthMailProvider implements AuthMailProvider {
           Accept: "application/json",
           "Content-Type": "application/json",
           Authorization: `Bearer ${this.apiKey}`,
-          "Idempotency-Key": `tuts-password-reset-${idempotencyKey}`,
+          "Idempotency-Key": idempotencyKey,
         },
         body: JSON.stringify({
           from: this.from,
           to: [mail.recipientEmail],
-          subject: "Reset your Tuts password",
-          text: [
-            "A password reset was requested for your Tuts account.",
-            "",
-            "Use this link to choose a new password:",
-            mail.resetUrl,
-            "",
-            "This link expires in 30 minutes.",
-            "If you did not request this, you can ignore this email.",
-          ].join("\n"),
+          subject: mail.subject,
+          text: mail.text,
         }),
         redirect: "manual",
         signal: AbortSignal.any([deadline, AbortSignal.timeout(providerTimeoutMs)]),

@@ -73,8 +73,8 @@ provider configuration. Production subscription/admin provisioning is not
 implemented, and there is no business self-service entitlement endpoint. The global identity
 business directory contains only user/business IDs for preselection discovery;
 role and entitlement reads always require tenant transactions and membership.
-No membership invitations, email verification transport or production
-subscription administration are implemented.
+Student/guardian portal invitations are implemented as described below. Email
+verification transport and production subscription administration are not implemented.
 
 ## Membership capability policy
 
@@ -92,6 +92,62 @@ inside a tenant transaction; the global directory only discovers candidate tenan
 IDs and cannot grant membership. Missing memberships deny access even when an old
 directory row remains. Business creation inserts the owner membership and directory
 entry in the same transaction and returns the explicit owner policy preset.
+
+## Student portal invitations and grants
+
+Apply `006_portal_invitations.sql` after the capability migration. Configure
+`PORTAL_INTERNAL_SECRET` on Platform and Clients, with a private `CLIENTS` Worker
+binding or local `CLIENTS_URL`. This secret is distinct from gateway context and
+identity-mail secrets. Invitation mutations require a browser session, a trusted
+Origin, the `clients` entitlement, `platform.invites.manage` and access to the
+selected student. Listing filters every row to the actor's student scope.
+
+- `GET /v1/portal/sender-status?businessId=UUID` returns `{item:{available,provider,reason,manualDeliveryAvailable:true}}`. Provider is `resend` or null; reason is null, `sender_unavailable`, or `status_unavailable`. This checks configured sender availability only, not inbox delivery.
+- `GET /v1/portal/invitations?businessId=UUID&studentId=UUID` returns `{items:Invitation[]}`, newest first, maximum 100. `studentId` is optional; broad lists remain scope-filtered.
+- `POST /v1/portal/invitations` accepts `{businessId,studentId,contactId,emailAddressId,relationship:'student'|'guardian'}` and returns `{item:Invitation,deduplicated,manualInviteUrl?}`. Recipient email is derived from the selected Clients address. Own-contact relations `student`/`self` permit student grants; `parent`/`guardian` permit guardian grants. `sponsor`/`other` do not grant portal access.
+- `POST /v1/portal/invitations/:id/resend` accepts `{businessId}` and returns the same response. It rotates the token and extends expiry by seven days. The old token stops working. A recently queued delivery rejects resend for one minute; a stalled queued attempt can then be explicitly retried. An accepted invitation requires grant revocation first; a revoked invitation requires a fresh create action.
+- `DELETE /v1/portal/invitations/:id?businessId=UUID` returns `{item:Invitation}` and invalidates the token. It is idempotent for an already revoked invitation. Accepted invitations use grant revocation instead.
+- `POST /v1/portal/accept` accepts `{businessId,token}` and returns `{item:{businessId,studentId,relationship,access:AccessGrant}}`. A valid browser session and trusted Origin are required. The signed-in account email must match the invited address after trimming and case normalization. Acceptance consumes the token and inserts the relationship grant, membership and directory entry atomically. Existing staff roles, scopes and permission overrides are preserved.
+- `GET /v1/portal/access?businessId=UUID&studentId=UUID` returns `{items:AccessGrant[]}`, active grants only, maximum 500. Without `studentId`, it lists the signed-in user's grants. With `studentId`, an authorized invitation manager may view all grants for that student; other users still see only their own. Requires `clients.read`, the Clients entitlement, and scope access when a student is supplied.
+- `DELETE /v1/portal/access/:id?businessId=UUID` returns `{item:AccessGrant}` and revokes that relationship without changing staff membership. It also invalidates pending invitations for the current recipient/student. It requires invitation management permission and the student's scope. Clients merge protection remains permanent after revocation.
+
+`Invitation` contains `{id,businessId,studentId,contactId,emailAddressId,
+recipientEmail,relationship,status,deliveryError,expiresAt,createdAt,updatedAt,
+acceptedAt,revokedAt}`. Status is `queued`, `delivery_failed`, `sent`, `accepted`,
+`revoked`, or `expired`. `sent` means the provider accepted the email, not that the
+recipient received it. `deliveryError` is null, `sender_unavailable`, or
+`delivery_failed`; provider responses and credentials never enter public lists.
+Expired pending records report `expired` even before another mutation persists
+the transition. `AccessGrant` contains `{id,userId,studentId,relationship,
+createdAt,updatedAt,revokedAt}`.
+
+Platform stores only SHA-256 hashes of random 256-bit tokens. Links use
+`/portal/invite#token=...&business=...`, and only a fresh creation/resend response
+contains `manualInviteUrl`. A deduplicated create and every list omit the link;
+there is no stored plaintext token to retrieve. An unavailable sender persists
+`delivery_failed` and still returns the fresh link for explicit staff delivery.
+The system never claims a failed attempt was sent. Staff must handle that link
+privately. No rollout, group addition, or background tick sends invitations.
+
+Before issuance, Clients validates the student/contact/address and permanently
+marks the active canonical student merge-protected under its own contact lock.
+This prevents a merge from transferring an invitation or grant to another person.
+Platform deduplicates pending invitations for the same business/student/recipient/
+relationship; an accepted invitation with an active grant is also deduplicated.
+A later invitation after expiry/revocation requires a new explicit staff action.
+Acceptance, grant revocation and issuance serialize by recipient/student; token
+consumption is row-locked, and revocation cannot be reversed by a racing old link.
+Every state change writes tenant-protected audit records and an outbox event in
+the same transaction. Events omit email addresses, token hashes and raw tokens.
+
+Delivery uses private `POST /internal/auth-mail/portal-invitation` on Notifications
+with `X-Auth-Mail-Secret` and `{recipientEmail,token,businessId,invitationId,
+deliveryRevision}`. Notifications constructs the link from its trusted app origin
+and uses a stable Resend idempotency key for retries of one delivery revision.
+The provider has at most two bounded attempts. Platform persists queued state
+before delivery and persists the accepted/failure result afterward. There is no
+automatic durable delivery retry; an interrupted process may leave `queued` until
+staff explicitly resend. No email delivery was exercised during implementation.
 
 ## Password recovery delivery
 

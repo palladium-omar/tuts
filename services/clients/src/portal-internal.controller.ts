@@ -4,12 +4,15 @@ import { timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import { lockContacts } from './contact-store.js';
 import { listRelatedContacts, requireStudent } from './student-identity.js';
-const schema = z.object({ businessId: z.uuid(), studentId: z.uuid(), protect: z.boolean() }).strict();
+const schema = z.object({
+    businessId: z.uuid(), studentId: z.uuid(), protect: z.boolean()
+}).strict();
 @Controller('internal')
 export class PortalInternalController {
     constructor(
     @Inject(Database)
-    private readonly db: Database) { }
+    private readonly db: Database) {
+    }
     @Public()
     @Post('portal-students')
     async student(
@@ -34,7 +37,11 @@ export class PortalInternalController {
                     throw new ConflictException('Inactive student cannot receive a grant');
                 await tx.query('UPDATE clients SET portal_protected_at=COALESCE(portal_protected_at,now()) WHERE id=$1', [student.id]);
             }
-            return { item: { id: student.id, displayName: student.display_name, revision: student.revision, portalProtected: input.protect || Boolean(student.portal_protected_at), contacts: await listRelatedContacts(tx, student.id) } };
+            return {
+                item: {
+                    id: student.id, displayName: student.display_name, revision: student.revision, portalProtected: input.protect || Boolean(student.portal_protected_at), contacts: await listRelatedContacts(tx, student.id)
+                }
+            };
         });
     }
 }

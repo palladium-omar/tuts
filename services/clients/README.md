@@ -198,3 +198,58 @@ There is no automatic unlock from events or revocation; a future explicit review
 unlock workflow is required. Protect=false canonicalizes an alias for trusted reads.
 Missing configuration returns unavailable, and invalid secret returns forbidden.
 Student/parent presentation routes remain a later phase.
+
+## Groups and scoped student directory (Phase 2)
+
+Group shape is `{id,name,description,revision,studentCount,createdAt,updatedAt}`.
+Name is 1–160 characters; description is null or at most 2,000 characters.
+Groups have many-to-many student membership and do not own student records.
+
+| Method | Path | Request / response |
+| --- | --- | --- |
+| GET | `/v1/groups` | `limit`/`offset`; `{items:Group[],total,limit,offset}` |
+| POST | `/v1/groups` | `{name,description?}`; `{item:Group}` |
+| GET | `/v1/groups/:id` | `{item:Group}` |
+| PATCH | `/v1/groups/:id` | `{name?,description?}`; `{item:Group}` |
+| DELETE | `/v1/groups/:id` | `{item:{id,deleted:true}}`; students retained |
+| GET | `/v1/groups/:id/members` | `limit`/`offset`; `{items:Client[],total,limit,offset}` |
+| POST | `/v1/groups/:id/members` | `{studentIds:UUID[]}`; `{item:Group,studentIds:changedIds}` |
+| DELETE | `/v1/groups/:id/members` | Same body and response; detaches only |
+| GET | `/v1/portal/students` | `limit`/`offset`; `{items:PortalStudent[],total,limit,offset}` |
+| GET | `/v1/portal/students/:id` | `{item:PortalStudent}` |
+
+Lists default to 50, max 100; membership mutation accepts 1–500 UUIDs. Duplicate
+IDs and already-applied changes are idempotent: only actual changes increment the
+group revision or emit events. IDs are canonicalized before adding/removing.
+Membership changes invalidate the student's merge preview revision. A merge moves
+source group memberships to the survivor and emits removals/additions per affected
+group. Deleting a student emits group removals; deleting a group never deletes a
+student. Group create/edit/delete events carry `{groupId,revision}`; membership
+events `clients.group-members-added.v1` and `clients.group-members-removed.v1`
+carry `{groupId,studentIds,revision}`. These events contain no contact data.
+
+Group writes require clients.groups.manage plus a staff role and business scope.
+Group reads require clients.read and a staff role. Scoped staff list/count only
+granted students and their groups; member lists exclude all other students.
+Student and parent roles use the safe directory, not staff group member routes.
+Group membership does not create access grants or deliver invitations. Only an
+explicit Platform invitation action can request delivery.
+
+Existing `/v1/clients` and recipient filter objects gain `groupId:UUID` and
+`unassigned:'true'|'false'`, composed with existing custom filters/sort/pagination.
+Unassigned means no group membership in this business. Combining groupId with
+unassigned=true deliberately yields no matching students.
+
+Client create/PATCH accepts `photo:string|null`, and staff client/list/member
+responses include it. Only PNG/JPEG/WebP inline data URLs pass validation; decoded
+bytes must be at most 256 KiB with matching file signatures. SVG, arbitrary URLs,
+malformed base64 and larger photos are rejected. Existing photos default to null.
+Photo conflicts appear as field `photo` in merge previews and require a choice.
+
+`PortalStudent` is exactly
+`{id,firstName,lastName,displayName,photo,revision,contacts:RelatedContact[]}`.
+It excludes notes, consent, tags, source, staff custom fields, payer CRM details,
+portal protection and internal source mappings. Lists filter exact signed
+studentIds for student/parent or student scope, and detail rechecks both requested
+and canonical IDs. Business-scoped staff may read the safe directory. Client
+custom fields remain staff-private until an explicit sharing policy exists.

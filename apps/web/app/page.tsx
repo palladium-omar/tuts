@@ -35,9 +35,11 @@ import {
   type Row,
 } from "../lib/api";
 import { Notice } from "../components/shared";
+import { Registration } from "../features/registration";
 import { BusinessProfile, defaultPalette } from "../features/business-profile";
 import { BusinessDashboard } from "../features/business-dashboard";
 import { CRM } from "../features/crm";
+import { StudentTracker } from "../features/student-tracker";
 import {
   CampaignComposer,
   CommunicationConnections,
@@ -48,6 +50,7 @@ import { Sessions } from "../features/sessions-calendar";
 import { Learning } from "../features/learning";
 import { Activity, Invoices, Payments } from "../features/finance";
 const icons: Record<string, any> = {
+  tracker: Users,
   clients: Users,
   scheduling: CalendarDays,
   learning: BookOpen,
@@ -186,6 +189,7 @@ export default function Home() {
       </main>
     );
   if (!session) return <Registration api={platform} onSignedIn={signedIn} />;
+  if (business && ['student', 'parent'].includes(business.role)) return <PortalRedirect businessId={business.id} />;
   if (!business || newBusiness)
     return (
       <main className="onboarding" style={theme(draftPalette)}>
@@ -226,155 +230,9 @@ export default function Home() {
     />
   );
 }
-function Registration({
-  api,
-  onSignedIn,
-}: {
-  api: Api;
-  onSignedIn: () => Promise<void>;
-}) {
-  const [register, setRegister] = useState(false),
-    [error, setError] = useState(""),
-    [busy, setBusy] = useState(false),
-    [showPassword, setShowPassword] = useState(false);
-  async function submit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const f = new FormData(e.currentTarget);
-    const password = String(f.get("password"));
-    setError("");
-    if (register && password !== f.get("confirmPassword")) {
-      setError(
-        "The passwords don’t match. Please enter the same password in both fields.",
-      );
-      return;
-    }
-    setBusy(true);
-    try {
-      await api(
-        `platform/auth/${register ? "sign-up" : "sign-in"}/email`,
-        "POST",
-        {
-          email: f.get("email"),
-          password,
-          ...(register ? { name: f.get("name") } : {}),
-        },
-      );
-      await onSignedIn();
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <main className="auth">
-      <div className="auth-story">
-        <div className="wordmark">
-          <GraduationCap />
-          tuts
-        </div>
-        <div>
-          <span className="eyebrow light">ROOM TO TEACH</span>
-          <h1>
-            Your practice.
-            <br />
-            All together.
-          </h1>
-          <p>
-            Your students, your tools,
-            <br />
-            your own way of teaching.
-          </p>
-        </div>
-        <div className="auth-foot">
-          <span className="little-star">✳</span>Built around independent
-          educators.
-        </div>
-      </div>
-      <div className="auth-panel">
-        <div className="auth-card">
-          <span className="eyebrow">YOUR WORKSPACE</span>
-          <h2>{register ? "Make room for good teaching." : "Welcome back."}</h2>
-          <p className="muted">
-            {register
-              ? "Create your account, then make this space your own."
-              : "Sign in to pick up where you left off."}
-          </p>
-          <Notice error={error} />
-          <form onSubmit={submit}>
-            {register && (
-              <label>
-                Your name
-                <input name="name" autoComplete="name" required />
-              </label>
-            )}
-            <label>
-              Email address
-              <input name="email" type="email" autoComplete="email" required />
-            </label>
-            <label>
-              Password
-              <input
-                name="password"
-                type={showPassword ? "text" : "password"}
-                autoComplete={register ? "new-password" : "current-password"}
-                minLength={register ? 8 : undefined}
-                maxLength={128}
-                required
-              />
-              {register && (
-                <span className="field-hint">
-                  At least 8 characters. No special-character or uppercase
-                  rules.
-                </span>
-              )}
-            </label>
-            {register && (
-              <label>
-                Confirm password
-                <input
-                  name="confirmPassword"
-                  type={showPassword ? "text" : "password"}
-                  autoComplete="new-password"
-                  minLength={8}
-                  maxLength={128}
-                  required
-                />
-              </label>
-            )}
-            <label className="checkbox">
-              <input
-                type="checkbox"
-                checked={showPassword}
-                onChange={(e) => setShowPassword(e.target.checked)}
-              />
-              Show password{register ? "s" : ""}
-            </label>
-            <button className="primary full" disabled={busy}>
-              {busy ? "Please wait…" : register ? "Create account" : "Sign in"}
-              <ArrowRight size={17} />
-            </button>
-          </form>
-          {!register && (
-            <p className="small-note">
-              <a href="/forgot-password">Forgot password?</a>
-            </p>
-          )}
-          <button
-            className="link"
-            onClick={() => {
-              setRegister(!register);
-              setError("");
-            }}
-          >
-            {register
-              ? "Already have an account? Sign in"
-              : "New here? Create an account"}
-          </button>
-        </div>
-      </div>
-    </main>
-  );
+function PortalRedirect({ businessId }: { businessId: string }) {
+  useEffect(() => { window.location.replace(`/portal?business=${encodeURIComponent(businessId)}`); }, [businessId]);
+  return <main className="loading-screen"><p>Opening your student portal…</p></main>;
 }
 function Workspace({
   business,
@@ -399,6 +257,7 @@ function Workspace({
 }) {
   const api = useMemo(() => createApi(business.id), [business.id]);
   const { view, filter } = route;
+  const [learningStudentId, setLearningStudentId] = useState<string | undefined>();
   const [preview, setPreview] = useState<Row | null>(null),
     [menuOpen, setMenuOpen] = useState(false),
     [error, setError] = useState(""),
@@ -581,6 +440,7 @@ function Workspace({
           {view === "overview" && (
             <Overview api={api} business={business} user={user} go={go} />
           )}
+          {view === "tracker" && <StudentTracker api={api} business={business} onOpenLearning={hasPermission(business, "learning.write") ? (studentId) => { setLearningStudentId(studentId); go("learning"); } : undefined} />}
           {view === "clients" && (
             <CRM
               api={api}
@@ -600,6 +460,7 @@ function Workspace({
           )}
           {view === "learning" && (
             <Learning
+              initialStudentId={learningStudentId}
               api={api}
               businessId={business.id}
               onOpenClients={() => go("clients")}

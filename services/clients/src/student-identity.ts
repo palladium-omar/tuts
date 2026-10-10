@@ -4,6 +4,7 @@ import type { PoolClient } from 'pg';
 import { emitEvent, assertStudentAccess } from '@palladium/service-kit';
 import type { RequestContext } from '@palladium/contracts';
 import { item, requireClient, updateContact, type ClientRow } from './contact-store.js';
+import { remapStudentGroups } from "./groups-store.js";
 import type { ContactPatch } from './schemas.js';
 export const normalizeName = (value: string) => value.normalize('NFKC').trim().replace(/\s+/gu, ' ').toLowerCase();
 export const normalizePhone = (value: string) => value.replace(/[^0-9+]/g, '');
@@ -35,9 +36,16 @@ export async function syncLegacyContact(tx: PoolClient, businessId: string, row:
         if (value)
             await tx.query(`INSERT INTO contact_addresses(business_id,id,contact_id,kind,value,normalized_value,is_primary) VALUES($1,$2,$3,$4,$5,$6,true) ON CONFLICT(business_id,contact_id,kind,normalized_value) DO UPDATE SET value=EXCLUDED.value,is_primary=true`, [businessId, randomUUID(), row.id, kind, value, kind === 'email' ? value.trim().toLowerCase() : normalizePhone(value)]);
     }
-    const affected = await tx.query<{id:string;revision:number}>(`UPDATE clients SET revision=revision+1,updated_at=now() WHERE id<>$1 AND id IN (SELECT student_id FROM student_contacts WHERE contact_id=$1) RETURNING id,revision`,[row.id]);
-    for(const linked of affected.rows) await emitEvent(tx,{type:'clients.contacts-updated.v1',producer:'clients',businessId,data:{clientId:linked.id,revision:linked.revision}});
-
+    const affected = await tx.query<{
+        id: string;
+        revision: number;
+    }>(`UPDATE clients SET revision=revision+1,updated_at=now() WHERE id<>$1 AND id IN (SELECT student_id FROM student_contacts WHERE contact_id=$1) RETURNING id,revision`, [row.id]);
+    for (const linked of affected.rows)
+        await emitEvent(tx, {
+            type: 'clients.contacts-updated.v1', producer: 'clients', businessId, data: {
+                clientId: linked.id, revision: linked.revision
+            }
+        });
 }
 export async function listRelatedContacts(tx: PoolClient, studentId: string) {
     const rows = await tx.query<{
@@ -54,14 +62,20 @@ export async function listRelatedContacts(tx: PoolClient, studentId: string) {
         label: string;
         is_primary: boolean;
     }>(`SELECT a.* FROM contact_addresses a JOIN student_contacts s ON s.business_id=a.business_id AND s.contact_id=a.contact_id WHERE s.student_id=$1 ORDER BY a.is_primary DESC,a.created_at,a.id`, [studentId]);
-    return rows.rows.map(row => ({ id: row.id, displayName: row.display_name, relationship: row.relationship, isPrimary: row.is_primary, emails: addresses.rows.filter(a => a.contact_id === row.id && a.kind === 'email').map(addressItem), phones: addresses.rows.filter(a => a.contact_id === row.id && a.kind === 'phone').map(addressItem) }));
+    return rows.rows.map(row => ({
+        id: row.id, displayName: row.display_name, relationship: row.relationship, isPrimary: row.is_primary, emails: addresses.rows.filter(a => a.contact_id === row.id && a.kind === 'email').map(addressItem), phones: addresses.rows.filter(a => a.contact_id === row.id && a.kind === 'phone').map(addressItem)
+    }));
 }
 function addressItem(a: {
     id: string;
     value: string;
     label: string;
     is_primary: boolean;
-}) { return { id: a.id, value: a.value, label: a.label, isPrimary: a.is_primary }; }
+}) {
+    return {
+        id: a.id, value: a.value, label: a.label, isPrimary: a.is_primary
+    };
+}
 export async function saveRelatedContact(tx: PoolClient, ctx: RequestContext, studentId: string, input: RelatedContactInput, editingId?: string) {
     const student = await requireStudent(tx, studentId);
     assertStudentAccess(ctx, student.id);
@@ -138,10 +152,14 @@ export async function saveRelatedContact(tx: PoolClient, ctx: RequestContext, st
         revision: number;
     }>('UPDATE clients SET revision=revision+1,updated_at=now() WHERE id IN (SELECT student_id FROM student_contacts WHERE contact_id=$1) RETURNING id,revision', [id]);
     for (const affected of revision.rows)
-        await emitEvent(tx, { type: 'clients.contacts-updated.v1', producer: 'clients', businessId: ctx.businessId, correlationId: ctx.requestId, data: { clientId: affected.id, revision: affected.revision } });
+        await emitEvent(tx, {
+            type: 'clients.contacts-updated.v1', producer: 'clients', businessId: ctx.businessId, correlationId: ctx.requestId, data: {
+                clientId: affected.id, revision: affected.revision
+            }
+        });
     return (await listRelatedContacts(tx, studentId)).find(c => c.id === id)!;
 }
-const mergeFields = ['firstName', 'lastName', 'displayName', 'email', 'phone', 'notes', 'status', 'source', 'emailOptIn', 'whatsappOptIn'] as const;
+const mergeFields = ['photo', 'firstName', 'lastName', 'displayName', 'email', 'phone', 'notes', 'status', 'source', 'emailOptIn', 'whatsappOptIn'] as const;
 const empty = (value: unknown) => value === null || value === undefined || value === '';
 export async function mergePreview(tx: PoolClient, sourceId: string, targetId: string) {
     if (sourceId === targetId)
@@ -157,19 +175,28 @@ export async function mergePreview(tx: PoolClient, sourceId: string, targetId: s
     }[] = [];
     for (const field of mergeFields)
         if (!empty(a[field]) && !empty(b[field]) && a[field] !== b[field])
-            conflicts.push({ field, source: a[field], target: b[field] });
+            conflicts.push({
+                field, source: a[field], target: b[field]
+            });
     for (const key of new Set([...Object.keys(a.customFields), ...Object.keys(b.customFields)]))
         if (!empty(a.customFields[key]) && !empty(b.customFields[key]) && a.customFields[key] !== b.customFields[key])
-            conflicts.push({ field: `custom:${key}`, source: a.customFields[key], target: b.customFields[key] });
+            conflicts.push({
+                field: `custom:${key}`, source: a.customFields[key], target: b.customFields[key]
+            });
     const counts = await tx.query<{
         contacts: string;
         payers: string;
         source_identities: string;
-    }>(`SELECT (SELECT count(*) FROM student_contacts WHERE student_id=$1)::text contacts,(SELECT count(*) FROM client_payers WHERE student_id=$1)::text payers,(SELECT count(*) FROM client_external_sources WHERE client_id=$1)::text source_identities`, [source.id]);
+        groups: string;
+    }>(`SELECT (SELECT count(*) FROM student_contacts WHERE student_id=$1)::text contacts,(SELECT count(*) FROM client_payers WHERE student_id=$1)::text payers,(SELECT count(*) FROM client_external_sources WHERE client_id=$1)::text source_identities,(SELECT count(*) FROM student_group_members WHERE student_id=$1)::text groups`, [source.id]);
     const blockedReasons: string[] = [];
     if (source.portal_protected_at || target.portal_protected_at)
         blockedReasons.push('Portal access or an invitation protects a selected student. Review and revoke grants before a separately authorized unlock.');
-    return { source: a, target: b, conflicts, affectedLinks: { contacts: Number(counts.rows[0]!.contacts), payers: Number(counts.rows[0]!.payers), sourceIdentities: Number(counts.rows[0]!.source_identities) }, blockedReasons, sourceRevision: source.revision, targetRevision: target.revision };
+    return {
+        source: a, target: b, conflicts, affectedLinks: {
+            contacts: Number(counts.rows[0]!.contacts), payers: Number(counts.rows[0]!.payers), sourceIdentities: Number(counts.rows[0]!.source_identities), groups: Number(counts.rows[0]!.groups)
+        }, blockedReasons, sourceRevision: source.revision, targetRevision: target.revision
+    };
 }
 export async function commitMerge(tx: PoolClient, ctx: RequestContext, input: {
     sourceId: string;
@@ -188,15 +215,20 @@ export async function commitMerge(tx: PoolClient, ctx: RequestContext, input: {
         throw new ConflictException('Choose a survivor value for every conflict');
     if (Object.keys(input.fieldChoices).some(field => !conflictFields.has(field)))
         throw new ConflictException('Field choice does not refer to a current conflict');
-    const linkedCount=await tx.query<{count:string}>('SELECT count(DISTINCT contact_id) FROM student_contacts WHERE student_id=ANY($1::uuid[])',[[input.sourceId,input.targetId]]);
-    if(Number(linkedCount.rows[0]!.count)>100) throw new ConflictException('Merged contacts exceed 100; detach unnecessary relationships before merging');
+    const linkedCount = await tx.query<{
+        count: string;
+    }>('SELECT count(DISTINCT contact_id) FROM student_contacts WHERE student_id=ANY($1::uuid[])', [[input.sourceId, input.targetId]]);
+    if (Number(linkedCount.rows[0]!.count) > 100)
+        throw new ConflictException('Merged contacts exceed 100; detach unnecessary relationships before merging');
     const patch: Record<string, unknown> = {};
     for (const field of mergeFields)
         patch[field] = input.fieldChoices[field] === 'source' || empty(preview.target[field]) ? preview.source[field] : preview.target[field];
     patch.tags = [...new Set([...preview.target.tags, ...preview.source.tags])];
     if ((patch.tags as string[]).length > 30)
         throw new ConflictException('Merged tags exceed 30; reduce tags before merging');
-    const custom = { ...preview.target.customFields };
+    const custom = {
+        ...preview.target.customFields
+    };
     for (const [key, value] of Object.entries(preview.source.customFields))
         if (empty(custom[key]) || input.fieldChoices[`custom:${key}`] === 'source')
             custom[key] = value;
@@ -208,12 +240,21 @@ export async function commitMerge(tx: PoolClient, ctx: RequestContext, input: {
     await tx.query('DELETE FROM student_contacts WHERE student_id=$1', [input.sourceId]);
     await tx.query(`INSERT INTO client_payers(business_id,student_id,payer_id,relationship) SELECT business_id,$2,payer_id,relationship FROM client_payers WHERE student_id=$1 ON CONFLICT DO NOTHING`, [input.sourceId, input.targetId]);
     await tx.query('DELETE FROM client_payers WHERE student_id=$1', [input.sourceId]);
+    await remapStudentGroups(tx, ctx, input.sourceId, input.targetId);
     await tx.query('UPDATE client_external_sources SET client_id=$2 WHERE client_id=$1', [input.sourceId, input.targetId]);
     // Flatten any older alias chain, while retaining its original source and audit.
     await tx.query('UPDATE clients SET merged_into=$2 WHERE merged_into=$1', [input.sourceId, input.targetId]);
     await tx.query('UPDATE clients SET merged_into=$2,merged_at=now(),revision=revision+1,updated_at=now() WHERE id=$1', [input.sourceId, input.targetId]);
     const id = randomUUID();
     await tx.query('INSERT INTO student_merge_audit(business_id,id,source_id,target_id,actor_id,source_snapshot,target_snapshot,field_choices,revision) VALUES($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9)', [ctx.businessId, id, input.sourceId, input.targetId, ctx.sub, JSON.stringify(preview.source), JSON.stringify(preview.target), JSON.stringify(input.fieldChoices), row.revision]);
-    await emitEvent(tx, { type: 'clients.student-merged.v1', producer: 'clients', businessId: ctx.businessId, correlationId: ctx.requestId, data: { sourceId: input.sourceId, targetId: input.targetId, revision: row.revision } });
-    return { item: item(row), merge: { id, sourceId: input.sourceId, targetId: input.targetId, revision: row.revision } };
+    await emitEvent(tx, {
+        type: 'clients.student-merged.v1', producer: 'clients', businessId: ctx.businessId, correlationId: ctx.requestId, data: {
+            sourceId: input.sourceId, targetId: input.targetId, revision: row.revision
+        }
+    });
+    return {
+        item: item(row), merge: {
+            id, sourceId: input.sourceId, targetId: input.targetId, revision: row.revision
+        }
+    };
 }

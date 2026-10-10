@@ -28,6 +28,7 @@ import {
   updateClientSchema,
 } from "./schemas.js";
 
+import { emitGroupMembers } from "./groups-store.js";
 import { buildClientQuery } from "./client-query.js";
 
 import {
@@ -136,6 +137,8 @@ export class ClientsController {
       if(client.portal_protected_at) throw new ConflictException("Portal protected students cannot be deleted");
       const aliases=await tx.query("SELECT 1 FROM clients WHERE merged_into=$1 LIMIT 1",[id]);
       if(aliases.rowCount) throw new ConflictException("A merge survivor must be retained");
+      const groups=await tx.query<{group_id:string}>("SELECT group_id FROM student_group_members WHERE student_id=$1 ORDER BY group_id",[id]);
+      for(const group of groups.rows) await emitGroupMembers(tx,ctx,group.group_id,[id],"removed");
       await tx.query("DELETE FROM clients WHERE id=$1", [id]);
       await emitEvent(tx, {
         type: "clients.client-deleted.v1",

@@ -7,6 +7,7 @@ import { normalizeName, syncLegacyContact } from "./student-identity.js";
 import { validateCustomFields } from "./custom-fields.js";
 export type ClientRow = {
   id: string;
+  photo: string | null;
   revision: number;
   merged_into: string | null;
   portal_protected_at: Date | null;
@@ -28,6 +29,7 @@ export type ClientRow = {
 };
 export const item = (r: ClientRow) => ({
   id: r.id,
+  photo: r.photo ?? null,
   kind: r.kind,
   revision: r.revision,
   portalProtected: Boolean(r.portal_protected_at),
@@ -81,8 +83,8 @@ export async function createContact(
     );
   const result = await tx.query<ClientRow>(
     `INSERT INTO clients
-    (business_id,id,kind,display_name,first_name,last_name,email,phone,notes,status,tags,source,custom_fields,email_opt_in,whatsapp_opt_in)
-    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14,$15) RETURNING *`,
+    (business_id,id,kind,display_name,first_name,last_name,email,phone,notes,status,tags,source,custom_fields,email_opt_in,whatsapp_opt_in,photo)
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14,$15,$16) RETURNING *`,
     [
       businessId,
       id,
@@ -99,6 +101,7 @@ export async function createContact(
       JSON.stringify(input.customFields ?? {}),
       input.emailOptIn ?? false,
       input.whatsappOptIn ?? false,
+      input.photo ?? null,
     ],
   );
   await tx.query("UPDATE clients SET normalized_name=$2 WHERE id=$1", [id, normalizeName(displayName)]);
@@ -117,6 +120,7 @@ export async function createContact(
   return result.rows[0]!;
 }
 const columns = {
+  photo: "photo",
   firstName: "first_name",
   lastName: "last_name",
   displayName: "display_name",

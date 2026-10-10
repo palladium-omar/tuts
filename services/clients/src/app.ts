@@ -1,4 +1,6 @@
 import "reflect-metadata";
+import { GroupsController } from "./groups.controller.js";
+import { PortalStudentsController } from "./portal-students.controller.js";
 import { IdentityController } from "./identity.controller.js";
 import { PortalInternalController } from "./portal-internal.controller.js";
 import { ClientsController } from "./clients.controller.js";
@@ -13,6 +15,8 @@ export const appOptions = {
   controllers: [
     ClientsController,
     IdentityController,
+    GroupsController,
+    PortalStudentsController,
     PortalInternalController,
     ImportsController,
     FieldsController,

@@ -55,7 +55,9 @@ export function normalizeContact(raw: Record<string, unknown>): {
         return {
             errors: parsed.error.issues.map((e) => `${e.path.join(".")}: ${e.message}`),
         };
-    return { contact: parsed.data, errors: [] };
+    return {
+        contact: parsed.data, errors: []
+    };
 }
 export type ImportPreviewRow = {
     rowNumber: number;
@@ -114,7 +116,9 @@ export async function previewImport(tx: PoolClient, input: ImportInput) {
                     continue;
                 }
                 const custom = values.customFields as Record<string, unknown> | undefined;
-                values.customFields = { ...custom, [id]: value };
+                values.customFields = {
+                    ...custom, [id]: value
+                };
             }
             else
                 values[field] = raw[header];
@@ -137,7 +141,9 @@ export async function previewImport(tx: PoolClient, input: ImportInput) {
     if ([...decisions.keys()].some(n => n > input.rows.length + 1))
         throw new BadRequestException('Decision row is outside the import');
     const seen = new Set<string>();
-    const summary: ImportSummary = { created: 0, updated: 0, skipped: 0, errors: 0, review: 0 };
+    const summary: ImportSummary = {
+        created: 0, updated: 0, skipped: 0, errors: 0, review: 0
+    };
     for (const row of mapped) {
         const contact = row.contact, decision = decisions.get(row.rowNumber);
         if (row.errors.length || !contact)
@@ -152,13 +158,17 @@ export async function previewImport(tx: PoolClient, input: ImportInput) {
                 reasons: string[];
             }>();
             for (const c of emailMatches.get(contact.email ?? '') ?? [])
-                candidates.set(c.id, { id: c.id, displayName: c.display_name, email: c.email, kind: c.kind, reasons: ['shared email (may be family)'] });
+                candidates.set(c.id, {
+                    id: c.id, displayName: c.display_name, email: c.email, kind: c.kind, reasons: ['shared email (may be family)']
+                });
             for (const c of nameRows.rows.filter(c => normalizeName(c.display_name) === name)) {
                 const found = candidates.get(c.id);
                 if (found)
                     found.reasons.push('same normalized name');
                 else
-                    candidates.set(c.id, { id: c.id, displayName: c.display_name, email: c.email, kind: c.kind, reasons: ['same normalized name'] });
+                    candidates.set(c.id, {
+                        id: c.id, displayName: c.display_name, email: c.email, kind: c.kind, reasons: ['same normalized name']
+                    });
             }
             row.candidates = [...candidates.values()];
             const identity = JSON.stringify([contact.kind ?? 'student', name, contact.email ?? '', contact.phone ?? '']);
@@ -215,7 +225,9 @@ export async function previewImport(tx: PoolClient, input: ImportInput) {
         else
             summary.errors++;
     }
-    return { rows: mapped, summary };
+    return {
+        rows: mapped, summary
+    };
 }
 export async function commitImport(tx: PoolClient, businessId: string, input: ImportInput, correlationId: string) {
     const preview = await previewImport(tx, input);
@@ -237,9 +249,13 @@ export async function commitImport(tx: PoolClient, businessId: string, input: Im
         ...preview.summary,
         errors: preview.rows
             .filter((r) => r.action === "error")
-            .map((r) => ({ rowNumber: r.rowNumber, messages: r.errors })),
+            .map((r) => ({
+            rowNumber: r.rowNumber, messages: r.errors
+        })),
         skippedRows: preview.rows
             .filter((r) => r.action === "skip")
-            .map((r) => ({ rowNumber: r.rowNumber, message: r.message })),
+            .map((r) => ({
+            rowNumber: r.rowNumber, message: r.message
+        })),
     };
 }

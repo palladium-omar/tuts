@@ -1,7 +1,9 @@
 import { z } from "zod";
+import { validStudentPhoto } from "./student-photo.js";
 export const clientIdSchema = z.uuid();
 export const contactStatusSchema = z.enum(["lead", "active", "inactive"]);
 export const contactFields = {
+    photo: z.string().max(349600).refine(validStudentPhoto,"Photo must be a PNG, JPEG or WebP of at most 256 KiB").nullable(),
     firstName: z.string().trim().max(80),
     lastName: z.string().trim().max(80),
     displayName: z.string().trim().min(1).max(160),
@@ -55,6 +57,8 @@ export const filterClauseSchema = z
     v.value !== undefined, "Filter value is required");
 const filtersSchema = z.array(filterClauseSchema).max(20);
 export const clientFilterShape = {
+    groupId: z.uuid().optional(),
+    unassigned: z.enum(["true","false"]).optional(),
     kind: z.enum(["student", "payer"]).optional(),
     status: contactStatusSchema.optional(),
     search: z.string().trim().max(160).optional(),
@@ -132,7 +136,9 @@ export const importRequestSchema = z
     ]), z.string().min(1).max(160))
         .refine((v) => Object.keys(v).length > 0, "Map at least one column"),
     duplicateMode: z.enum(["skip", "update"]).default("skip"),
-    decisions: z.array(z.object({ rowNumber: z.number().int().min(2).max(2001), action: z.enum(["create", "update", "skip"]), clientId: z.uuid().optional() }).strict().refine(v => v.action === "update" ? Boolean(v.clientId) : !v.clientId, "Only update decisions require clientId")).max(2000).optional(),
+    decisions: z.array(z.object({
+        rowNumber: z.number().int().min(2).max(2001), action: z.enum(["create", "update", "skip"]), clientId: z.uuid().optional()
+    }).strict().refine(v => v.action === "update" ? Boolean(v.clientId) : !v.clientId, "Only update decisions require clientId")).max(2000).optional(),
 })
     .strict()
     .refine((v) => v.rows.every((r) => Object.keys(r).length <= 100), "At most 100 columns per row");

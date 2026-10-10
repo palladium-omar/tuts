@@ -65,6 +65,8 @@ export async function buildClientQuery(
       throw new BadRequestException(`Unsupported filter field '${name}'`);
     return { expression: value[0], type: value[1] };
   }
+  if (input.groupId) conditions.push(`EXISTS (SELECT 1 FROM student_group_members m WHERE m.business_id=clients.business_id AND m.student_id=clients.id AND m.group_id=${add(input.groupId)})`);
+  if (input.unassigned) conditions.push(`${input.unassigned === "true" ? "NOT " : ""}EXISTS (SELECT 1 FROM student_group_members m WHERE m.business_id=clients.business_id AND m.student_id=clients.id)`);
   if (input.kind) conditions.push(`kind=${add(input.kind)}`);
   if (input.status) conditions.push(`status=${add(input.status)}`);
   if (input.source) conditions.push(`source=${add(input.source)}`);
