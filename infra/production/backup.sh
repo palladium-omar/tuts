@@ -10,7 +10,7 @@ stamp=$(date -u +%Y%m%dT%H%M%SZ)
 target="$backup_root/$stamp"
 mkdir -p "$target"
 compose=(docker compose --env-file /opt/tuts/.env.production -f compose.production.yaml)
-for service in platform clients scheduling learning billing payments notifications integrations; do
+for service in platform clients scheduling learning billing payments notifications integrations planning reporting; do
   "${compose[@]}" exec -T postgres pg_dump -U postgres --format=custom "$service" > "$target/$service.dump"
 done
 "${compose[@]}" run --rm --no-deps --entrypoint sh -T learning -c 'tar -czf - -C /data uploads' > "$target/uploads.tar.gz"

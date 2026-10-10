@@ -5,6 +5,8 @@ import {
   ExternalSessionsController,
   ExternalSessionsService,
 } from "./external-sessions.js";
+import {PortalSessionsController,PortalSessionsService} from './portal-sessions.js';
+import {StudentAliasConsumer} from './student-scope.js';
 export const appOptions = {
   name: "scheduling",
   port: 4003,
@@ -13,6 +15,7 @@ export const appOptions = {
     SessionsController,
     ExternalSessionsController,
     ClassLedgerController,
+    PortalSessionsController,
   ],
-  providers: [SessionsService, ExternalSessionsService],
+  providers: [SessionsService, ExternalSessionsService,PortalSessionsService,StudentAliasConsumer],
 };

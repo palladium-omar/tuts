@@ -112,8 +112,10 @@ export type ExternalSession = {
   title: string;
   startsAt: string;
   endsAt: string;
-  status: "scheduled" | "cancelled" | "completed";
+  status: "scheduled" | "cancelled" | "completed" | "no_show";
   attendeeName?: string;
   attendeeEmail?: string;
   bookingUrl?: string;
+  providerUpdatedAt?: string;
+  revisionSource?: "provider" | "observed";
 };

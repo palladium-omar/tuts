@@ -14,6 +14,8 @@ const names = [
   "payments",
   "notifications",
   "integrations",
+  "planning",
+  "reporting",
 ];
 const configuration = { ...process.env, ...settings };
 const systemEnvironment = { ...process.env };
@@ -99,7 +101,7 @@ const launches = [...names, "gateway", "web"].map((name, index) => {
       ]),
     );
   if (name === "integrations")
-    Object.assign(env, select(["INTEGRATIONS_ENCRYPTION_KEY"]));
+    Object.assign(env, select(["INTEGRATIONS_ENCRYPTION_KEY", "PORTAL_INTERNAL_SECRET", "PUBLIC_APP_URL", "PUBLIC_GATEWAY_URL"]), { CLIENTS_URL: configuration.CLIENTS_URL || "http://127.0.0.1:4002" });
   if (name === "notifications") {
     Object.assign(
       env,
@@ -110,6 +112,9 @@ const launches = [...names, "gateway", "web"].map((name, index) => {
   if (name === "billing")
     env.SCHEDULING_URL =
       configuration.SCHEDULING_URL || "http://127.0.0.1:4003";
+  if (name === "planning") env.CLIENTS_URL = configuration.CLIENTS_URL || "http://127.0.0.1:4002";
+  if (name === "reporting") Object.assign(env, { PUBLIC_APP_URL: configuration.PUBLIC_APP_URL || "http://localhost:3000", PUBLIC_REPORTING_BASE_URL: `${configuration.PUBLIC_GATEWAY_URL || "http://localhost:8080"}/api/reporting` });
+  if (name === "reporting") for (const [service, port] of [["scheduling",4003],["learning",4004],["billing",4005],["clients",4002]]) env[`${service.toUpperCase()}_URL`] = configuration[`${service.toUpperCase()}_URL`] || `http://127.0.0.1:${port}`;
   if (name === "learning")
     env.UPLOAD_DIRECTORY = new URL(".local/uploads/", root).pathname;
   if (name === "gateway") {

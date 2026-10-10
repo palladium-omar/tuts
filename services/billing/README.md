@@ -96,3 +96,14 @@ first-day drafting. Fixtures are rolled back.
 
 `src/worker.ts` exports this domain as an independent Worker through the shared Nest runtime; `src/main.ts` remains the Node entrypoint. The service retains its own PostgreSQL database, signed caller context, tenant RLS and event contracts. Migrations are applied during deployment, outside requests. Worker secrets and bindings are supplied by the deployment configuration.
 Billing reconciliation uses the `SCHEDULING` service binding and forwards signed authorization with a 30-second deadline. The private runtime tick calls `MonthlyService.runAutomatic()`. Worker startup creates no polling timers; the central 15-minute cron drives automatic draft checks. Manual reconciliation and invoice actions remain request driven.
+
+
+## Scoped student financial history
+
+`GET /v1/portal/finance?studentId=<uuid>&limit=50&offset=0` requires the Billing entitlement, `billing.read`, and access to that student. It returns issued invoices, paginated recorded payments, counts and complete totals separated by currency. Drafts and payment credentials are excluded. Simulated allocations are labeled and never counted as real collections. Totals are all-time; the student report month does not redefine their period.
+
+Client merge events install a local alias, preserving historical invoice IDs and seller/payer snapshots. Alias rates are retained but disabled for staff review; the survivor's existing rate is preserved. Monthly drafting recognizes earlier invoices under the merged identity and retains billed-class review flags. A merge never silently changes a price or combines issued invoices.
+
+`billing.invoice-updated.v1` publishes revisioned invoice state after issue/payment allocation for Reporting. It contains IDs and monetary totals, without payer contact details. Reporting uses a scoped Billing reconciliation before showing real collection totals, because invoice paid amounts can contain explicitly simulated payments.
+
+Attendance `no_show` is accepted in the billing projection and is not billable under the current completed-classes policy. Monthly arrears remain unchanged: October 1 drafts September's completed classes.

@@ -25,7 +25,7 @@ export const updateSessionSchema = z
 export const listSessionsSchema = z
   .object({
     clientId: uuid.optional(),
-    status: z.enum(["scheduled", "cancelled", "completed"]).optional(),
+    status: z.enum(["scheduled", "cancelled", "completed", "no_show"]).optional(),
     limit: z.coerce.number().int().min(1).max(200).default(100),
   })
   .strict();

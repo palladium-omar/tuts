@@ -109,7 +109,7 @@ selected student. Listing filters every row to the actor's student scope.
 - `DELETE /v1/portal/invitations/:id?businessId=UUID` returns `{item:Invitation}` and invalidates the token. It is idempotent for an already revoked invitation. Accepted invitations use grant revocation instead.
 - `POST /v1/portal/accept` accepts `{businessId,token}` and returns `{item:{businessId,studentId,relationship,access:AccessGrant}}`. A valid browser session and trusted Origin are required. The signed-in account email must match the invited address after trimming and case normalization. Acceptance consumes the token and inserts the relationship grant, membership and directory entry atomically. Existing staff roles, scopes and permission overrides are preserved.
 - `GET /v1/portal/access?businessId=UUID&studentId=UUID` returns `{items:AccessGrant[]}`, active grants only, maximum 500. Without `studentId`, it lists the signed-in user's grants. With `studentId`, an authorized invitation manager may view all grants for that student; other users still see only their own. Requires `clients.read`, the Clients entitlement, and scope access when a student is supplied.
-- `DELETE /v1/portal/access/:id?businessId=UUID` returns `{item:AccessGrant}` and revokes that relationship without changing staff membership. It also invalidates pending invitations for the current recipient/student. It requires invitation management permission and the student's scope. Clients merge protection remains permanent after revocation.
+- `DELETE /v1/portal/access/:id?businessId=UUID` returns `{item:AccessGrant}` and revokes that relationship without changing staff membership. It also invalidates pending invitations for the recipient/student across current and historically accepted email addresses. It requires invitation management permission and the student's scope. Clients merge protection remains permanent after revocation.
 
 `Invitation` contains `{id,businessId,studentId,contactId,emailAddressId,
 recipientEmail,relationship,status,deliveryError,expiresAt,createdAt,updatedAt,
@@ -135,7 +135,7 @@ This prevents a merge from transferring an invitation or grant to another person
 Platform deduplicates pending invitations for the same business/student/recipient/
 relationship; an accepted invitation with an active grant is also deduplicated.
 A later invitation after expiry/revocation requires a new explicit staff action.
-Acceptance, grant revocation and issuance serialize by recipient/student; token
+Acceptance, grant revocation and issuance serialize by student, including invitations addressed to changed account emails; token
 consumption is row-locked, and revocation cannot be reversed by a racing old link.
 Every state change writes tenant-protected audit records and an outbox event in
 the same transaction. Events omit email addresses, token hashes and raw tokens.

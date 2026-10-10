@@ -18,12 +18,12 @@ registry and deployment tooling. Do not share database tables across services.
 | Clients | Students, related contacts and addresses, source identity mappings, groups, merge aliases | Platform, Scheduling, Learning, Billing, Planning, Reporting |
 | Scheduling | Provider booking projection and explicit attendance | Billing, Reporting |
 | Learning | Assignments, submissions, resources, selected Google Docs references | Portal, Planning, Reporting |
-| Billing | Rates, prior-month class billing, invoices, product/order entitlement records | Payments, Reporting |
+| Billing | Rates, prior-month class billing, invoices (product/order entitlements remain future work) | Payments, Reporting |
 | Payments | Provider connections, verified payment attempts and transactions | Billing, Reporting |
 | Notifications | Delivery attempts and outcomes; sender adapters | Platform, staff |
-| Integrations | Calendar/source adapters, synchronization, attribution destinations | Scheduling, Clients, Reporting |
+| Integrations | Calendar/source adapters and synchronization | Scheduling, Clients, Reporting |
 | Planning | Student boards, columns, cards, templates and deadline provenance | Portal, Reporting |
-| Reporting | Rebuildable summaries and first-party active-time aggregates | Tracker, business dashboard, permitted analytics exports |
+| Reporting | Rebuildable summaries, first-party activity, tagged attribution links and exports | Tracker, business dashboard, permitted analytics exports |
 
 Tutor and student screens compose these services through the gateway. A portal
 is a presentation and authorization surface, not a second copy of the databases.
@@ -191,11 +191,15 @@ deadline timezone and official/personal milestone type. Only verified applicable
 dates are populated. Unknown dates remain visibly unverified; no fabricated
 deadlines. User-edited dates are preserved when template updates are reviewed.
 
-Capture allowed campaign/UTM attribution separately from identity. Reporting
-joins verified booking/payment events to attribution by an opaque correlation
-identifier. Mapping external product purchases to lesson credits requires an
-explicit product/student association. Refunds and duplicate webhook deliveries
-must not inflate revenue or entitlements.
+Capture allowed campaign/UTM attribution separately from identity. This release
+stores tagged Cal.com/Tuts links, daily request counts and explicit staff-selected
+student associations. These associations do not establish conversion causality.
+Reporting exposes selected student summaries and permission-gated financial CSVs;
+no data is transmitted to Beacons. Public redirects use an opaque 256-bit token,
+allowlisted destinations, no cookies/IP storage and no-cache/no-referrer headers.
+A future verified provider correlation contract can match conversions; external
+product-to-lesson-credit mappings and refund entitlement adjustments remain
+unimplemented until that contract exists.
 
 Beacons creator accounts and Beacons for Brands are distinct products. Never
 advertise unsupported Beacons conversion ingestion as connected. Offer tracked

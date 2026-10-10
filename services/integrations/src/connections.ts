@@ -1,6 +1,7 @@
-import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import {
   BadGatewayException,
+  BadRequestException,
   Body,
   ConflictException,
   Controller,
@@ -14,6 +15,7 @@ import {
   Param,
   Patch,
   Post,
+  Req,
   UnauthorizedException,
 } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
@@ -26,6 +28,7 @@ import {
   parseBody,
   Public,
   Roles,
+  Permissions,
 } from "@palladium/service-kit";
 import type { RequestContext } from "@palladium/contracts";
 import type { PoolClient } from "pg";
@@ -42,6 +45,7 @@ import {
   pull,
   type SyncData,
   validateAccount,
+  canonicalCalBooking,
 } from "./providers.js";
 const uuid = z.string().uuid();
 const patchSchema = z
@@ -69,6 +73,7 @@ type Row = {
   display_name: string;
   credentials_encrypted: string | null;
   webhook_secret_hash: string | null;
+  cal_webhook_secret_encrypted: string | null;
   config: Config;
   account: Record<string, unknown>;
   status: string;
@@ -101,6 +106,9 @@ function view(row: Row) {
     dispatchEntitlements: row.dispatch_entitlements,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
+    calWebhookConfigured: Boolean(row.cal_webhook_secret_encrypted),
+    ...(row.provider === 'calcom' && row.cal_webhook_secret_encrypted
+      ? {webhookPath: `/api/integrations/hooks/${row.business_id}/${row.id}`} : {}),
     ...(row.provider === "form_webhook"
       ? { webhookPath: `/api/integrations/hooks/${row.business_id}/${row.id}` }
       : {}),
@@ -306,7 +314,7 @@ export class ConnectionsService {
     return this.db.withTenant(ctx.businessId, async (tx) => {
       const row = (
         await tx.query<Row>(
-          `UPDATE integration_connections SET status='disconnected',credentials_encrypted=NULL,webhook_secret_hash=NULL,next_sync_at=NULL,last_error=NULL,updated_at=now() WHERE business_id=$1 AND id=$2 RETURNING *`,
+          `UPDATE integration_connections SET status='disconnected',credentials_encrypted=NULL,webhook_secret_hash=NULL,cal_webhook_secret_encrypted=NULL,next_sync_at=NULL,last_error=NULL,updated_at=now() WHERE business_id=$1 AND id=$2 RETURNING *`,
           [ctx.businessId, id],
         )
       ).rows[0];
@@ -466,9 +474,12 @@ export class ConnectionsService {
     id: string,
     authorization: unknown,
     body: unknown,
+    calSignature?: unknown,
+    rawBody?: Buffer,
   ) {
     parseBody(uuid, businessId);
     parseBody(uuid, id);
+    if (calSignature !== undefined) return this.receiveCal(businessId, id, calSignature, rawBody);
     const secret =
       typeof authorization === "string" && authorization.startsWith("Bearer ")
         ? authorization.slice(7)
@@ -518,6 +529,68 @@ export class ConnectionsService {
         [businessId, id, JSON.stringify(counts)],
       );
       return { accepted: true, ...counts };
+    });
+  }
+
+  async configureCalWebhook(ctx: RequestContext, id: string) {
+    parseBody(uuid,id);
+    const secret=randomBytes(32).toString('base64url');
+    return this.db.withTenant(ctx.businessId,async tx=>{
+      const row=(await tx.query<Row>('SELECT * FROM integration_connections WHERE id=$1 FOR UPDATE',[id])).rows[0];
+      if(!row || row.provider!=='calcom' || row.status==='disconnected') throw new NotFoundException('Active Cal.com connection not found');
+      const updated=(await tx.query<Row>('UPDATE integration_connections SET cal_webhook_secret_encrypted=$2,dispatch_entitlements=$3,updated_at=now() WHERE id=$1 RETURNING *',
+        [id,encrypt({token:secret},ctx.businessId),ctx.entitlements])).rows[0]!;
+      return {item:view(updated),webhookSecret:secret,webhookPath:`/api/integrations/hooks/${ctx.businessId}/${id}`,
+        registered:false,registration:'manual',triggers:['BOOKING_CREATED','BOOKING_CANCELLED','BOOKING_RESCHEDULED','BOOKING_REJECTED','BOOKING_REQUESTED','BOOKING_NO_SHOW_UPDATED']};
+    });
+  }
+
+  private async receiveCal(businessId:string,id:string,signature:unknown,rawBody?:Buffer) {
+    if(typeof signature!=='string' || !/^[a-fA-F0-9]{64}$/.test(signature) || !rawBody || rawBody.byteLength>1024*1024)
+      throw new UnauthorizedException('Invalid Cal.com webhook signature');
+    return this.db.withTenant(businessId,async tx=>{
+      await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[`integrations:${businessId}:${id}`]);
+      const row=(await tx.query<Row>('SELECT * FROM integration_connections WHERE id=$1 FOR UPDATE',[id])).rows[0];
+      if(!row || row.provider!=='calcom' || row.status==='disconnected' || !row.cal_webhook_secret_encrypted)
+        throw new UnauthorizedException('Invalid Cal.com webhook signature');
+      const secret=decrypt(row.cal_webhook_secret_encrypted,businessId).token;
+      if(!secret) throw new UnauthorizedException('Invalid Cal.com webhook signature');
+      const expected=createHmac('sha256',secret).update(rawBody).digest();
+      if(!timingSafeEqual(expected,Buffer.from(signature,'hex'))) throw new UnauthorizedException('Invalid Cal.com webhook signature');
+      if(!row.dispatch_entitlements.includes('integrations') || !row.dispatch_entitlements.includes('scheduling'))
+        throw new ForbiddenException('Calendar synchronization features are unavailable');
+      let body:unknown;
+      try {body=JSON.parse(rawBody.toString('utf8'));} catch {throw new BadRequestException('Invalid Cal.com webhook payload');}
+      const schema=z.object({triggerEvent:z.string().max(80),createdAt:z.string().datetime({offset:true}),payload:z.object({
+        uid:z.string().min(1).max(128).optional(),bookingUid:z.string().min(1).max(128).optional(),rescheduleUid:z.string().max(128).optional(),
+      }).refine(payload=>Boolean(payload.uid||payload.bookingUid),'A booking UID is required').optional()});
+      const parsed=schema.safeParse(body);
+      if(!parsed.success) throw new BadRequestException('Invalid Cal.com webhook payload');
+      const timestamp=Date.parse(parsed.data.createdAt);
+      if(timestamp>Date.now()+5*60_000) throw new BadRequestException('Cal.com webhook timestamp is in the future');
+      const receipt=await tx.query(`INSERT INTO cal_webhook_receipts(business_id,connection_id,payload_hash,trigger_event,provider_created_at)
+        VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING RETURNING payload_hash`,
+        [businessId,id,createHash('sha256').update(rawBody).digest('hex'),parsed.data.triggerEvent,parsed.data.createdAt]);
+      if(!receipt.rowCount) return {accepted:true,duplicate:true,applied:false};
+      if(timestamp<Date.now()-7*86400000) return {accepted:true,ignored:'stale',applied:false};
+      const supported=['BOOKING_CREATED','BOOKING_CANCELLED','BOOKING_RESCHEDULED','BOOKING_REJECTED','BOOKING_REQUESTED','BOOKING_NO_SHOW_UPDATED'];
+      if(!supported.includes(parsed.data.triggerEvent) || !parsed.data.payload)
+        return {accepted:true,ignored:'unsupported',applied:false};
+      // Signed payloads identify an event, not a Tuts student. Re-fetch canonical
+      // provider state to avoid applying stale delivered snapshots or metadata.
+      const credentials=row.credentials_encrypted ? decrypt(row.credentials_encrypted,businessId) : {};
+      const snapshots=[];
+      let reconciliationQueued=false;
+      const bookingUid=parsed.data.payload.uid??parsed.data.payload.bookingUid!;
+      for(const uid of [...new Set([bookingUid,...(parsed.data.payload.rescheduleUid ? [parsed.data.payload.rescheduleUid] : [])])]) {
+        try {
+          const booking=credentials.token ? await canonicalCalBooking(credentials.token,uid,row.config,row.account) : null;
+          if(booking) snapshots.push(booking); else reconciliationQueued=true;
+        } catch {reconciliationQueued=true;}
+      }
+      if(snapshots.length) await this.publish(tx,row,{contacts:[],sessions:snapshots,truncated:false});
+      await tx.query('UPDATE integration_connections SET last_attempt_at=now(),next_sync_at=CASE WHEN $2 THEN now() ELSE next_sync_at END,updated_at=now() WHERE id=$1',[id,reconciliationQueued]);
+      return {accepted:true,duplicate:false,applied:snapshots.length>0,reconciliationQueued};
     });
   }
   async poll() {
@@ -594,6 +667,10 @@ export class ConnectionsController {
   ) {
     return this.service.sync(ctx, id);
   }
+  @Roles('owner','admin') @Permissions('integrations.manage') @Post(':id/calcom-webhook')
+  configureCalWebhook(@CurrentContext() ctx:RequestContext,@Param('id') id:string) {
+    return this.service.configureCalWebhook(ctx,id);
+  }
   @Roles("owner", "admin") @Delete(":id") disconnect(
     @CurrentContext() ctx: RequestContext,
     @Param("id") id: string,
@@ -612,7 +689,9 @@ export class FormHooksController {
     @Param("connectionId") id: string,
     @Headers("authorization") authorization: unknown,
     @Body() body: unknown,
+    @Headers('x-cal-signature-256') calSignature:unknown,
+    @Req() req:{rawBody?:Buffer},
   ) {
-    return this.service.receive(businessId, id, authorization, body);
+    return this.service.receive(businessId, id, authorization, body,calSignature,req.rawBody);
   }
 }

@@ -1,8 +1,8 @@
 # Tuts
 
-Tuts is a composable tutoring-business workspace. Its local preview brings together eight independently running domain services, each with its own API, migrations, and PostgreSQL database. PostgreSQL row-level security, signed gateway context, and RabbitMQ provide the service and tenant boundaries.
+Tuts is a composable tutoring-business workspace. Its local preview brings together ten independently running domain services, each with its own API, migrations, and PostgreSQL database. PostgreSQL row-level security, signed gateway context, and RabbitMQ provide the service and tenant boundaries.
 
-The current product is a staff web app with a local preview, a container deployment configuration, and a Cloudflare runtime adapter. The hosted app is available at [tuts.palladiumscholars.com](https://tuts.palladiumscholars.com), with page visits to [tuts-palladium.pages.dev](https://tuts-palladium.pages.dev) redirecting to the custom domain. Live checks confirmed the custom hostname homepage, health endpoint, unauthenticated session endpoint, and canonical redirect. Hosted signup/sign-in and authenticated workflows remain unverified. See the [Cloudflare deployment guide](docs/cloudflare-deployment.md), [domain setup](docs/cloudflare-domain.md), and [agent tooling setup](docs/agent-setup.md). Architecture documents describe the contracts and extension workflow for this system; they include planned capabilities as well as implemented ones. The status list below is the source of truth for what is delivered today.
+The current product is staff and student web apps with a local preview, a container deployment configuration, and a Cloudflare runtime adapter. The hosted app is available at [tuts.palladiumscholars.com](https://tuts.palladiumscholars.com), with page visits to [tuts-palladium.pages.dev](https://tuts-palladium.pages.dev) redirecting to the custom domain. Live checks confirmed the custom hostname homepage, health endpoint, unauthenticated session endpoint, and canonical redirect. Hosted signup/sign-in and authenticated workflows remain unverified. See the [Cloudflare deployment guide](docs/cloudflare-deployment.md), [domain setup](docs/cloudflare-domain.md), and [agent tooling setup](docs/agent-setup.md). Architecture documents describe the contracts and extension workflow for this system; they include planned capabilities as well as implemented ones. The status list below is the source of truth for what is delivered today.
 
 The original local account and four owned workspaces have been restored to the hosted databases, including CRM, sessions, learning and billing records. See [data migration and recovery](docs/data-migration.md) for the backup, maintenance and integrity checks. Existing passwords were preserved; old browser sessions were not transferred.
 
@@ -10,26 +10,28 @@ Password recovery now includes a sign-in link, request/reset pages, expiring sin
 
 ## What works today
 
-| Area          | Delivered                                                                                                                                                                               | Not delivered yet                                                                                            |
-| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| Platform      | Sign-in, business workspaces, an owner membership created with each workspace, editable business profile and address, logo, four-color workspace palette                                | Inviting or adding other staff, student/parent portal, production subscription administration                |
-| Clients       | Tenant-scoped student/payer CRM; custom typed columns, filters, sorting and bulk selection; mapped CSV/`.xlsx` import; connected-source intake and email/WhatsApp permissions           | Student/parent portal access                                                                                 |
-| Scheduling    | Month and week calendars with synced Calendly/Cal.com bookings, date navigation, daily agenda, and booking details; legacy local session APIs remain                                    | UI-based local session creation/editing and provider booking actions; student self-service booking           |
-| Learning      | Calendar/date-time picker; staff assignments, progress records, and private disk/R2 resource uploads up to 20 MiB                                                               | Student/parent portal access; hosted R2 upload/download flow unverified                                                        |
-| Billing       | Monthly arrears drafts from completed classes, student rates, optional draft automation, revenue/class dashboard; staff invoice creation, issue and allocation with seller profile/logo | Automatic issuance/charging, fixed packages, taxes and hourly pricing                                        |
-| Payments      | Stripe test-account connections, hosted test payment links, verified server reconciliation; local sandbox simulation                                                                    | Production Stripe Connect/OAuth, PayPal, bank providers and signed external webhooks; no real money is moved |
-| Notifications | Email (SMTP/Resend), WhatsApp template and AI drafting connections; recipient previews, permission checks, approved durable campaigns; local delivery disabled                          | Provider delivery/read receipts, SMS, student portal; actual outbound delivery not exercised                 |
-| Integrations  | Token-based Calendly/Cal.com polling, HTTPS JSON contact pulls, authenticated form webhooks, durable CRM/session sync                                                                   | OAuth app connections; businesses must supply credentials and verify their own connection before use         |
+| Area | Implemented | Limits / provider setup |
+| --- | --- | --- |
+| Platform | Account recovery, business branding, scoped capability policy, invitations and student/guardian access | System email requires a configured sender; enterprise licensing/admin is deferred |
+| Clients | Editable CRM, custom columns/imports, multiple related contacts/addresses, duplicate review/merges, groups and student cards | Name matches need review; portal-protected records cannot merge without a future revoke/unlock workflow |
+| Scheduling | Calendar, Cal.com/Calendly sync, signed Cal.com webhook, explicit attendance and no-show status | Tutor configures booking link/API connection; webhook registration remains manual; ambiguous student matches require review |
+| Learning | Private uploads/downloads, homework submission/review, student portal, selected Google Docs references | Google sharing remains external; no Google OAuth document creation |
+| Billing | Prior-month completed-class billing, scoped invoice/payment history, immutable issued snapshots and merge aliases | No automatic real charges; existing billing rules retained |
+| Payments | Existing Stripe test adapters and local simulation, clearly separate from confirmed collections | Live Stripe/PayPal/bank provider activation remains separate |
+| Notifications | Durable campaigns and system invite/recovery sender adapter | Automatic system email unavailable until real sender configured; outbound campaigns disabled by default |
+| Integrations | Calendar/contact connectors, safe student booking links and provider reconciliation | Customer credentials required; no new OAuth registrations |
+| Planning | Multiple student boards, columns/cards/checklists, explicit sharing, versioned UCAS/Common App/Bocconi/Campus France templates | Deadlines depend on year/program/round/country; unknown dates require confirmation |
+| Reporting | Scoped monthly student summaries, coverage/asOf, estimated active time, tagged Beacons links and CSV exports | No external-document time, verified click-to-purchase matching or direct Beacons conversion writes |
 
 The [Cloudflare deployment guide](docs/cloudflare-deployment.md) describes separate private service Workers, PostgreSQL databases, Queues and private R2 uploads. Its adapter preserves the HTTP and event contracts. SMTP, arbitrary contact API pulls and custom AI endpoints require an additional safe egress adapter on Cloudflare; Cal.com, Calendly, Resend and WhatsApp use fixed provider endpoints. Production payments remain unavailable, and outbound messaging is disabled by default. The hosted homepage, gateway health, unauthenticated session endpoint, and canonical redirect respond successfully; hosted signup/sign-in and authenticated workflows remain unverified. The earlier [Google Cloud container configuration](docs/deployment.md) remains an alternative and has not been provisioned.
 
-OAuth app connections, production payment providers, country-specific bank integrations, student/parent portal access and paid subscription administration are future work. Provider integrations require each business to supply its own credentials; their live behavior has not been verified as part of this implementation. See [connector protocols](docs/architecture/connectors.md), [payment provider contracts](docs/architecture/payments.md), and the [service status list](#what-works-today).
+OAuth app connections, production payment providers, country-specific bank integrations, paid subscription administration are future work. Provider integrations require each business to supply its own credentials; their live behavior has not been verified as part of this implementation. See [connector protocols](docs/architecture/connectors.md), [payment provider contracts](docs/architecture/payments.md), and the [service status list](#what-works-today).
 
 ## Architecture
 
 ```mermaid
 flowchart TB
-  Web[Tuts staff web app] --> Gateway[HTTP gateway]
+  Web[Tuts staff and student apps] --> Gateway[HTTP gateway]
   Gateway --> Platform[Platform :4001<br/>platform database]
   Gateway --> Clients[Clients :4002<br/>clients database]
   Gateway --> Scheduling[Scheduling :4003<br/>scheduling database]
@@ -38,6 +40,10 @@ flowchart TB
   Gateway --> Payments[Payments :4006<br/>payments database]
   Gateway --> Notifications[Notifications :4007<br/>notifications database]
   Gateway --> Integrations[Integrations :4008<br/>integrations database]
+  Gateway --> Planning[Planning :4009<br/>planning database]
+  Gateway --> Reporting[Reporting :4010<br/>reporting database]
+  Rabbit -. projections .-> Reporting
+  Rabbit -. student identity .-> Planning
   Platform -. business profile .-> Rabbit
   Integrations -. contacts and sessions .-> Rabbit
   Rabbit -. CRM projection .-> Clients
@@ -76,9 +82,9 @@ pnpm build
 pnpm dev
 ```
 
-`pnpm setup:local` creates an ignored `.env` with local credentials and signing keys, and adds missing settings while preserving existing values. Keep it on your machine. Account signup requires an 8–128 character password and a confirmation in the UI; there are no composition rules. Creating a business workspace creates its owner membership. `pnpm infra:up` starts the local PostgreSQL server and RabbitMQ. `pnpm dev` runs the eight services, gateway, and web app; leave it running while using the preview.
+`pnpm setup:local` creates an ignored `.env` with local credentials and signing keys, and adds missing settings while preserving existing values. Keep it on your machine. Account signup requires an 8–128 character password and a confirmation in the UI; there are no composition rules. Creating a business workspace creates its owner membership. `pnpm infra:up` starts the local PostgreSQL server and RabbitMQ. `pnpm dev` runs the ten services, gateway, and web app; leave it running while using the preview.
 
-For an existing checkout, use the same commands after pulling the update. Run `pnpm install` to update the workspace, then `pnpm setup:local` to add the integrations encryption key and database credential while preserving existing local settings. After starting infrastructure, run `docker compose exec -T postgres sh /tmp/palladium-init.sh` once; this idempotently provisions the new integrations role and database without resetting existing databases. Then build and start the development processes:
+For an existing checkout, use the same commands after pulling the update. Run `pnpm install` to update the workspace, then `pnpm setup:local` to add missing service keys and database credentials while preserving existing local settings. After starting infrastructure, run `docker compose exec -T postgres sh /tmp/palladium-init.sh` once; this idempotently provisions new service roles and databases without resetting existing databases. Then build and start the development processes:
 
 ```sh
 pnpm install
@@ -130,4 +136,4 @@ The [live UI review](docs/ux-review.md) records usability fixes, manually exerci
 
 ## Stack
 
-TypeScript, Next.js and React, eight NestJS service processes, PostgreSQL with a separate database and restricted role per service, RabbitMQ, and Docker Compose for local infrastructure. The local Compose environment shares one PostgreSQL server while keeping the service databases and credentials separate. The Cloudflare target uses private Workers, Neon PostgreSQL, Queues and R2 while retaining the same domain boundaries. Payment simulation is limited to the local development environment.
+TypeScript, Next.js and React, ten NestJS service processes, PostgreSQL with a separate database and restricted role per service, RabbitMQ, and Docker Compose for local infrastructure. The local Compose environment shares one PostgreSQL server while keeping the service databases and credentials separate. The Cloudflare target uses private Workers, Neon PostgreSQL, Queues and R2 while retaining the same domain boundaries. Payment simulation is limited to the local development environment.

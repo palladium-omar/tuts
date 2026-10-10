@@ -1,6 +1,6 @@
 # Scheduling
 
-This service owns local session records and a separate read-only external session projection. Imported Calendly/Cal.com appointments are delivered through `integrations.sessions-synced.v1`, batch validated, tenant scoped, inbox deduplicated, and upserted by connection/external ID. Later event timestamps take precedence over older replayed updates.
+This service owns local session records and a separate read-only external session projection. Imported Calendly/Cal.com appointments are delivered through `integrations.sessions-synced.v1`, batch validated, tenant scoped, inbox deduplicated, and upserted by connection/external ID. Provider update/observation watermarks take precedence over older replayed updates; legacy deliveries cannot overwrite a modern projection.
 
 `GET /v1/external-sessions` accepts optional `status`, `connectionId`, `from`, `to`, `limit`, and `offset`. Owner/admin users see the business projection; tutors see connections created under their own user ID. Items contain provider, connectionId, externalId, attendeeName, attendeeEmail, bookingUrl and `readOnly:true`. The web calendar reads this projection and uses bookingUrl for external navigation. It must not call the local edit/cancel/complete routes for these external IDs.
 
@@ -32,7 +32,7 @@ session state; external elapsed dates never imply completion. Historical source
 rows are backfilled transactionally with class snapshot outbox events.
 
 `PATCH /v1/class-ledger/:source/:id` accepts
-`{clientId?:uuid|null,status:'completed'|'cancelled'|'scheduled'}` for staff under
+`{clientId?:uuid|null,status:'completed'|'cancelled'|'scheduled'|'no_show'}` for staff under
 the scheduling entitlement. Internal records require a student ID; switching back
 to scheduled enforces the original overlap constraints and returns 409 on conflict.
 External annotations persist in a separate forced-RLS table and override attendance
@@ -55,3 +55,48 @@ revision ordering, tenant isolation, transactional backfill and overlap 409s.
 ## Cloudflare runtime
 
 `src/worker.ts` exports this domain as an independent Worker through the shared Nest runtime; `src/main.ts` remains the Node entrypoint. The service retains its own PostgreSQL database, signed caller context, tenant RLS and event contracts. Migrations are applied during deployment, outside requests. Worker secrets and bindings are supplied by the deployment configuration.
+
+## Student scope, attendance and merge aliases
+
+Apply `004_portal_attendance.sql`. Every student/guardian read uses signed student
+IDs; attendee email and editable provider metadata never establish access. Staff
+routes retain their role checks and action capabilities. A tutor restricted to
+student scope sees only mapped classes within those grants; unassociated external
+bookings require explicit staff review before appearing in a portal.
+
+- `GET /v1/portal/sessions` accepts optional `studentId`, paired `from`/`to` offset ISO timestamps, `limit` (1–200, default 100) and `offset` (0–100000). A supplied range must be positive and at most 93 days. Without a range it covers the previous 31 days through the next 62 days. It returns `{items,total,limit,offset,from,to}` in start-time order. Every item is read-only.
+- `GET /v1/portal/classes` accepts required `studentId`, `month:YYYY-MM`, optional `timeZone` (default UTC), `limit` and `offset`; returns `{items,total,limit,offset,month,timeZone}`. Month boundaries use the requested business timezone. Current sources are reconciled transactionally before reading the ledger, including retained history after disconnect. An oversized range/month above 10000 records is rejected rather than silently claiming complete coverage.
+- `POST /v1/sessions/:id/no-show` marks a scheduled local session explicitly `no_show`, idempotent for the same status. Requires staff role, `scheduling.write`, and the student's grant. Existing complete/cancel routes enforce the same scope checks.
+- `PATCH /v1/class-ledger/:source/:id` now accepts `no_show` alongside completed/cancelled/scheduled. Staff association and attendance are explicit, tenant-scoped and preserved across provider sync. External attendance annotations retain `updated_by` and `updated_at` provenance.
+
+Portal class/session items contain `{id,classId,source,title,clientId,studentId,
+assignedTutorId,connectionId,startsAt,endsAt,status,providerStatus,attendanceSource,
+revision,updatedAt,bookingUrl,readOnly:true}`. `clientId` and `studentId` are the
+same canonical student UUID. Attendee email is excluded from portal responses.
+Status is `scheduled`, `completed`, `cancelled`, or `no_show`; attendance source is
+`session`, `tutor`, or `provider`. Financial consumers continue billing only
+explicitly completed classes; no-show charging is not introduced here.
+
+The revisioned `scheduling.class-updated.v1` snapshot retains all existing fields
+and additionally includes `{studentId,title,assignedTutorId,connectionId,
+providerStatus,attendanceSource}`. Unchanged snapshots do not increment revisions.
+External projection updates use provider `updatedAt` or the observation watermark
+from Integrations. Equal/older revisions do not replace current state. Explicit
+class annotations remain authoritative. Legacy elapsed-time `completed` imports
+are presented as scheduled unless a tutor explicitly recorded completion, and
+reconciliation publishes a correcting ledger snapshot. Meeting-ended hooks and
+past booking dates never imply attendance.
+
+`clients.student-merged.v1` is consumed into a forced-RLS alias projection. Reads
+and class events resolve canonical student IDs; underlying scheduled session keys
+are preserved because a blind remap may violate student/tutor overlap exclusions.
+New bookings and edited/reopened scheduled classes additionally check canonical
+student overlap under the existing tenant scheduling lock. Merge processing
+updates the ledger's association and revision atomically, without changing class
+IDs or attendance and without moving a portal grant. Cyclic/stale aliases are
+rejected/ignored. Clients independently forbids merging portal-protected students.
+
+Builds/typechecks validate source compilation only. No tests, live bookings,
+provider registrations or external messages were run during this implementation.
+
+Revision precedence: an observed polling timestamp cannot replace a provider `updatedAt` revision. Provider snapshots replace observed/legacy state, then only strictly newer provider revisions apply. Scoped tutors can associate an unmatched external booking only if they own its connected account and have the target student grant; business-wide staff may perform the documented review association. Attendee email never grants student authorization.

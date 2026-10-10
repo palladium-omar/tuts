@@ -7,8 +7,8 @@ import { checkServerIdentity } from 'node:tls';
 import pg from 'pg';
 
 export const root = fileURLToPath(new URL('../', import.meta.url));
-export const serviceNames = ['platform', 'clients', 'scheduling', 'learning', 'billing', 'payments', 'notifications', 'integrations'];
-export const deployOrder = ['platform', 'clients', 'scheduling', 'learning', 'payments', 'integrations', 'billing', 'notifications', 'gateway'];
+export const serviceNames = ['platform', 'clients', 'scheduling', 'learning', 'billing', 'payments', 'notifications', 'integrations', 'planning', 'reporting'];
+export const deployOrder = ['platform', 'clients', 'scheduling', 'learning', 'payments', 'integrations', 'billing', 'notifications', 'planning', 'reporting', 'gateway'];
 const directory = join(root, '.cloudflare');
 const deploymentPath = join(directory, 'deployment.json');
 const secretsPath = join(directory, 'secrets.json');
@@ -105,7 +105,7 @@ export function createConfigs(configInput, subscriptions, projectRoot = root) {
     send_metrics: false,
     minify: true,
     // Explicit production variables are retained alongside Worker secrets.
-    vars: { TUTS_RUNTIME: 'cloudflare', NODE_ENV: 'production', PUBLIC_APP_URL: config.publicUrl, PUBLIC_GATEWAY_URL: config.publicUrl, INITIAL_BUSINESS_ENTITLEMENTS: featureNames.join(','), ALLOW_OUTBOUND_DELIVERY: 'false', ALLOW_SANDBOX_PAYMENTS: 'false' },
+    vars: { TUTS_RUNTIME: 'cloudflare', NODE_ENV: 'production', PUBLIC_APP_URL: config.publicUrl, PUBLIC_GATEWAY_URL: config.publicUrl, PUBLIC_REPORTING_BASE_URL: `${config.publicUrl}/api/reporting`, INITIAL_BUSINESS_ENTITLEMENTS: featureNames.join(','), ALLOW_OUTBOUND_DELIVERY: 'false', ALLOW_SANDBOX_PAYMENTS: 'false' },
   };
   const output = {};
   for (const name of serviceNames) {
@@ -117,7 +117,9 @@ export function createConfigs(configInput, subscriptions, projectRoot = root) {
       ...(['platform', 'notifications'].includes(name) ? { vars: { ...common.vars, AUTH_MAIL_ENABLED: config.authMailEnabled ? 'true' : 'false' } } : {}),
       queues: { ...(producers.length ? { producers } : {}), ...(consumes ? { consumers: [{ queue: queueName(config, name), max_batch_size: 5, max_batch_timeout: 5, max_retries: 5, dead_letter_queue: queueName(config, name, true) }] } : {}) },
       r2_buckets: [{ binding: 'EVENT_PAYLOADS', bucket_name: `${config.prefix}-event-payloads` }, ...(name === 'learning' ? [{ binding: 'UPLOADS', bucket_name: `${config.prefix}-uploads` }] : [])],
+      ...(name === 'reporting' ? { services: ['scheduling', 'learning', 'billing', 'clients'].map(service => ({ binding: service.toUpperCase(), service: `${config.prefix}-${service}` })) } : {}),
       ...(name === 'billing' ? { services: [{ binding: 'SCHEDULING', service: `${config.prefix}-scheduling` }] } : {}),
+      ...(['integrations', 'planning'].includes(name) ? { services: [{ binding: 'CLIENTS', service: `${config.prefix}-clients` }] } : {}),
       ...(name === 'notifications' ? { services: [{ binding: 'CLIENTS', service: `${config.prefix}-clients` }] } : {}),
       ...(name === 'platform' ? { services: [{ binding: 'NOTIFICATIONS', service: `${config.prefix}-notifications` }, { binding: 'CLIENTS', service: `${config.prefix}-clients` }] } : {}),
     };
@@ -196,7 +198,7 @@ export function secretsFor(name, secrets) {
   if (!value.DATABASE_URL) fail(`Missing ${name} database URL; run migrate before deploy`);
   if (name === 'platform') Object.assign(value, { PLATFORM_INTERNAL_SECRET: secrets.PLATFORM_INTERNAL_SECRET, BETTER_AUTH_SECRET: secrets.BETTER_AUTH_SECRET });
   if (['platform', 'notifications'].includes(name)) value.AUTH_MAIL_INTERNAL_SECRET = secrets.AUTH_MAIL_INTERNAL_SECRET;
-  if (['platform', 'clients'].includes(name)) value.PORTAL_INTERNAL_SECRET = secrets.PORTAL_INTERNAL_SECRET;
+  if (['platform', 'clients', 'integrations'].includes(name)) value.PORTAL_INTERNAL_SECRET = secrets.PORTAL_INTERNAL_SECRET;
   if (name === 'notifications') for (const key of ['AUTH_MAIL_PROVIDER', 'AUTH_MAIL_FROM', 'AUTH_MAIL_API_KEY']) {
     if (typeof secrets[key] === 'string' && secrets[key]) value[key] = secrets[key];
   }

@@ -8,8 +8,11 @@ import {
   EventBus,
   parseBody,
   Roles,
+  Permissions,
+  StudentScoped,
 } from "@palladium/service-kit";
 import type { RequestContext } from "@palladium/contracts";
+import {isStudentScope} from "./student-scope.js";
 import { z } from "zod";
 const session = z
   .object({
@@ -17,7 +20,9 @@ const session = z
     title: z.string().min(1).max(200),
     startsAt: z.string().datetime(),
     endsAt: z.string().datetime(),
-    status: z.enum(["scheduled", "completed", "cancelled"]),
+    status: z.enum(["scheduled", "completed", "cancelled", "no_show"]),
+    providerUpdatedAt: z.string().datetime().optional(),
+    revisionSource: z.enum(['provider','observed']).optional(),
     attendeeName: z.string().max(200).optional(),
     attendeeEmail: z.string().email().max(254).optional(),
     bookingUrl: z
@@ -45,7 +50,7 @@ const disconnected = z.object({ connectionId: z.string().uuid() });
 const maximumRangeMs = 93 * 24 * 60 * 60 * 1000;
 const filter = z
   .object({
-    status: z.enum(["scheduled", "completed", "cancelled"]).optional(),
+    status: z.enum(["scheduled", "completed", "cancelled", "no_show"]).optional(),
     connectionId: z.string().uuid().optional(),
     from: z.string().datetime({ offset: true }).optional(),
     to: z.string().datetime({ offset: true }).optional(),
@@ -96,7 +101,10 @@ export class ExternalSessionsService {
         if (revoked.rowCount) return;
         for (const item of data.sessions) {
           const changed = await tx.query(
-            `INSERT INTO external_sessions(id,business_id,connection_id,provider,external_id,owner_user_id,title,starts_at,ends_at,status,attendee_name,attendee_email,booking_url,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT(business_id,connection_id,external_id) DO UPDATE SET title=EXCLUDED.title,starts_at=EXCLUDED.starts_at,ends_at=EXCLUDED.ends_at,status=EXCLUDED.status,attendee_name=EXCLUDED.attendee_name,attendee_email=EXCLUDED.attendee_email,booking_url=EXCLUDED.booking_url,updated_at=EXCLUDED.updated_at WHERE external_sessions.updated_at<=EXCLUDED.updated_at RETURNING id`,
+            `INSERT INTO external_sessions(id,business_id,connection_id,provider,external_id,owner_user_id,title,starts_at,ends_at,status,attendee_name,attendee_email,booking_url,updated_at,provider_updated_at,revision_source) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) ON CONFLICT(business_id,connection_id,external_id) DO UPDATE SET title=EXCLUDED.title,starts_at=EXCLUDED.starts_at,ends_at=EXCLUDED.ends_at,status=EXCLUDED.status,attendee_name=EXCLUDED.attendee_name,attendee_email=EXCLUDED.attendee_email,booking_url=EXCLUDED.booking_url,updated_at=EXCLUDED.updated_at,provider_updated_at=EXCLUDED.provider_updated_at,revision_source=EXCLUDED.revision_source
+              WHERE (EXCLUDED.revision_source='provider' AND (external_sessions.revision_source<>'provider' OR external_sessions.provider_updated_at<EXCLUDED.provider_updated_at))
+                 OR (EXCLUDED.revision_source='observed' AND external_sessions.revision_source IN ('legacy','observed') AND (external_sessions.revision_source='legacy' OR external_sessions.provider_updated_at<EXCLUDED.provider_updated_at))
+                 OR (EXCLUDED.revision_source='legacy' AND external_sessions.revision_source='legacy' AND external_sessions.updated_at<EXCLUDED.updated_at) RETURNING id`,
             [
               randomUUID(),
               event.businessId,
@@ -107,11 +115,13 @@ export class ExternalSessionsService {
               item.title,
               item.startsAt,
               item.endsAt,
-              item.status,
+              item.status === 'completed' ? 'scheduled' : item.status,
               item.attendeeName ?? null,
               item.attendeeEmail ?? null,
               item.bookingUrl ?? null,
               event.occurredAt,
+              item.providerUpdatedAt ?? null,
+              item.providerUpdatedAt ? item.revisionSource ?? 'provider' : 'legacy',
             ],
           );
           if (changed.rows[0])
@@ -148,11 +158,13 @@ export class ExternalSessionsService {
   async list(ctx: RequestContext, query: unknown) {
     const parsed = parseBody(filter, query);
     return this.db.withTenant(ctx.businessId, async (tx) => {
-      const conditions = `business_id=$1
-        AND ($2::text IS NULL OR status=$2)
-        AND ($3::uuid IS NULL OR connection_id=$3)
-        AND ($4::text IS NULL OR owner_user_id=$4)
-        AND ($5::timestamptz IS NULL OR (starts_at<$6::timestamptz AND ends_at>$5::timestamptz))`;
+      const conditions = `e.business_id=$1
+        AND ($2::text IS NULL OR e.status=$2)
+        AND ($3::uuid IS NULL OR e.connection_id=$3)
+        AND ($4::text IS NULL OR e.owner_user_id=$4)
+        AND ($5::timestamptz IS NULL OR (e.starts_at<$6::timestamptz AND e.ends_at>$5::timestamptz))
+        AND ($7::boolean OR scheduling_canonical_student(a.client_id)=ANY($8::uuid[]))`;
+      const source="external_sessions e LEFT JOIN class_annotations a ON a.business_id=e.business_id AND a.source='external' AND a.class_id=e.id";
       const parameters = [
         ctx.businessId,
         parsed.status ?? null,
@@ -160,18 +172,19 @@ export class ExternalSessionsService {
         ctx.role === "tutor" ? ctx.sub : null,
         parsed.from ?? null,
         parsed.to ?? null,
+        !isStudentScope(ctx),ctx.studentIds??[],
       ];
       const total = Number(
         (
           await tx.query(
-            `SELECT COUNT(*) AS total FROM external_sessions WHERE ${conditions}`,
+            `SELECT COUNT(*) AS total FROM ${source} WHERE ${conditions}`,
             parameters,
           )
         ).rows[0].total,
       );
       const rows = (
         await tx.query(
-          `SELECT * FROM external_sessions WHERE ${conditions} ORDER BY starts_at ${parsed.from === undefined ? "DESC" : "ASC"},id LIMIT $7 OFFSET $8`,
+          `SELECT e.*,scheduling_canonical_student(a.client_id) AS client_id,a.status AS attendance_status FROM ${source} WHERE ${conditions} ORDER BY e.starts_at ${parsed.from === undefined ? "DESC" : "ASC"},e.id LIMIT $9 OFFSET $10`,
           [...parameters, parsed.limit, parsed.offset],
         )
       ).rows;
@@ -182,11 +195,12 @@ export class ExternalSessionsService {
           connectionId: row.connection_id,
           provider: row.provider,
           externalId: row.external_id,
+          clientId:row.client_id,studentId:row.client_id,attendanceStatus:row.attendance_status,
           ownerUserId: row.owner_user_id,
           title: row.title,
           startsAt: row.starts_at.toISOString(),
           endsAt: row.ends_at.toISOString(),
-          status: row.status,
+          status: row.status==='completed' ? 'scheduled' : row.status,
           attendeeName: row.attendee_name,
           attendeeEmail: row.attendee_email,
           bookingUrl: row.booking_url,
@@ -204,12 +218,14 @@ export class ExternalSessionsService {
 }
 @ApiTags("external-sessions")
 @Roles("owner", "admin", "tutor")
+@StudentScoped()
 @Controller("v1/external-sessions")
 export class ExternalSessionsController {
   constructor(
     @Inject(ExternalSessionsService)
     private readonly service: ExternalSessionsService,
   ) {}
+  @Permissions("scheduling.read")
   @Get() list(@CurrentContext() ctx: RequestContext, @Query() query: unknown) {
     return this.service.list(ctx, query);
   }

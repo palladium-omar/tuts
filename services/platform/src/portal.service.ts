@@ -64,11 +64,12 @@ export class PortalService {
       data: {studentId, ...(invitationId ? {invitationId} : {}), ...(subjectUserId ? {userId: subjectUserId} : {})}});
   }
 
-  private async lockAccess(tx: PoolClient, businessId: string, studentId: string, recipientEmail: string) {
-    // Acceptance, revocation and explicit issuance serialize for this recipient.
+  private async lockAccess(tx: PoolClient, businessId: string, studentId: string) {
+    // Serialize every invitation/grant lifecycle for this student, including
+    // account email changes and differently addressed invitations for one user.
     // An older pending token cannot race a revocation and restore the grant.
     await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))',
-      [`portal-access:${businessId}:${studentId}:${normalizeEmail(recipientEmail)}`]);
+      [`portal-access:${businessId}:${studentId}`]);
   }
 
   private async student(businessId: string, studentId: string, protect: boolean) {
@@ -150,7 +151,7 @@ export class PortalService {
     const prepared = await this.db.withTenant(input.businessId, async tx => {
       const policy = await this.identity.requireBusinessContext(session, input.businessId, tx);
       this.assertManager(policy, input.studentId);
-      await this.lockAccess(tx, input.businessId, input.studentId, recipientEmail);
+      await this.lockAccess(tx, input.businessId, input.studentId);
       await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`portal-invite:${input.businessId}:${input.studentId}:${recipientEmail}:${input.relationship}`]);
       await tx.query("UPDATE portal_invitations SET status='expired',token_hash=NULL,updated_at=now() WHERE student_id=$1 AND recipient_email=$2 AND relationship=$3 AND status IN ('queued','delivery_failed','sent') AND expires_at<=now()",
         [input.studentId, recipientEmail, input.relationship]);
@@ -229,7 +230,7 @@ export class PortalService {
     const next = await this.db.withTenant(businessId, async tx => {
       const currentPolicy = await this.identity.requireBusinessContext(session, businessId, tx);
       this.assertManager(currentPolicy, previous.student_id);
-      await this.lockAccess(tx, businessId, previous.student_id, email);
+      await this.lockAccess(tx, businessId, previous.student_id);
       await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`portal-invite:${businessId}:${previous.student_id}:${email}:${previous.relationship}`]);
       const duplicate = await tx.query<{id: string}>(
         "SELECT id FROM portal_invitations WHERE student_id=$1 AND recipient_email=$2 AND relationship=$3 AND id<>$4 AND status IN ('queued','delivery_failed','sent') LIMIT 1",
@@ -269,12 +270,15 @@ export class PortalService {
       const candidate = preview.rows[0];
       if (!candidate || normalizeEmail(session.user.email) !== candidate.recipient_email)
         throw new ForbiddenException('Invitation is invalid, expired, or belongs to another email');
-      await this.lockAccess(tx, businessId, candidate.student_id, candidate.recipient_email);
+      await this.lockAccess(tx, businessId, candidate.student_id);
       const result = await tx.query<InvitationRow>(
         "SELECT * FROM portal_invitations WHERE token_hash=$1 AND status IN ('queued','delivery_failed','sent') AND expires_at>now() FOR UPDATE", [hashToken(token)]);
       const row = result.rows[0];
       if (!row || normalizeEmail(session.user.email) !== row.recipient_email)
         throw new ForbiddenException('Invitation is invalid, expired, or belongs to another email');
+      // Recheck the authoritative identity before creating a grant. Permanent
+      // merge/delete protection remains in Clients; inactive records fail closed.
+      await this.student(businessId, row.student_id, true);
       const business = await tx.query<{entitlements: string[]}>('SELECT entitlements FROM businesses WHERE business_id=$1', [businessId]);
       if (!business.rows[0]?.entitlements.includes('clients')) throw new ForbiddenException('Clients is not enabled for this business');
       const role = row.relationship === 'guardian' ? 'parent' : 'student';
@@ -316,17 +320,21 @@ export class PortalService {
       const candidate = preview.rows[0];
       if (!candidate) throw new NotFoundException('Access grant is unavailable');
       this.assertManager(policy, candidate.student_id);
-      await this.lockAccess(tx, businessId, candidate.student_id, candidate.recipient_email);
+      await this.lockAccess(tx, businessId, candidate.student_id);
       const result = await tx.query<GrantRow>('SELECT * FROM portal_student_access WHERE id=$1 FOR UPDATE', [grantId]);
       const row = result.rows[0];
       if (!row) throw new NotFoundException('Access grant is unavailable');
       this.assertManager(policy, row.student_id);
       if (row.revoked_at) return {item: grantItem(row)};
       const updated = await tx.query<GrantRow>('UPDATE portal_student_access SET revoked_at=now(),updated_at=now() WHERE id=$1 RETURNING *', [grantId]);
-      // Invalidate pending invitations for this recipient/student, so an older
-      // unconsumed link cannot silently restore access after explicit revocation.
+      // Include current and previously accepted addresses. Changing an account's
+      // email must not leave an old token able to restore this revoked grant.
       const revokedInvites = await tx.query<InvitationRow>(`UPDATE portal_invitations SET status='revoked',token_hash=NULL,revoked_at=now(),delivery_error=NULL,updated_at=now()
-        WHERE student_id=$1 AND recipient_email=(SELECT lower(btrim(email)) FROM "user" WHERE id=$2) AND status IN ('queued','delivery_failed','sent') RETURNING *`, [row.student_id, row.user_id]);
+        WHERE student_id=$1 AND recipient_email IN (
+          SELECT lower(btrim(email)) FROM "user" WHERE id=$2
+          UNION SELECT $3::text
+          UNION SELECT recipient_email FROM portal_invitations WHERE student_id=$1 AND accepted_by=$2
+        ) AND status IN ('queued','delivery_failed','sent') RETURNING *`, [row.student_id, row.user_id, candidate.recipient_email]);
       for (const invitation of revokedInvites.rows)
         await this.audit(tx, policy, 'invitation_revoked', invitation.student_id, invitation.id);
       await this.audit(tx, policy, 'access_revoked', row.student_id, undefined, row.user_id);

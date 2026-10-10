@@ -6,7 +6,7 @@ case "$SERVICE" in
     exec node .next/standalone/apps/web/server.js
     ;;
   gateway) exec node /app/apps/gateway/dist/main.js ;;
-  platform|clients|scheduling|learning|billing|payments|notifications|integrations)
+  platform|clients|scheduling|learning|billing|payments|notifications|integrations|planning|reporting)
     cd "/app/services/$SERVICE"
     exec node dist/main.js
     ;;

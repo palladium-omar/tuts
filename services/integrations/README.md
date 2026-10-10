@@ -58,3 +58,70 @@ The private runtime tick calls `ConnectionsService.poll()` on the central 15-min
 Worker fetch uses `redirect: "manual"` and rejects every 3xx response without following it; workerd does not support `redirect: "error"`. Transport failures distinguish timeout, connection failure and interrupted response. Structured diagnostics contain only provider, request phase, elapsed time and a static failure classification; tokens, response bodies and raw exceptions are excluded. HTTP errors retain their status even if response cleanup fails.
 
 Authentication rejection (401), insufficient access (403) and provider rate limits (429) have explicit user-facing messages. The redirect fix follows [workerd's request parser](https://github.com/cloudflare/workerd/blob/main/src/workerd/api/http.c%2B%2B), which accepts `follow` and `manual`. A successful build or deploy does not establish that a supplied key is valid; reconnect requires provider acceptance with the current key.
+
+## Student portal booking and Cal.com hooks
+
+Apply `004_portal_booking.sql`. Integrations needs a private `CLIENTS` binding
+(or local `CLIENTS_URL`) and `PORTAL_INTERNAL_SECRET` shared with Clients to read
+an already-authorized student's contact prefill. These fields are never queried
+through cross-service SQL.
+
+- `GET /v1/portal/booking-config` returns `{item:BookingConfig|null}` for the signed-in staff account. Requires `integrations.read`; staff roles only.
+- `PUT /v1/portal/booking-config` accepts `{displayName,bookingUrl,connectionId?:uuid|null,enabled:boolean}`. Requires `integrations.write`, staff role, and scope-safe account ownership. `bookingUrl` is a public `https://cal.com/...` path without query parameters/fragments/credentials. An optional connection must be an active Cal.com connection owned by this tutor. No API key is required for a public link.
+- `GET /v1/portal/booking?studentId=UUID` requires the student's grant, `integrations.read`, `scheduling.read`, and Clients/Scheduling/Integrations entitlements. It returns `{items:[{id,ownerUserId,displayName,bookingUrl,connectionId,syncAvailable,webhookConfigured,associationMode:'staff_review',prefill:{name,email?}}]}`. Safe existing Cal.com connection links are used as defaults until a tutor explicitly configures or disables their link. API credentials and account email are excluded.
+- `POST /v1/connections/:id/calcom-webhook` requires owner/admin and `integrations.manage`. It generates/rotates an encrypted per-connection HMAC secret and returns `{item:Connection,webhookSecret,webhookPath,registered:false,registration:'manual',triggers:string[]}`. The secret is shown once; later connection views only show `calWebhookConfigured` and `webhookPath`. Disconnect removes the encrypted secret and immediately rejects new hooks.
+
+`BookingConfig` contains `{id,ownerUserId,displayName,bookingUrl,connectionId,
+enabled,createdAt,updatedAt}`. Portal booking prefills the student's display name
+and an own-contact email only when the stored addresses resolve to one distinct
+email. Ambiguity omits the email. These editable URL/embed values are convenience
+only and never establish a student relationship. Use the official Cal.com link or
+embed; there is no locally invented availability calendar or booking create/cancel
+API. Cal.com handles creation, cancellation and rescheduling in its supported UI.
+
+To configure webhook delivery, explicitly generate the local secret, then open
+Cal.com Settings > Developer > Webhooks and manually set the HTTPS gateway origin
+plus the returned path as Subscriber URL. Set the returned Secret and select the
+returned booking triggers. Use the default payload; custom templates are rejected
+unless they preserve the documented structure. No provider webhook registration
+or other provider write was performed during implementation. A configured local
+secret is not evidence that the provider registered or delivered a webhook.
+
+The existing public `/api/integrations/hooks/:businessId/:connectionId` route
+accepts Cal.com's hexadecimal `x-cal-signature-256` HMAC-SHA256 over exact raw JSON
+bytes. It verifies the active encrypted connection secret before applying any
+state and stores a tenant-protected SHA-256 body receipt for durable replay
+deduplication. Future timestamps beyond five minutes are rejected; deliveries
+older than seven days are acknowledged without applying stale state. Rotating the
+secret invalidates the previous signature. The Node and Worker gateways must
+forward the signature and preserve raw bytes, not reserialize parsed JSON.
+
+Supported booking hooks identify the booking UID only. The service re-fetches
+canonical `GET /v2/bookings/:uid` using the saved credential and verifies that its
+host belongs to the connected account. Provider `updatedAt` becomes the projection
+revision watermark. Reschedules re-fetch both new and old UIDs. Missing revisions
+or read failures queue the existing polling fallback instead of trusting a
+possibly stale webhook snapshot. Unsupported triggers are acknowledged and
+ignored; a meeting ending never establishes attendance. The API detail endpoint
+uses version `2026-02-25`; the list endpoint retains `2026-05-01`.
+
+Polling emits each provider's own update timestamp when available; otherwise it
+uses the pull's start timestamp as an observation watermark. Scheduling prevents
+older revisions/replays from replacing newer projection state. Public-link-only
+configuration has neither API sync nor webhook delivery unless an API connection
+is separately supplied. Neither attendee email nor client-supplied metadata such
+as `studentId` grants portal access. Staff must explicitly review and associate an
+external booking in the Scheduling class ledger. This intentionally leaves
+ambiguous attendee matches in staff review.
+
+Provider state stays scheduled until explicitly cancelled/rejected or explicitly
+marked no-show by the canonical provider record. Past times no longer imply
+completion. Tutor attendance overrides remain authoritative in Scheduling.
+
+Primary documentation checked for this implementation:
+
+- [Cal.com webhook payloads and HMAC verification](https://cal.com/docs/developing/guides/automation/webhooks)
+- [Get a canonical Cal.com booking](https://cal.com/docs/api-reference/v2/bookings/get-a-booking)
+- [Cal.com public booking embeds and prefill](https://cal.com/embed)
+
+Static review: Cal no-show update hooks use `bookingUid`; ordinary booking hooks use `uid`. Both identify only the canonical provider read. Polling and individual reads require a positive connected account host ID; a malformed/missing host identity fails closed and bookings hosted only by other accounts are excluded. [Official API host response](https://cal.com/docs/api-reference/v2/bookings/get-all-bookings).

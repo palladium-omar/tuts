@@ -1,0 +1,38 @@
+.student-boards-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 18px; }
+.student-board-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; margin: 18px 0; }
+.student-board-tile { border: 1px solid var(--line); border-radius: 10px; padding: 18px; min-width: 0; }
+.student-board-tile > button { display: block; width: 100%; text-align: left; border: 0; padding: 0; background: transparent; }
+.student-board-tile h3 { margin: 0 0 12px; }
+.student-board-tile p { white-space: pre-wrap; line-height: 1.6; font-size: 13px; color: var(--muted); }
+.student-board-meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 12px 0; }
+.student-board-kanban { display: flex; gap: 16px; overflow-x: auto; align-items: flex-start; padding: 8px 0 20px; }
+.student-board-column { width: 280px; flex: 0 0 280px; border: 1px solid var(--line); border-radius: 10px; background: var(--tint); padding: 12px; }
+.student-board-column-heading { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 12px; }
+.student-board-column-heading h3 { margin: 0; font-size: 14px; flex: 1; overflow-wrap: anywhere; }
+.student-board-column-heading button { font-size: 11px; padding: 4px 7px; }
+.student-board-card { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); margin: 10px 0; padding: 12px; }
+.student-board-card-open { display: block; text-align: left; width: 100%; border: 0; background: transparent; padding: 0; }
+.student-board-card-open strong { display: block; overflow-wrap: anywhere; font-size: 13px; }
+.student-board-card small { display: block; line-height: 1.6; color: var(--muted); margin-top: 6px; }
+.student-board-card-move { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.student-board-card-move select { width: 100%; padding: 7px 9px; font-size: 12px; }
+.student-board-card-move button { padding: 5px 9px; font-size: 11px; }
+.student-board-checklist, .student-board-links { display: grid; gap: 10px; margin: 16px 0; }
+.student-board-checklist-row { display: flex; align-items: center; gap: 9px; }
+.student-board-checklist-row input[type="checkbox"] { width: 16px; height: 16px; flex-shrink: 0; margin: 0; accent-color: var(--accent); }
+.student-board-checklist-row input[type="text"] { flex: 1; min-width: 0; }
+.student-board-links-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) auto; gap: 10px; align-items: end; }
+.student-board-links-row label { min-width: 0; margin: 0; }
+.student-board-deadline { padding: 16px; border: 1px solid var(--line); border-radius: 8px; margin: 18px 0; }
+.student-board-deadline h3 { margin: 0 0 12px; }
+.student-board-deadline .form-grid { margin-bottom: 16px; }
+.student-template-source { font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.student-template-source a { display: block; margin: 8px 0; }
+.student-template-scope { border: 1px solid var(--line); border-radius: 8px; padding: 14px; margin: 14px 0; }
+.student-template-scope p { font-size: 13px; color: var(--muted); line-height: 1.6; }
+.student-board-danger { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--line); }
+.student-board-banner { border-radius: 8px; background: var(--tint); padding: 12px; margin: 12px 0; line-height: 1.6; font-size: 13px; }
+@media (max-width: 640px) { .student-board-grid { grid-template-columns: 1fr; } .student-board-links-row { grid-template-columns: minmax(0, 1fr) auto; } .student-board-links-row label:first-child { grid-column: 1 / -1; } }
+.student-board-banner .student-template-source, a.student-template-source { display: block; margin: 8px 0; }
+.student-board-tile > button:hover h3, .student-board-card-open:hover strong { color: var(--accent); }
+.student-board-tile > button:focus-visible, .student-board-card-open:focus-visible { outline: 2px solid var(--accent); outline-offset: 5px; border-radius: 4px; }

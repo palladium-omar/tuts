@@ -1,0 +1,13 @@
+.tracker-summary-grid, .tracker-financial-totals { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin: 18px 0; }
+.tracker-coverage { display: grid; gap: 10px; margin-top: 22px; }
+.tracker-coverage h3 { margin-bottom: 0; }
+.student-reporting .tracker-detail-item, .student-finance .tracker-detail-item { padding: 14px; border: 1px solid var(--line); border-radius: 8px; }
+.student-reporting .tracker-detail-item h3, .student-finance .tracker-detail-item h3 { margin: 0 0 8px; font-size: 14px; }
+.student-reporting .tracker-detail-list, .student-finance .tracker-detail-list { display: grid; gap: 12px; margin: 16px 0; }
+.student-reporting .tracker-properties, .student-finance .tracker-properties { display: grid; gap: 8px; font-size: 12px; margin: 16px 0; }
+.student-reporting .tracker-properties > div, .student-finance .tracker-properties > div { display: flex; justify-content: space-between; gap: 15px; }
+.student-reporting .tracker-properties dt, .student-finance .tracker-properties dt { color: var(--muted); }
+.student-reporting .tracker-properties dd, .student-finance .tracker-properties dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
+.student-reporting .tracker-actions, .student-finance .tracker-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.student-reporting .tracker-actions label { margin: 0; }
+.student-finance button[aria-pressed="true"] { background: var(--tint); border-color: var(--accent); color: var(--accent); }

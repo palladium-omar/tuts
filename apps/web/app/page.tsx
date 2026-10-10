@@ -39,6 +39,7 @@ import { Registration } from "../features/registration";
 import { BusinessProfile, defaultPalette } from "../features/business-profile";
 import { BusinessDashboard } from "../features/business-dashboard";
 import { CRM } from "../features/crm";
+import { PlanningWorkspace } from "../features/planning-workspace";
 import { StudentTracker } from "../features/student-tracker";
 import {
   CampaignComposer,
@@ -46,10 +47,13 @@ import {
   type Audience,
 } from "../features/communications";
 import { Connectors } from "../features/connectors";
+import { AttributionSettings } from "../features/attribution-settings";
+import { StudentBookingSettings } from "../features/student-booking-settings";
 import { Sessions } from "../features/sessions-calendar";
 import { Learning } from "../features/learning";
 import { Activity, Invoices, Payments } from "../features/finance";
 const icons: Record<string, any> = {
+  planning: ClipboardList,
   tracker: Users,
   clients: Users,
   scheduling: CalendarDays,
@@ -257,6 +261,7 @@ function Workspace({
 }) {
   const api = useMemo(() => createApi(business.id), [business.id]);
   const { view, filter } = route;
+  const [planningStudentId, setPlanningStudentId] = useState<string | undefined>();
   const [learningStudentId, setLearningStudentId] = useState<string | undefined>();
   const [preview, setPreview] = useState<Row | null>(null),
     [menuOpen, setMenuOpen] = useState(false),
@@ -440,7 +445,7 @@ function Workspace({
           {view === "overview" && (
             <Overview api={api} business={business} user={user} go={go} />
           )}
-          {view === "tracker" && <StudentTracker api={api} business={business} onOpenLearning={hasPermission(business, "learning.write") ? (studentId) => { setLearningStudentId(studentId); go("learning"); } : undefined} />}
+          {view === "tracker" && <StudentTracker api={api} business={business} onOpenPlanning={business.entitlements.includes("planning") && hasPermission(business, "planning.read") ? (studentId) => { setPlanningStudentId(studentId); go("planning"); } : undefined} onOpenLearning={hasPermission(business, "learning.write") ? (studentId) => { setLearningStudentId(studentId); go("learning"); } : undefined} />}
           {view === "clients" && (
             <CRM
               api={api}
@@ -466,6 +471,7 @@ function Workspace({
               onOpenClients={() => go("clients")}
             />
           )}
+          {view === "planning" && <PlanningWorkspace api={api} business={business} initialStudentId={planningStudentId} />}
           {view === "billing" && <Invoices api={api} business={business} />}
           {view === "payments" && (
             <Payments api={api} role={business.role} businessId={business.id} />
@@ -482,6 +488,8 @@ function Workspace({
             (business.entitlements.includes("integrations") ? (
               <>
                 <Connectors api={api} role={business.role} filter={filter} />
+                {filter !== "crm" && <StudentBookingSettings api={api} business={business} userId={user.id} />}
+              {filter === "all" && <AttributionSettings api={api} business={business} />}
                 {filter === "all" &&
                   business.entitlements.includes("notifications") && (
                     <CommunicationConnections api={api} role={business.role} />

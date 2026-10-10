@@ -1,5 +1,5 @@
 import express, { type Request } from "express";
-import { createProxyMiddleware, fixRequestBody } from "http-proxy-middleware";
+import { createProxyMiddleware } from "http-proxy-middleware";
 import { randomUUID } from "node:crypto";
 import { importPKCS8, SignJWT } from "jose";
 import { requestContextSchema, serviceNames } from "@palladium/contracts";
@@ -20,17 +20,31 @@ const privateKey = await importPKCS8(
 if (!process.env.PLATFORM_INTERNAL_SECRET)
   throw new Error("PLATFORM_INTERNAL_SECRET required");
 const tokens = new WeakMap<Request, string>();
+app.get(/^\/api\/reporting\/v1\/public\/links\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\/[a-f0-9]{64}$/, createProxyMiddleware({
+  target: serviceUrls.reporting,
+  pathRewrite: (path) => path.replace(/^\/api\/reporting/, ''),
+  on: {
+    proxyReq(proxyReq) { for (const name of ['authorization','cookie','x-business-id','x-platform-internal-secret','x-auth-mail-secret','x-portal-internal-secret']) proxyReq.removeHeader(name); },
+    error(_error, _req, res) { if ('writeHead' in res && !res.headersSent) { res.writeHead(503, {'content-type':'application/json'}); res.end(JSON.stringify({error:{code:'service_unavailable',message:'Link is temporarily unavailable'}})); } },
+  },
+}));
 // Form providers authenticate with a connector-scoped secret, not browser cookies.
 app.use(
   "/api/integrations/hooks",
-  express.json({ limit: "1mb" }),
+  express.raw({ type: () => true, limit: "1mb" }),
   createProxyMiddleware({
     target: serviceUrls.integrations,
     pathRewrite: (path) => `/hooks${path}`,
     changeOrigin: false,
     on: {
       proxyReq(proxyReq, req) {
-        fixRequestBody(proxyReq, req);
+        // HMAC verification needs exactly the received bytes, including whitespace.
+        const raw = (req as Request).body;
+        if (Buffer.isBuffer(raw)) {
+          proxyReq.removeHeader("transfer-encoding");
+          proxyReq.setHeader("content-length", String(raw.byteLength));
+          proxyReq.write(raw);
+        }
         proxyReq.removeHeader("cookie");
         proxyReq.removeHeader("x-platform-internal-secret");
         proxyReq.removeHeader("x-auth-mail-secret");
@@ -74,7 +88,7 @@ app.use((req, res, next) => {
   );
   res.setHeader(
     "Access-Control-Allow-Methods",
-    "GET, POST, PATCH, DELETE, OPTIONS",
+    "GET, POST, PUT, PATCH, DELETE, OPTIONS",
   );
   if (req.method === "OPTIONS") {
     res.sendStatus(204);
@@ -107,6 +121,7 @@ for (const name of serviceNames) {
         proxyReq.removeHeader("authorization");
         proxyReq.removeHeader("x-platform-internal-secret");
         proxyReq.removeHeader("x-auth-mail-secret");
+        proxyReq.removeHeader("x-portal-internal-secret");
         proxyReq.removeHeader("x-user-id");
         proxyReq.removeHeader("x-role");
         const token = tokens.get(req as Request);

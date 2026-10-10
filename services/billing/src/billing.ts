@@ -31,11 +31,13 @@ import {
   serviceMonthView,
 } from "./financial.js";
 import { sellerEventSchema } from "./seller.js";
+import type { PoolClient } from "pg";
 import { idempotent } from "./idempotency.js";
 const idSchema = z.string().uuid();
 export function invoice(row: Record<string, any>) {
   return {
     id: row.id,
+    revision: row.revision ?? 1,
     clientId: row.client_id,
     payerName: row.payer_name,
     currency: row.currency,
@@ -50,6 +52,14 @@ export function invoice(row: Record<string, any>) {
     dueAt: row.due_at ?? null,
     classIds: row.class_ids ?? [],
   };
+}
+export async function emitInvoiceSnapshot(tx: PoolClient, businessId: string, row: Record<string, any>, correlationId?: string) {
+  const studentId = row.client_id ? (await tx.query('SELECT billing_student_root($1) id', [row.client_id])).rows[0].id : null;
+  await emitEvent(tx, {type:'billing.invoice-updated.v1',producer:'billing',businessId,correlationId,data:{
+    invoiceId:row.id,studentId,clientId:studentId,status:row.status,amountMinor:Number(row.total_minor),
+    paidMinor:Number(row.paid_minor),currency:row.currency,issuedAt:row.issued_at?.toISOString()??null,
+    serviceMonth:serviceMonthView(row.service_month),revision:row.revision,
+  }});
 }
 @Injectable()
 export class BillingService implements OnModuleInit {
@@ -136,9 +146,11 @@ export class BillingService implements OnModuleInit {
         ],
       );
       await tx.query(
-        "UPDATE invoices SET paid_minor=$3,status=$4 WHERE business_id=$1 AND id=$2",
+        "UPDATE invoices SET paid_minor=$3,status=$4,revision=revision+1 WHERE business_id=$1 AND id=$2",
         [event.businessId, payment.invoiceId, next.paidMinor, next.status],
       );
+      const updated = (await tx.query("SELECT * FROM invoices WHERE id=$1", [payment.invoiceId])).rows[0];
+      await emitInvoiceSnapshot(tx, event.businessId, updated, event.correlationId);
     });
   }
   list(ctx: RequestContext) {
@@ -214,7 +226,7 @@ export class BillingService implements OnModuleInit {
               "Business identity is still syncing. Save business settings, then retry issuing the invoice.",
             );
           const changed = await tx.query(
-            "UPDATE invoices SET status='issued',issued_at=now(),seller_snapshot=$3 WHERE business_id=$1 AND id=$2 RETURNING *",
+            "UPDATE invoices SET status='issued',issued_at=now(),seller_snapshot=$3,revision=revision+1 WHERE business_id=$1 AND id=$2 RETURNING *",
             [ctx.businessId, id, projected.rows[0].seller],
           );
           const result = invoice(changed.rows[0]);
@@ -229,6 +241,7 @@ export class BillingService implements OnModuleInit {
               currency: result.currency,
             },
           });
+          await emitInvoiceSnapshot(tx, ctx.businessId, changed.rows[0], ctx.requestId);
           return result;
         },
       ),

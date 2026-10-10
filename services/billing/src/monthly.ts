@@ -82,7 +82,7 @@ export const classSnapshotSchema = z
     clientId: z.uuid().nullable(),
     startsAt: z.string().datetime(),
     endsAt: z.string().datetime(),
-    status: z.enum(["scheduled", "completed", "cancelled"]),
+    status: z.enum(["scheduled", "completed", "cancelled", "no_show"]),
     revision: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
     title: z.string().max(200).optional(),
     attendeeEmail: z.email().nullable().optional(),
@@ -97,7 +97,7 @@ const ledgerResponseSchema = z.object({
         clientId: z.uuid().nullable(),
         startsAt: z.string().datetime(),
         endsAt: z.string().datetime(),
-        status: z.enum(["scheduled", "completed", "cancelled"]),
+        status: z.enum(["scheduled", "completed", "cancelled", "no_show"]),
         revision: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
         title: z.string().max(200),
         attendeeEmail: z.email().nullable().optional(),
@@ -167,7 +167,7 @@ export async function projectClass(
       businessId,
       input.classId,
       input.source,
-      input.clientId,
+      input.clientId ? (await tx.query('SELECT billing_student_root($1) id', [input.clientId])).rows[0].id : null,
       input.title ?? "Class",
       input.attendeeEmail ?? null,
       input.startsAt,
@@ -390,7 +390,11 @@ export class MonthlyService implements OnModuleInit, OnApplicationShutdown {
         `${month}-01`,
       ])
     ).rows;
-    const byClient = new Map(invoices.map((r) => [r.client_id, r]));
+    const byClient = new Map<string, any>();
+    for (const row of invoices) {
+      const canonical = (await tx.query("SELECT billing_student_root($1) id", [row.client_id])).rows[0].id;
+      byClient.set(canonical, row);
+    }
     const students = new Map<string, any>(),
       unrated: any[] = [],
       unmatched: any[] = [],

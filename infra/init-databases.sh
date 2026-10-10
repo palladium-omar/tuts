@@ -1,6 +1,6 @@
 #!/bin/sh
 set -eu
-for service in platform clients scheduling learning billing payments notifications integrations; do
+for service in platform clients scheduling learning billing payments notifications integrations planning reporting; do
   upper=$(printf '%s' "$service" | tr '[:lower:]' '[:upper:]')
   password=$(printenv "${upper}_DB_PASSWORD")
   psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname postgres -v name="$service" -v password="$password" <<'SQL'

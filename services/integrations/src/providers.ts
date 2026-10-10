@@ -180,6 +180,8 @@ function session(input: {
   attendeeName?: unknown;
   attendeeEmail?: unknown;
   bookingUrl?: unknown;
+  providerUpdatedAt?: unknown;
+  observedAt?: string;
 }): ExternalSession {
   const id = text(input.externalId, 512),
     start = text(input.start),
@@ -199,16 +201,15 @@ function session(input: {
     startsAt: new Date(start).toISOString(),
     endsAt: new Date(end).toISOString(),
     status:
-      input.status === "canceled" ||
-      input.status === "cancelled" ||
-      input.status === "rejected"
+      ['canceled', 'cancelled', 'rejected'].includes(String(input.status).toLowerCase())
         ? "cancelled"
-        : Date.parse(end) < Date.now()
-          ? "completed"
-          : "scheduled",
+        : input.status === 'no_show' ? 'no_show' : "scheduled",
     attendeeName: text(input.attendeeName),
     attendeeEmail: email(input.attendeeEmail),
     bookingUrl: httpsLink(input.bookingUrl),
+    providerUpdatedAt: typeof input.providerUpdatedAt === 'string' && Number.isFinite(Date.parse(input.providerUpdatedAt))
+      ? new Date(input.providerUpdatedAt).toISOString() : input.observedAt,
+    revisionSource: typeof input.providerUpdatedAt === 'string' && Number.isFinite(Date.parse(input.providerUpdatedAt)) ? 'provider' : 'observed',
   };
 }
 function providerContact(
@@ -249,6 +250,7 @@ export async function pull(
       "Form connections receive contacts through their webhook",
     );
   const result: SyncData = { contacts: [], sessions: [], truncated: false };
+  const observedAt = new Date().toISOString();
   let requests = 0;
   const deadline = Date.now() + 120000;
   const cutoff = new Date(Date.now() - 90 * 86400000).toISOString();
@@ -328,6 +330,8 @@ export async function pull(
             attendeeName: first?.name,
             attendeeEmail: first?.email,
             bookingUrl: config.bookingUrl ?? account.bookingUrl,
+            providerUpdatedAt: event.updated_at,
+            observedAt,
           }),
         );
       }
@@ -357,6 +361,7 @@ export async function pull(
         if (body.status !== "success" || !Array.isArray(body.data))
           throw new ConnectorError("Cal.com bookings response was invalid");
         for (const booking of body.data) {
+          if (!connectedCalHost(booking, account)) continue;
           const attendees = Array.isArray(booking.attendees)
             ? booking.attendees
             : [];
@@ -371,10 +376,13 @@ export async function pull(
               title: booking.title,
               start: booking.start,
               end: booking.end,
-              status: booking.status,
+              status: ['canceled','cancelled','rejected'].includes(String(booking.status).toLowerCase())
+                ? booking.status : attendees.length === 1 && first?.absent === true ? 'no_show' : booking.status,
               attendeeName: first?.name,
               attendeeEmail: first?.email,
               bookingUrl: config.bookingUrl ?? account.bookingUrl,
+              providerUpdatedAt: booking.updatedAt,
+              observedAt,
             }),
           );
           for (const attendee of attendees) {
@@ -401,4 +409,31 @@ export async function pull(
     }
   }
   return deduplicate(result);
+}
+
+function connectedCalHost(booking:any,account:Record<string,unknown>):boolean {
+  const accountId=String(account.externalId??'');
+  if(!/^[1-9][0-9]*$/.test(accountId)||!Array.isArray(booking.hosts)||
+    !booking.hosts.some((host:any)=>/^[1-9][0-9]*$/.test(String(host?.id??''))))
+    throw new ConnectorError('Cal.com booking host identity is unavailable');
+  return booking.hosts.some((host:any)=>String(host?.id??'')===accountId);
+}
+
+/** Re-fetch one signed hook's UID through the connected account before projection. */
+export async function canonicalCalBooking(token: string, uid: string, config: Config, account: Record<string, unknown>): Promise<ExternalSession | null> {
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(uid)) throw new ConnectorError('Cal.com booking identifier is invalid');
+  const body = await safeJsonGet(`https://api.cal.com/v2/bookings/${encodeURIComponent(uid)}`, {
+    Authorization: `Bearer ${token}`, 'cal-api-version': '2026-02-25',
+  });
+  if (body.status !== 'success' || !body.data || Array.isArray(body.data)) throw new ConnectorError('Cal.com booking response was invalid');
+  const booking = body.data;
+  if (booking.uid !== uid || !connectedCalHost(booking, account))
+    throw new ConnectorError('Cal.com booking does not belong to the connected tutor');
+  if (typeof booking.updatedAt !== 'string' || !Number.isFinite(Date.parse(booking.updatedAt))) return null;
+  const attendees = Array.isArray(booking.attendees) ? booking.attendees : [];
+  return session({externalId: booking.uid, title: booking.title, start: booking.start, end: booking.end,
+    status: ['canceled','cancelled','rejected'].includes(String(booking.status).toLowerCase())
+      ? booking.status : attendees.length === 1 && attendees[0].absent === true ? 'no_show' : booking.status,
+    attendeeName: attendees[0]?.name, attendeeEmail: attendees[0]?.email,
+    bookingUrl: config.bookingUrl ?? account.bookingUrl, providerUpdatedAt: booking.updatedAt});
 }

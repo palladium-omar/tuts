@@ -13,7 +13,7 @@ export RELEASE_TAG="$revision"
 compose=(docker compose --env-file /opt/tuts/.env.production -f compose.production.yaml)
 "${compose[@]}" config --quiet
 # Sequential image builds keep Next.js and the database below the VM memory limit.
-for service in platform clients scheduling learning billing payments notifications integrations gateway web; do
+for service in platform clients scheduling learning billing payments notifications integrations planning reporting gateway web; do
   "${compose[@]}" build "$service"
 done
 if [[ -L /opt/tuts/current ]]; then

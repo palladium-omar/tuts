@@ -1,7 +1,7 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { resolve, relative } from 'node:path';
 const root=resolve(import.meta.dirname,'..');
-const services=['platform','clients','scheduling','learning','billing','payments','notifications','integrations'];
+const services=['platform','clients','scheduling','learning','billing','payments','notifications','integrations','planning','reporting'];
 async function walk(dir){const entries=await readdir(dir,{withFileTypes:true}).catch(()=>[]);return(await Promise.all(entries.filter(e=>!['node_modules','dist','.next'].includes(e.name)).map(e=>e.isDirectory()?walk(resolve(dir,e.name)):resolve(dir,e.name)))).flat();}
 const failures=[];
 for(const service of services){
@@ -18,4 +18,4 @@ for(const service of services){
   }
  }
 }
-if(failures.length){console.error(failures.join('\n'));process.exit(1);}console.log('Service import boundaries verified across eight independent packages.');
+if(failures.length){console.error(failures.join('\n'));process.exit(1);}console.log(`Service import boundaries verified across ${services.length} independent packages.`);

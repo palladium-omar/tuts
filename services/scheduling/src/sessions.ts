@@ -22,7 +22,10 @@ import {
   emitEvent,
   parseBody,
   Roles,
+  Permissions,
+  StudentScoped,
 } from "@palladium/service-kit";
+import {isStudentScope,requireStudentScope,assertCanonicalOverlap} from "./student-scope.js";
 import type { PoolClient } from "pg";
 import type { RequestContext } from "@palladium/contracts";
 import {
@@ -52,6 +55,7 @@ export function sessionView(row: Row) {
     id: row.id,
     businessId: row.business_id,
     clientId: row.client_id,
+    studentId: row.client_id,
     assignedTutorId: row.assigned_tutor_id,
     title: row.title,
     subject: row.subject,
@@ -80,13 +84,16 @@ export class SessionsService {
   async list(ctx: RequestContext, query: unknown) {
     const filter = parseBody(listSessionsSchema, query);
     return this.db.withTenant(ctx.businessId, async (tx) => {
+      const clientId=filter.clientId ? await requireStudentScope(tx,ctx,filter.clientId) : null;
       const result = await tx.query<Row>(
-        `SELECT * FROM sessions WHERE business_id=$1 AND ($2::uuid IS NULL OR client_id=$2) AND ($3::text IS NULL OR status=$3) ORDER BY starts_at DESC, id LIMIT $4`,
+        `SELECT s.*,scheduling_canonical_student(s.client_id) AS client_id FROM sessions s WHERE business_id=$1 AND ($2::uuid IS NULL OR scheduling_canonical_student(client_id)=$2) AND ($3::text IS NULL OR status=$3)
+        AND ($5::boolean OR scheduling_canonical_student(client_id)=ANY($6::uuid[])) ORDER BY starts_at DESC, id LIMIT $4`,
         [
           ctx.businessId,
-          filter.clientId ?? null,
+          clientId,
           filter.status ?? null,
           filter.limit,
+          !isStudentScope(ctx),ctx.studentIds??[],
         ],
       );
       return { items: result.rows.map(sessionView) };
@@ -106,6 +113,8 @@ export class SessionsService {
     try {
       return await this.db.withTenant(ctx.businessId, async (tx) => {
         await lockBusiness(tx, ctx.businessId);
+        input.clientId=await requireStudentScope(tx,ctx,input.clientId);
+        await assertCanonicalOverlap(tx,input.clientId,input.startsAt,input.endsAt);
         const result = await tx.query<Row>(
           `INSERT INTO sessions(id,business_id,client_id,assigned_tutor_id,title,subject,starts_at,ends_at,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
           [
@@ -161,14 +170,17 @@ export class SessionsService {
         );
         const row = existing.rows[0];
         if (!row) throw new NotFoundException("Session not found");
+        await requireStudentScope(tx,ctx,row.client_id);
         if (row.status !== "scheduled")
           throw new ConflictException("Only scheduled sessions can be edited");
         const previous = sessionView(row);
         const next: SessionInput = { ...previous, ...patch };
         if (!validInterval(next.startsAt, next.endsAt))
           throw new BadRequestException("endsAt must be after startsAt");
+        const canonical=await requireStudentScope(tx,ctx,next.clientId);
+        await assertCanonicalOverlap(tx,canonical,next.startsAt,next.endsAt,id);
         const updated = await tx.query<Row>(
-          `UPDATE sessions SET client_id=$3,assigned_tutor_id=$4,title=$5,subject=$6,starts_at=$7,ends_at=$8,updated_at=now() WHERE business_id=$1 AND id=$2 RETURNING *`,
+          `UPDATE sessions SET client_id=$3,assigned_tutor_id=$4,title=$5,subject=$6,starts_at=$7,ends_at=$8,updated_at=now() WHERE business_id=$1 AND id=$2 RETURNING *,scheduling_canonical_student(client_id) AS client_id`,
           [
             ctx.businessId,
             id,
@@ -190,7 +202,7 @@ export class SessionsService {
   async transition(
     ctx: RequestContext,
     id: string,
-    status: "cancelled" | "completed",
+    status: "cancelled" | "completed" | "no_show",
   ) {
     parseBody(uuid, id);
     return this.db.withTenant(ctx.businessId, async (tx) => {
@@ -201,13 +213,14 @@ export class SessionsService {
       );
       const row = result.rows[0];
       if (!row) throw new NotFoundException("Session not found");
-      if (row.status === status) return { item: sessionView(row) };
+      const canonical=await requireStudentScope(tx,ctx,row.client_id);
+      if (row.status === status) return { item: sessionView({...row,client_id:canonical}) };
       if (row.status !== "scheduled")
         throw new ConflictException(
           `Cannot mark a ${row.status} session ${status}`,
         );
       const changed = await tx.query<Row>(
-        "UPDATE sessions SET status=$3,updated_at=now() WHERE business_id=$1 AND id=$2 RETURNING *",
+        "UPDATE sessions SET status=$3,updated_at=now() WHERE business_id=$1 AND id=$2 RETURNING *,scheduling_canonical_student(client_id) AS client_id",
         [ctx.businessId, id, status],
       );
       const item = sessionView(changed.rows[0]!);
@@ -253,6 +266,7 @@ const sessionProperties = {
 } as const;
 @ApiTags("sessions")
 @Roles("owner", "admin", "tutor")
+@StudentScoped()
 @Controller("v1/sessions")
 export class SessionsController {
   constructor(
@@ -262,9 +276,10 @@ export class SessionsController {
   @ApiQuery({
     name: "status",
     required: false,
-    enum: ["scheduled", "cancelled", "completed"],
+    enum: ["scheduled", "cancelled", "completed", "no_show"],
   })
   @ApiQuery({ name: "limit", required: false, type: Number })
+  @Permissions("scheduling.read")
   @Get()
   @ApiOperation({
     summary: "List one-on-one sessions for the selected business",
@@ -280,6 +295,7 @@ export class SessionsController {
       properties: sessionProperties,
     },
   })
+  @Permissions("scheduling.write")
   @Post()
   @ApiOperation({
     summary: "Schedule a one-on-one session; conflicting time returns 409",
@@ -295,6 +311,7 @@ export class SessionsController {
       properties: sessionProperties,
     },
   })
+  @Permissions("scheduling.write")
   @Patch(":id")
   @ApiOperation({ summary: "Edit a scheduled session" })
   update(
@@ -304,14 +321,21 @@ export class SessionsController {
   ) {
     return this.sessions.update(ctx, id, body);
   }
+  @Permissions("scheduling.write")
   @Post(":id/cancel")
   @ApiOperation({ summary: "Cancel a scheduled session" })
   cancel(@CurrentContext() ctx: RequestContext, @Param("id") id: string) {
     return this.sessions.transition(ctx, id, "cancelled");
   }
+  @Permissions("scheduling.write")
   @Post(":id/complete")
   @ApiOperation({ summary: "Complete a scheduled session" })
   complete(@CurrentContext() ctx: RequestContext, @Param("id") id: string) {
     return this.sessions.transition(ctx, id, "completed");
+  }
+  @Permissions("scheduling.write")
+  @Post(":id/no-show")
+  noShow(@CurrentContext() ctx:RequestContext,@Param("id") id:string) {
+    return this.sessions.transition(ctx,id,"no_show");
   }
 }

@@ -10,6 +10,8 @@ export const serviceNames = [
   "payments",
   "notifications",
   "integrations",
+  "planning",
+  "reporting",
 ] as const;
 export const featureNames = serviceNames.filter((name) => name !== "platform");
 export const roleSchema = z.enum([
@@ -56,6 +58,7 @@ export const eventConsumerSubscriptions = [
       "payments.payment-confirmed.v1",
       "platform.business-profile-updated.v1",
       "scheduling.class-updated.v1",
+      "clients.student-merged.v1",
     ],
   },
   { consumer: "integrations", types: ["clients.source-synced.v1"] },
@@ -69,10 +72,18 @@ export const eventConsumerSubscriptions = [
   {
     consumer: "scheduling",
     types: [
+      "clients.student-merged.v1",
       "integrations.sessions-synced.v1",
       "integrations.connection-disconnected.v1",
     ],
   },
+  { consumer: "planning", types: ["clients.student-merged.v1"] },
+  { consumer: "reporting", types: [
+    "scheduling.class-updated.v1", "learning.assignment-created.v1", "learning.assignment-submitted.v1",
+    "learning.assignment-reviewed.v1", "learning.assignment-updated.v1", "learning.resource-created.v1",
+    "learning.resource-updated.v1", "billing.invoice-updated.v1", "clients.student-merged.v1",
+  ] },
+  { consumer: "learning", types: ["clients.student-merged.v1"] },
   { consumer: "payments", types: ["billing.invoice-issued.v1"] },
   {
     consumer: "notifications",
@@ -92,6 +103,14 @@ export const eventConsumerSubscriptions = [
 }[];
 
 export const featureRegistry = [
+  {
+    id: 'tracker',
+    label: 'Student tracker',
+    path: '/students',
+    entitlement: 'clients',
+    permission: 'clients.read',
+    apiPrefix: '/api/clients',
+  },
   {
     id: "clients",
     label: "CRM",
@@ -113,6 +132,7 @@ export const featureRegistry = [
     entitlement: "learning",
     apiPrefix: "/api/learning",
   },
+  { id: "planning", label: "Student boards", path: "/boards", entitlement: "planning", dependencies: ["clients"], apiPrefix: "/api/planning" },
   {
     id: "billing",
     label: "Invoices",

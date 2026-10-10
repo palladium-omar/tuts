@@ -27,12 +27,17 @@ export function Learning({
   api,
   businessId,
   onOpenClients,
+  initialStudentId,
 }: {
   api: Api;
   businessId: string;
   onOpenClients?: () => void;
+  initialStudentId?: string;
 }) {
   const [studentId, setStudentId] = useState("");
+  const [filterStudentId, setFilterStudentId] = useState(initialStudentId ?? "");
+  const [documents, setDocuments] = useState<{ title: string; url: string }[]>([]);
+  useEffect(() => { setFilterStudentId(initialStudentId ?? ""); }, [initialStudentId]);
   const [rows, setRows] = useState<Row[]>([]),
     [students, setStudents] = useState<Row[]>([]),
     [creating, setCreating] = useState(false),
@@ -54,13 +59,17 @@ export function Learning({
       all.push(...result.items);
       if (result.items.length < 100) break;
     }
+    if (filterStudentId && !all.some((student) => student.id === filterStudentId)) {
+      const selectedStudent = await api(`clients/v1/clients/${filterStudentId}`);
+      if (selectedStudent.item?.kind === "student") all.push(selectedStudent.item);
+    }
     setStudents(all);
     return all;
   }
   async function load() {
     setLoading(true);
     try {
-      const data = await api("learning/v1/assignments");
+      const data = await api(`learning/v1/assignments?${new URLSearchParams({ limit: "200", ...(filterStudentId ? { clientId: filterStudentId } : {}) })}`);
       setRows(data.items);
       setError("");
     } catch (e) {
@@ -70,9 +79,12 @@ export function Learning({
     }
   }
   useEffect(() => {
-    void load();
+    let cancelled = false;
+    setLoading(true);
+    api(`learning/v1/assignments?${new URLSearchParams({ limit: "200", ...(filterStudentId ? { clientId: filterStudentId } : {}) })}`).then((data) => { if (!cancelled) { setRows(data.items); setError(""); } }).catch((e) => { if (!cancelled) setError(errorMessage(e)); }).finally(() => { if (!cancelled) setLoading(false); });
     void loadStudents().catch(() => setStudents([]));
-  }, [api]);
+    return () => { cancelled = true; };
+  }, [api, filterStudentId]);
   async function openCreate() {
     setError("");
     setMessage("");
@@ -81,7 +93,8 @@ export function Learning({
       await loadStudents();
       setFiles([]);
       setUploaded([]);
-      setStudentId("");
+      setDocuments([]);
+      setStudentId(filterStudentId);
       setCreating(true);
     } catch (e) {
       setError(errorMessage(e));
@@ -96,6 +109,15 @@ export function Learning({
     setError("");
     const attachments = [...uploaded];
     try {
+      for (const document of documents) {
+        let url: URL;
+        try { url = new URL(document.url); } catch { throw new Error("Use a valid Google Docs document URL."); }
+        if (url.protocol !== "https:" || url.hostname !== "docs.google.com" || !/^\/document\/d\/[A-Za-z0-9_-]+(?:\/|$)/.test(url.pathname) || url.username || url.password) throw new Error("Use an HTTPS Google Docs document URL from docs.google.com/document/d/…");
+        if (attachments.some((attachment) => attachment.documentUrl === document.url)) continue;
+        setSaveStep("Saving selected Google Docs references…");
+        const { item } = await api("learning/v1/resources", "POST", { clientId: String(form.get("clientId")), title: document.title.trim(), kind: "google_doc", url: url.href });
+        attachments.push({ ...item, documentUrl: document.url }); setUploaded([...attachments]);
+      }
       for (const [index, file] of files.entries()) {
         if (attachments.some((a) => a.uploadFile === file)) continue;
         setSaveStep(`Uploading file ${index + 1} of ${files.length}…`);
@@ -129,6 +151,7 @@ export function Learning({
       setCreating(false);
       setFiles([]);
       setUploaded([]);
+      setDocuments([]);
       await load();
       setMessage(
         attachments.length
@@ -200,6 +223,7 @@ export function Learning({
       <section className="panel">
         <div className="panel-title">
           <h3>Assignments & materials</h3>
+          <label>Student<select aria-label="Filter assignments by student" value={filterStudentId} onChange={(e) => setFilterStudentId(e.target.value)}><option value="">All students</option>{students.map((student) => <option value={student.id} key={student.id}>{student.displayName}</option>)}</select></label>
           <span className="tag">
             {rows.length} {rows.length === 1 ? "assignment" : "assignments"}
           </span>
@@ -232,7 +256,7 @@ export function Learning({
                 )}
                 <div className="attachment-list">
                   {row.resources?.map((r: Row) => (
-                    <button
+                    r.kind === "google_doc" || r.kind === "link" ? <a key={r.id} href={r.url} target="_blank" rel="noopener noreferrer" className="chosen-file"><FileText size={16} /><span>{r.title}<small>{r.sharingNotice ?? "Google sharing permissions still apply."}</small></span>Open document</a> : <button
                       key={r.id}
                       disabled={r.storageStatus !== "stored"}
                       onClick={() => void download(r)}
@@ -371,8 +395,8 @@ export function Learning({
                       setError("Each attachment must be 20 MB or smaller.");
                       return;
                     }
-                    if (files.length + incoming.length > 20) {
-                      setError("Attach up to 20 files per assignment.");
+                    if (files.length + incoming.length + documents.length > 20) {
+                      setError("Attach up to 20 files and document references per assignment.");
                       return;
                     }
                     setFiles([...files, ...incoming]);
@@ -406,6 +430,7 @@ export function Learning({
                   </div>
                 ))}
               </div>
+              <section className="student-contact-form"><h3>Selected Google Docs</h3><p className="crm-helper">Add documents you want this student to use. Google controls sharing; a saved link does not give the student permission to open the document. Creating a new Google Doc through Tuts is not available.</p>{documents.map((document, index) => <div className="form-grid" key={index}><label>Document title<input required maxLength={200} disabled={busy || uploaded.some((item) => item.documentUrl === document.url)} value={document.title} onChange={(e) => setDocuments(documents.map((item, at) => at === index ? { ...item, title: e.target.value } : item))} /></label><label>Google Docs URL<input required type="url" maxLength={2000} disabled={busy || uploaded.some((item) => item.documentUrl === document.url)} value={document.url} placeholder="https://docs.google.com/document/d/…/edit" onChange={(e) => setDocuments(documents.map((item, at) => at === index ? { ...item, url: e.target.value } : item))} /></label><button type="button" disabled={busy || uploaded.some((item) => item.documentUrl === document.url)} onClick={() => setDocuments(documents.filter((_, at) => at !== index))}>Remove document</button></div>)}<button type="button" disabled={busy || documents.length + files.length >= 20} onClick={() => setDocuments([...documents, { title: "", url: "" }])}>Add Google Docs reference</button></section>
               <label>
                 Note for the student (optional)
                 <textarea
@@ -463,7 +488,7 @@ export function Learning({
           )}
           <div className="attachment-list">
             {selected.resources?.map((r: Row) => (
-              <button
+              r.kind === "google_doc" || r.kind === "link" ? <a key={r.id} href={r.url} target="_blank" rel="noopener noreferrer" className="chosen-file"><FileText size={16} /><span>{r.title}<small>{r.sharingNotice ?? "Google sharing permissions still apply."}</small></span>Open document</a> : <button
                 key={r.id}
                 disabled={r.storageStatus !== "stored"}
                 onClick={() => void download(r)}

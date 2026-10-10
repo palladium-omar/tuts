@@ -32,7 +32,7 @@ export function createApi(businessId?: string): Api {
           ? { "Content-Type": "application/json" }
           : {}),
         ...(businessId ? { "X-Business-Id": businessId } : {}),
-        ...(["POST", "PATCH", "DELETE"].includes(method)
+        ...(["POST", "PUT", "PATCH", "DELETE"].includes(method)
           ? { "Idempotency-Key": key ?? crypto.randomUUID() }
           : {}),
       },

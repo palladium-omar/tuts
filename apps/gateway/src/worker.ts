@@ -15,6 +15,8 @@ export interface GatewayEnv {
   PAYMENTS: FetchBinding;
   NOTIFICATIONS: FetchBinding;
   INTEGRATIONS: FetchBinding;
+  PLANNING: FetchBinding;
+  REPORTING: FetchBinding;
   ASSETS: FetchBinding;
   CONTEXT_PRIVATE_KEY: string;
   PLATFORM_INTERNAL_SECRET: string;
@@ -239,15 +241,16 @@ async function route(request: Request, env: GatewayEnv, requestId: string): Prom
   const service = match?.[1];
   const path = match?.[2] ?? "/";
   const hook = service === "integrations" && (path === "/hooks" || path.startsWith("/hooks/"));
+  const publicReportingLink = service === "reporting" && request.method === "GET" && /^\/v1\/public\/links\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\/[a-f0-9]{64}$/.test(path);
   const origin = request.headers.get("origin");
-  if (!hook) {
+  if (!hook && !publicReportingLink) {
     if (origin && ![new URL(env.PUBLIC_APP_URL).origin, new URL(env.PUBLIC_GATEWAY_URL).origin].includes(origin))
       return error(403, "origin_denied", "Origin not permitted");
     if (request.method === "OPTIONS") return responseWithCors(new Response(null, { status: 204 }), origin ?? undefined);
     if (!["GET", "HEAD"].includes(request.method) && !origin)
       return error(403, "origin_required", "A trusted Origin header is required");
   }
-  const decorate = (response: Response) => hook ? response : responseWithCors(response, origin ?? undefined);
+  const decorate = (response: Response) => (hook || publicReportingLink) ? response : responseWithCors(response, origin ?? undefined);
   if (url.pathname === "/health")
     return decorate(Response.json({ service: "gateway", status: "ok" }));
   if (!url.pathname.startsWith("/api/") && url.pathname !== "/api")
@@ -260,8 +263,9 @@ async function route(request: Request, env: GatewayEnv, requestId: string): Prom
   if (length && (!/^\d+$/.test(length) || Number(length) > limit))
     return decorate(error(413, "body_too_large", "Request body is too large"));
   const headers = sanitizedHeaders(request, hook);
+  if (publicReportingLink) { headers.delete("cookie"); headers.delete("x-real-ip"); }
   headers.set("x-request-id", requestId);
-  if (service !== "platform" && !hook) {
+  if (service !== "platform" && !hook && !publicReportingLink) {
     const businessId = request.headers.get("x-business-id");
     if (!businessId) return decorate(error(400, "business_required", "Select a business"));
     try {

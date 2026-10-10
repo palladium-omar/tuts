@@ -17,7 +17,7 @@ export function diagnosticBusiness(businessId: string): void {
   if (scope && uuid.test(businessId)) scope.businessId = businessId;
 }
 
-const segments = new Set(('api platform clients scheduling learning billing payments notifications integrations auth v1 internal __runtime tick health context auth-mail status password-reset request-password-reset reset-password sign-in sign-up email sign-out get-session businesses profile resources assignments sessions calendar classes ledger connectors connections sync imports fields campaigns recipients invoices rates settings monthly reconcile checkout attempts activity hooks openapi.json').split(' '));
+const segments = new Set(('api platform clients scheduling learning billing payments notifications integrations planning reporting portal students groups members invitations accept resend access sender-status summaries summary boards columns tasks templates instantiate attribution active submission-upload google-docs booking booking-config calcom-webhook contacts duplicates merge preview dismiss finance auth v1 internal __runtime tick health context auth-mail status password-reset request-password-reset reset-password sign-in sign-up email sign-out get-session businesses profile resources assignments sessions calendar classes ledger connectors connections sync imports fields campaigns recipients invoices rates settings monthly reconcile checkout attempts activity hooks openapi.json').split(' '));
 /** No query strings, identifiers, arbitrary names, or webhook path secrets. */
 export function diagnosticRoute(path: string): string {
   return path.split('?')[0]!.split('/').slice(0, 9).map(part => segments.has(part) ? part : part ? ':param' : '').join('/');

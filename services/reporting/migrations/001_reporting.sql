@@ -1,0 +1,21 @@
+CREATE TABLE report_student_aliases (business_id uuid NOT NULL,source_id uuid NOT NULL,target_id uuid NOT NULL,revision integer NOT NULL,PRIMARY KEY(business_id,source_id),CHECK(source_id<>target_id));
+CREATE TABLE report_classes (business_id uuid NOT NULL,source text NOT NULL,class_id uuid NOT NULL,student_id uuid,starts_at timestamptz NOT NULL,ends_at timestamptz NOT NULL,status text NOT NULL,attendance_source text,revision integer NOT NULL,observed_at timestamptz NOT NULL DEFAULT now(),PRIMARY KEY(business_id,source,class_id));
+CREATE INDEX report_classes_student ON report_classes(business_id,student_id,starts_at);
+CREATE TABLE report_assignments (business_id uuid NOT NULL,assignment_id uuid NOT NULL,student_id uuid NOT NULL,status text NOT NULL,due_at timestamptz,created_at timestamptz,revision integer NOT NULL,observed_at timestamptz NOT NULL DEFAULT now(),PRIMARY KEY(business_id,assignment_id));
+CREATE INDEX report_assignments_student ON report_assignments(business_id,student_id,due_at);
+CREATE TABLE report_resources (business_id uuid NOT NULL,resource_id uuid NOT NULL,student_id uuid NOT NULL,assignment_id uuid,kind text NOT NULL,revision integer NOT NULL,observed_at timestamptz NOT NULL DEFAULT now(),PRIMARY KEY(business_id,resource_id));
+CREATE TABLE report_invoices (business_id uuid NOT NULL,invoice_id uuid NOT NULL,student_id uuid NOT NULL,status text NOT NULL,amount_minor bigint NOT NULL CHECK(amount_minor>=0),paid_minor bigint NOT NULL CHECK(paid_minor>=0),currency text NOT NULL CHECK(currency ~ '^[A-Z]{3}$'),issued_at timestamptz,service_month text,event_at timestamptz,revision integer NOT NULL,observed_at timestamptz NOT NULL DEFAULT now(),PRIMARY KEY(business_id,invoice_id));
+CREATE TABLE report_coverage (business_id uuid NOT NULL,student_id uuid NOT NULL,source text NOT NULL,month text NOT NULL,time_zone text NOT NULL,status text NOT NULL CHECK(status IN ('partial','complete','unavailable')),as_of timestamptz,attempted_at timestamptz NOT NULL DEFAULT now(),reason text,PRIMARY KEY(business_id,student_id,source,month,time_zone));
+CREATE TABLE report_finance_snapshots (business_id uuid NOT NULL,student_id uuid NOT NULL,totals jsonb NOT NULL,invoice_count integer NOT NULL,as_of timestamptz NOT NULL,complete boolean NOT NULL DEFAULT true,PRIMARY KEY(business_id,student_id));
+CREATE TABLE activity_sessions (business_id uuid NOT NULL,actor_id text NOT NULL,session_id uuid NOT NULL,student_id uuid NOT NULL,last_sequence integer NOT NULL,last_received_at timestamptz NOT NULL,PRIMARY KEY(business_id,actor_id,session_id));
+CREATE TABLE activity_actor_cursors (business_id uuid NOT NULL,actor_id text NOT NULL,last_received_at timestamptz NOT NULL,PRIMARY KEY(business_id,actor_id));
+CREATE TABLE activity_receipts (business_id uuid NOT NULL,actor_id text NOT NULL,session_id uuid NOT NULL,sequence integer NOT NULL,student_id uuid NOT NULL,claimed_seconds integer NOT NULL CHECK(claimed_seconds BETWEEN 0 AND 30),accepted_seconds integer NOT NULL CHECK(accepted_seconds BETWEEN 0 AND 30),received_at timestamptz NOT NULL,PRIMARY KEY(business_id,actor_id,session_id,sequence));
+CREATE INDEX activity_receipts_student ON activity_receipts(business_id,student_id,received_at);
+CREATE TABLE activity_daily (business_id uuid NOT NULL,actor_id text NOT NULL,student_id uuid NOT NULL,day date NOT NULL,active_seconds bigint NOT NULL CHECK(active_seconds>=0),last_seen_at timestamptz NOT NULL,PRIMARY KEY(business_id,actor_id,student_id,day));
+CREATE INDEX activity_daily_student ON activity_daily(business_id,student_id,day);
+DO $$ DECLARE table_name text; BEGIN
+ FOREACH table_name IN ARRAY ARRAY['report_student_aliases','report_classes','report_assignments','report_resources','report_invoices','report_coverage','report_finance_snapshots','activity_sessions','activity_actor_cursors','activity_receipts','activity_daily'] LOOP
+  EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY',table_name);EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY',table_name);
+  EXECUTE format('CREATE POLICY %I ON %I USING (business_id=nullif(current_setting(''app.business_id'',true),'''')::uuid) WITH CHECK(business_id=nullif(current_setting(''app.business_id'',true),'''')::uuid)',table_name||'_tenant',table_name);
+ END LOOP;
+END $$;

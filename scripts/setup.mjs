@@ -44,6 +44,8 @@ for (const name of [
   "payments",
   "notifications",
   "integrations",
+  "planning",
+  "reporting",
 ])
   defaults[`${name.toUpperCase()}_DB_PASSWORD`] = token();
 if (

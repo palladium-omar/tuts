@@ -6,7 +6,7 @@ import { promisify } from 'node:util';
 import { root, validateDeployment } from './cloudflare.mjs';
 
 // Only contract event-consumer queues; dead-letter queues have no consumers.
-const consumers = ['billing', 'integrations', 'clients', 'scheduling', 'payments', 'notifications'];
+const consumers = ['billing', 'integrations', 'clients', 'scheduling', 'payments', 'notifications', 'learning', 'planning', 'reporting'];
 const directory = join(root, '.cloudflare', 'recovery');
 const statePath = join(directory, 'maintenance-state.json');
 const configPath = join(root, '.cloudflare', 'generated', 'gateway', 'wrangler.json');
@@ -142,13 +142,17 @@ async function load(config) {
     state = JSON.parse(await readFile(statePath, 'utf8'));
   } catch (error) { if (error.code === 'ENOENT') return; throw new Error('Maintenance state is unreadable or unsafe; preserve it and review before continuing.'); }
   if (state.version !== 1 || !phases.includes(state.phase) || state.accountId !== config.accountId ||
-      state.prefix !== config.prefix || state.publicUrl !== config.publicUrl || !Array.isArray(state.original?.queues) || state.original.queues.length !== consumers.length)
+      state.prefix !== config.prefix || state.publicUrl !== config.publicUrl || !Array.isArray(state.original?.queues) || state.original.queues.length > consumers.length || !state.original.queues.length)
     fail('Saved maintenance state does not match this deployment.');
   state.original.schedules = schedules({ schedules: state.original.schedules });
-  for (const [index, consumer] of consumers.entries()) {
-    const item = state.original.queues[index];
-    state.original.queues[index] = queue({ queue_id: item.id, queue_name: item.name, settings: item.settings }, `${config.prefix}-events-${consumer}`);
+  const expected = new Set(consumers.map(consumer => `${config.prefix}-events-${consumer}`));
+  const seen = new Set();
+  for (const [index, item] of state.original.queues.entries()) {
+    if (!expected.has(item.name) || seen.has(item.name)) fail('Saved maintenance queue identity is invalid.');
+    seen.add(item.name);
+    state.original.queues[index] = queue({ queue_id: item.id, queue_name: item.name, settings: item.settings }, item.name);
   }
+  if (state.original.queues.length !== consumers.length && state.phase !== 'resumed') fail('Finish the existing maintenance operation before expanding queue topology.');
   return state;
 }
 function validateCurrent(current, state) {
@@ -204,10 +208,10 @@ async function pauseAfterResumeFailure(config, token, state) {
   let stateSaved = false;
   try { await save(state); stateSaved = true; } catch { /* Previous original snapshot remains retained. */ }
   if (paused && stateSaved)
-    fail('Resume failed. Gateway maintenance, empty cron, and all six paused queues are verified. Original restoration state is retained; resolve the issue and rerun resume.');
+    fail('Resume failed. Gateway maintenance, empty cron, and all event queues paused are verified. Original restoration state is retained; resolve the issue and rerun resume.');
   const details = [gatewayPaused ? 'Gateway maintenance is verified.' : 'Public ingress maintenance is uncertain.'];
   if (uncertainBackground.length) details.push(`Background controls remain uncertain: ${uncertainBackground.join(', ')}.`);
-  else details.push('Empty cron and all six paused queues are verified.');
+  else details.push('Empty cron and all event queues paused are verified.');
   if (!stateSaved) details.push('Updated recovery phase could not be saved; preserve the original snapshot.');
   fail(`Resume failed. ${details.join(' ')} Reconfirm maintenance and background controls before further work.`);
 }
@@ -234,6 +238,17 @@ export async function main(argv = process.argv.slice(2)) {
     let state = await load(config);
     let current = await controls(config, token, state?.original);
     const maintenance = await probe(config);
+    if (state?.phase === 'resumed' && state.original.queues.length !== consumers.length) {
+      if (maintenance || !equal(current.schedules, state.original.schedules)) fail('Prior maintenance state changed; cannot expand its queue topology.');
+      for (const saved of state.original.queues) {
+        if (!equal(current.queues.find(item => item.name === saved.name), saved)) fail('An existing event queue changed; preserve the prior maintenance snapshot.');
+      }
+      if (current.queues.filter(item => !state.original.queues.some(saved => saved.name === item.name)).some(item => item.settings.delivery_paused)) fail('A new event queue is paused; review its restoration state.');
+      if (command !== 'status') {
+        await rename(statePath, join(directory, `maintenance-completed-${Date.now()}.json`));
+        state = undefined;
+      }
+    }
     if (command === 'status') {
       console.log(JSON.stringify({ maintenance, phase: state?.phase ?? 'unmanaged', cronCount: current.schedules.length,
         queues: current.queues.map(item => ({ name: item.name, deliveryPaused: item.settings.delivery_paused })) }));

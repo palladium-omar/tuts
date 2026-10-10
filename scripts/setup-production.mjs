@@ -30,7 +30,7 @@ const defaults = {
   PUBLIC_APP_URL: `https://${domain}`,
   PUBLIC_GATEWAY_URL: `https://${domain}`,
   INITIAL_BUSINESS_ENTITLEMENTS:
-    "clients,scheduling,learning,billing,payments,notifications,integrations",
+    "clients,scheduling,learning,billing,payments,notifications,integrations,planning,reporting",
   POSTGRES_PASSWORD: token(),
   RABBITMQ_USER: "tuts",
   RABBITMQ_PASSWORD: token(),
@@ -39,6 +39,7 @@ const defaults = {
   PLATFORM_INTERNAL_SECRET: token(),
   BETTER_AUTH_SECRET: token(),
   AUTH_MAIL_INTERNAL_SECRET: token(),
+  PORTAL_INTERNAL_SECRET: token(),
   AUTH_MAIL_ENABLED: "false",
   PAYMENT_ENCRYPTION_KEY: randomBytes(32).toString("base64"),
   INTEGRATIONS_ENCRYPTION_KEY: randomBytes(32).toString("base64"),
@@ -54,6 +55,8 @@ for (const name of [
   "payments",
   "notifications",
   "integrations",
+  "planning",
+  "reporting",
 ]) {
   defaults[`${name.toUpperCase()}_DB_PASSWORD`] = token();
 }

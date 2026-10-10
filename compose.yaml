@@ -13,7 +13,9 @@
         "BILLING_DB_PASSWORD": "${BILLING_DB_PASSWORD}",
         "PAYMENTS_DB_PASSWORD": "${PAYMENTS_DB_PASSWORD}",
         "NOTIFICATIONS_DB_PASSWORD": "${NOTIFICATIONS_DB_PASSWORD}",
-        "INTEGRATIONS_DB_PASSWORD": "${INTEGRATIONS_DB_PASSWORD}"
+        "INTEGRATIONS_DB_PASSWORD": "${INTEGRATIONS_DB_PASSWORD}",
+        "PLANNING_DB_PASSWORD": "${PLANNING_DB_PASSWORD}",
+        "REPORTING_DB_PASSWORD": "${REPORTING_DB_PASSWORD}"
       },
       "ports": [
         "127.0.0.1:5434:5432"
@@ -82,7 +84,7 @@
         "NOTIFICATIONS_URL": "http://notifications:4007",
         "PUBLIC_APP_URL": "${PUBLIC_APP_URL}",
         "PUBLIC_GATEWAY_URL": "${PUBLIC_GATEWAY_URL}",
-        "PORTAL_INTERNAL_SECRET": "${PORTAL_INTERNAL_SECRET:-}",
+        "PORTAL_INTERNAL_SECRET": "${PORTAL_INTERNAL_SECRET}",
         "CLIENTS_URL": "http://clients:4002"
       },
       "depends_on": {
@@ -118,7 +120,7 @@
         "DATABASE_URL": "postgresql://clients:${CLIENTS_DB_PASSWORD}@postgres:5432/clients",
         "RABBITMQ_URL": "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672",
         "CONTEXT_PUBLIC_KEY": "${CONTEXT_PUBLIC_KEY}",
-        "PORTAL_INTERNAL_SECRET": "${PORTAL_INTERNAL_SECRET:-}"
+        "PORTAL_INTERNAL_SECRET": "${PORTAL_INTERNAL_SECRET}"
       },
       "depends_on": {
         "postgres": {
@@ -350,7 +352,9 @@
         "BILLING_URL": "http://billing:4005",
         "PAYMENTS_URL": "http://payments:4006",
         "NOTIFICATIONS_URL": "http://notifications:4007",
-        "INTEGRATIONS_URL": "http://integrations:4008"
+        "INTEGRATIONS_URL": "http://integrations:4008",
+        "PLANNING_URL": "http://planning:4009",
+        "REPORTING_URL": "http://reporting:4010"
       },
       "depends_on": {
         "platform": {
@@ -388,7 +392,11 @@
         "DATABASE_URL": "postgresql://integrations:${INTEGRATIONS_DB_PASSWORD}@postgres:5432/integrations",
         "RABBITMQ_URL": "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672",
         "CONTEXT_PUBLIC_KEY": "${CONTEXT_PUBLIC_KEY}",
-        "INTEGRATIONS_ENCRYPTION_KEY": "${INTEGRATIONS_ENCRYPTION_KEY}"
+        "INTEGRATIONS_ENCRYPTION_KEY": "${INTEGRATIONS_ENCRYPTION_KEY}",
+        "PORTAL_INTERNAL_SECRET": "${PORTAL_INTERNAL_SECRET}",
+        "CLIENTS_URL": "http://clients:4002",
+        "PUBLIC_APP_URL": "${PUBLIC_APP_URL}",
+        "PUBLIC_GATEWAY_URL": "${PUBLIC_GATEWAY_URL}"
       },
       "depends_on": {
         "postgres": {
@@ -404,6 +412,81 @@
           "node",
           "-e",
           "fetch('http://localhost:4008/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+        ],
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": 10
+      }
+    },
+    "planning": {
+      "build": {
+        "context": ".",
+        "args": {
+          "SERVICE": "planning"
+        }
+      },
+      "environment": {
+        "NODE_ENV": "development",
+        "PORT": "4009",
+        "DATABASE_URL": "postgresql://planning:${PLANNING_DB_PASSWORD}@postgres:5432/planning",
+        "RABBITMQ_URL": "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672",
+        "CONTEXT_PUBLIC_KEY": "${CONTEXT_PUBLIC_KEY}",
+        "CLIENTS_URL": "http://clients:4002"
+      },
+      "depends_on": {
+        "postgres": {
+          "condition": "service_healthy"
+        },
+        "rabbitmq": {
+          "condition": "service_healthy"
+        }
+      },
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://localhost:4009/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+        ],
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": 10
+      }
+    },
+    "reporting": {
+      "build": {
+        "context": ".",
+        "args": {
+          "SERVICE": "reporting"
+        }
+      },
+      "environment": {
+        "NODE_ENV": "development",
+        "PORT": "4010",
+        "DATABASE_URL": "postgresql://reporting:${REPORTING_DB_PASSWORD}@postgres:5432/reporting",
+        "RABBITMQ_URL": "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672",
+        "CONTEXT_PUBLIC_KEY": "${CONTEXT_PUBLIC_KEY}",
+        "SCHEDULING_URL": "http://scheduling:4003",
+        "LEARNING_URL": "http://learning:4004",
+        "BILLING_URL": "http://billing:4005",
+        "PUBLIC_APP_URL": "${PUBLIC_APP_URL:-http://localhost:3000}",
+        "PUBLIC_REPORTING_BASE_URL": "${PUBLIC_GATEWAY_URL:-http://localhost:8080}/api/reporting",
+        "CLIENTS_URL": "http://clients:4002"
+      },
+      "depends_on": {
+        "postgres": {
+          "condition": "service_healthy"
+        },
+        "rabbitmq": {
+          "condition": "service_healthy"
+        }
+      },
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://localhost:4010/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
         ],
         "interval": "10s",
         "timeout": "5s",
