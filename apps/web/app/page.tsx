@@ -41,6 +41,7 @@ import { BusinessDashboard } from "../features/business-dashboard";
 import { CRM } from "../features/crm";
 import { PlanningWorkspace } from "../features/planning-workspace";
 import { StudentTracker } from "../features/student-tracker";
+import { navigateTutor, tutorLocationKeys } from "../lib/tutor-workspace";
 import {
   CampaignComposer,
   CommunicationConnections,
@@ -91,6 +92,7 @@ function writeRoute(
   replace = false,
 ) {
   const url = new URL(window.location.href);
+  if (url.searchParams.get("business") !== business.id || url.searchParams.get("view") !== route.view) tutorLocationKeys.forEach(key => url.searchParams.delete(key));
   url.searchParams.set("business", business.id);
   url.searchParams.set("view", route.view);
   if (route.view === "integrations" && route.filter !== "all")
@@ -263,6 +265,7 @@ function Workspace({
   const { view, filter } = route;
   const [planningStudentId, setPlanningStudentId] = useState<string | undefined>();
   const [learningStudentId, setLearningStudentId] = useState<string | undefined>();
+  const [learningAssignmentId, setLearningAssignmentId] = useState<string | undefined>();
   const [preview, setPreview] = useState<Row | null>(null),
     [menuOpen, setMenuOpen] = useState(false),
     [error, setError] = useState(""),
@@ -294,11 +297,16 @@ function Workspace({
   function go(next: string) {
     if (next === 'settings' && !hasPermission(business, 'platform.write')) return;
     if (next !== 'overview' && next !== 'settings' && !enabled.some(feature => feature.id === next)) return;
+    setLearningAssignmentId(undefined);
     onNavigate({ view: next, filter: "all" });
     setMenuOpen(false);
     setPreview(null);
     setError("");
     setNotice("");
+  }
+  function openTutorRecord(next: "clients" | "tracker", id: string) {
+    go(next);
+    navigateTutor(business.id, next, next === "clients" ? {contact:id} : {student:id, trackerView:"all"}, true);
   }
   function connectors(type: "crm" | "calendars") {
     onNavigate({ view: "integrations", filter: type });
@@ -445,11 +453,12 @@ function Workspace({
           {view === "overview" && (
             <Overview api={api} business={business} user={user} go={go} />
           )}
-          {view === "tracker" && <StudentTracker api={api} business={business} onOpenPlanning={business.entitlements.includes("planning") && hasPermission(business, "planning.read") ? (studentId) => { setPlanningStudentId(studentId); go("planning"); } : undefined} onOpenLearning={hasPermission(business, "learning.write") ? (studentId) => { setLearningStudentId(studentId); go("learning"); } : undefined} />}
+          {view === "tracker" && <StudentTracker api={api} business={business} onOpenCRM={(id) => openTutorRecord("clients", id)} onOpenPlanning={business.entitlements.includes("planning") && hasPermission(business, "planning.read") ? (studentId) => { setPlanningStudentId(studentId); go("planning"); } : undefined} onOpenLearning={business.entitlements.includes("learning") && hasPermission(business, "learning.write") ? (studentId, assignmentId) => { go("learning"); setLearningStudentId(studentId); setLearningAssignmentId(assignmentId); } : undefined} />}
           {view === "clients" && (
             <CRM
               api={api}
               businessId={business.id}
+              onOpenTracker={enabled.some(feature => feature.id === "tracker") ? (id) => openTutorRecord("tracker", id) : undefined}
               role={business.role}
               permissions={business.permissions}
               onMessage={
@@ -466,6 +475,7 @@ function Workspace({
           {view === "learning" && (
             <Learning
               initialStudentId={learningStudentId}
+              initialAssignmentId={learningAssignmentId}
               api={api}
               businessId={business.id}
               onOpenClients={() => go("clients")}

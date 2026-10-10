@@ -15,6 +15,7 @@ import { errorMessage, type Api, type Row } from "../lib/api";
 import { Empty, Modal, Notice } from "../components/shared";
 import "./crm.css";
 import { StudentContacts } from "./student-contacts";
+import { contactDisplayName, navigateTutor, readContactLocation } from "../lib/tutor-workspace";
 import { DuplicateReview } from "./duplicate-review";
 import { hasPermission } from "@palladium/contracts";
 import {
@@ -75,9 +76,11 @@ export function CRM({
   role,
   permissions,
   onMessage,
+  onOpenTracker,
 }: {
   api: Api;
   onConnect: () => void;
+  onOpenTracker?: (studentId: string) => void;
   businessId?: string;
   role?: string;
   permissions?: string[];
@@ -175,6 +178,28 @@ export function CRM({
     [busy, setBusy] = useState(false),
     [loading, setLoading] = useState(true),
     [revision, setRevision] = useState(0);
+  function openEditor(row: Row) {
+    setError(""); setEditor(row); setDetailTab("record"); setRecordDirty(false);
+    if (businessId) navigateTutor(businessId, "clients", {contact:row.id ?? null});
+  }
+  function closeEditor() {
+    setEditor(null); setError(""); setRecordDirty(false);
+    if (businessId) navigateTutor(businessId, "clients", {contact:null});
+  }
+  useEffect(() => {
+    if (!businessId || !canRead) return;
+    let generation = 0, cancelled = false;
+    function restore() {
+      const id = readContactLocation(new URLSearchParams(window.location.search), businessId!);
+      const request = ++generation;
+      setEditor(null); setRecordDirty(false); setDetailTab("record");
+      if (id) api(`clients/v1/clients/${id}`).then(data => {
+        if (!cancelled && request === generation) setEditor(data.item);
+      }).catch(e => { if (!cancelled && request === generation) setError(errorMessage(e)); });
+    }
+    restore(); window.addEventListener("popstate", restore);
+    return () => { cancelled = true; window.removeEventListener("popstate", restore); };
+  }, [api, businessId, canRead]);
   const audienceFilter = {
     ...(search ? { search } : {}),
     ...(status ? { status } : {}),
@@ -258,9 +283,7 @@ export function CRM({
     const f = new FormData(e.currentTarget);
     const firstName = String(f.get("firstName")).trim(),
       lastName = String(f.get("lastName")).trim();
-    const displayName =
-      String(f.get("displayName") ?? "").trim() ||
-      [firstName, lastName].filter(Boolean).join(" ");
+    const displayName = contactDisplayName(editor?.id ? editor : null, firstName, lastName, String(f.get("displayName") ?? ""));
     if (!displayName) {
       setError(
         "Add a first name, last name, or display name to identify this contact.",
@@ -302,7 +325,7 @@ export function CRM({
           source: String(f.get("source") ?? "").trim() || null,
         },
       );
-      setEditor(null);
+      closeEditor();
       setRevision((n) => n + 1);
       setMessage("Contact saved.");
     } catch (e) {
@@ -619,22 +642,20 @@ export function CRM({
                     </td>
                     {displayedColumns.map((column) => (
                       <td key={column.key} data-label={column.label}>
-                        {columnCell(row, column, fields)}
+                        {column.key === "displayName" ? <button className="crm-record-open" onClick={() => openEditor(row)} aria-label={`Open ${row.displayName}`}>{columnCell(row, column, fields)}</button> : columnCell(row, column, fields)}
                       </td>
                     ))}
                     <td className="crm-edit-cell">
                       <button
                         aria-label={`Edit ${row.displayName}`}
                         onClick={() => {
-                          setError("");
-                          setEditor(row);
-                          setDetailTab("record");
-                          setRecordDirty(false);
+                          openEditor(row);
                         }}
                       >
                         <Pencil size={15} />
                         {canWrite ? "Edit" : "View"}
                       </button>
+                      {row.kind === "student" && onOpenTracker && <button onClick={() => onOpenTracker(row.id)} aria-label={`Track ${row.displayName}`}>Tracker ↗</button>}
                     </td>
                   </tr>
                 ))}
@@ -652,37 +673,35 @@ export function CRM({
                   ? "0 matching contacts"
                   : "No contacts yet"}
           </span>
-          <button
+          {total > 50 && <button
             disabled={loading || !offset}
             onClick={() => setOffset((n) => Math.max(0, n - 50))}
           >
             Previous
-          </button>
-          <button
+          </button>}
+          {total > 50 && <button
             disabled={loading || offset + 50 >= total}
             onClick={() => setOffset((n) => n + 50)}
           >
             Next
-          </button>
+          </button>}
         </div>
       </section>
       {editor && (
         <Modal
           title={editor.id ? editor.displayName : "Add contact"}
           onClose={() => {
-            if (!busy) {
-              setEditor(null);
-              setError("");
-            }
+            if (!busy) closeEditor();
           }}
         >
           <Notice error={error} />
+          {editor.id && editor.kind === "student" && onOpenTracker && <div className="tracker-actions"><button disabled={busy || recordDirty} onClick={() => onOpenTracker(editor.id)}>Open student tracker ↗</button></div>}
           {editor.id && editor.kind === "student" && <div className="student-detail-tabs" role="tablist" aria-label="Student details"><button role="tab" disabled={busy} aria-selected={detailTab === "record"} onClick={() => setDetailTab("record")}>Record details</button><button role="tab" disabled={busy || recordDirty} aria-selected={detailTab === "contacts"} onClick={() => setDetailTab("contacts")}>Related contacts</button></div>}
           {recordDirty && editor.kind === "student" && <p className="crm-helper">Save your record changes before editing related contacts.</p>}
           {editor.id && editor.kind === "student" && <div hidden={detailTab !== "contacts"}><StudentContacts api={api} student={editor} canWrite={canWrite} onBusyChange={setBusy} onChanged={async () => { const data = await api(`clients/v1/clients/${editor.id}`); setEditor(data.item); setRevision((n) => n + 1); }} /></div>}
           <div hidden={detailTab !== "record"}>
           <p className="crm-helper">
-            Provide at least one name. Email and the other details are optional.
+            Provide at least one name. Display names follow first and last name unless you set a custom name. Email and other details are optional.
           </p>
           <form key={`${editor.id ?? "new"}:${editor.revision ?? 0}`} onSubmit={save} onChange={() => setRecordDirty(true)}>
             <fieldset disabled={!canWrite || busy} className="crm-record-fields">
@@ -816,8 +835,7 @@ export function CRM({
                 type="button"
                 disabled={busy}
                 onClick={() => {
-                  setEditor(null);
-                  setError("");
+                  closeEditor();
                 }}
               >
                 Cancel

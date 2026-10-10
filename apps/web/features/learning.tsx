@@ -10,6 +10,8 @@ import {
 import { Empty, Modal, Notice } from "../components/shared";
 import "./teaching-ux.css";
 import { DatePicker } from "../components/date-picker";
+import { StudentSubmission } from "../components/student-submission";
+import { tutorHomeworkOrder } from "../lib/tutor-workspace";
 
 const assignmentStatus: Record<string, string> = {
   assigned: "Assigned",
@@ -28,11 +30,13 @@ export function Learning({
   businessId,
   onOpenClients,
   initialStudentId,
+  initialAssignmentId,
 }: {
   api: Api;
   businessId: string;
   onOpenClients?: () => void;
   initialStudentId?: string;
+  initialAssignmentId?: string;
 }) {
   const [studentId, setStudentId] = useState("");
   const [filterStudentId, setFilterStudentId] = useState(initialStudentId ?? "");
@@ -50,6 +54,15 @@ export function Learning({
     [opening, setOpening] = useState(false),
     [saveStep, setSaveStep] = useState(""),
     [loading, setLoading] = useState(true);
+  useEffect(() => {
+    if (!initialAssignmentId) return;
+    let cancelled = false;
+    api(`learning/v1/assignments/${initialAssignmentId}`).then(data => {
+      if (initialStudentId && data.item.clientId !== initialStudentId) throw new Error("This assignment does not belong to the selected student.");
+      if (!cancelled) setSelected(data.item);
+    }).catch(e => { if (!cancelled) setError(errorMessage(e)); });
+    return () => { cancelled = true; };
+  }, [api, initialAssignmentId, initialStudentId]);
   async function loadStudents() {
     const all: Row[] = [];
     for (let offset = 0; offset < 2000; offset += 100) {
@@ -238,7 +251,7 @@ export function Learning({
           </Empty>
         ) : (
           <div className="assignment-grid">
-            {rows.map((row) => (
+            {tutorHomeworkOrder(rows).map((row) => (
               <article className="assignment-card" key={row.id}>
                 <div className="panel-title">
                   <strong>{row.title}</strong>
@@ -499,12 +512,7 @@ export function Learning({
               </button>
             ))}
           </div>
-          {selected.submissionText && (
-            <section className="submission">
-              <h3>Student work</h3>
-              <p className="teaching-work-text">{selected.submissionText}</p>
-            </section>
-          )}
+          <StudentSubmission assignment={selected} onDownload={download} />
           {selected.feedback && (
             <blockquote>
               <strong>Feedback</strong>

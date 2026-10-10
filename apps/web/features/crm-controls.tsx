@@ -406,11 +406,13 @@ const filterBuiltins = [
   },
 ];
 export function FiltersDialog({
+  selectionHint = "Selection clears when filters change.",
   fields,
   filters,
   onApply,
   onClose,
 }: {
+  selectionHint?: string;
   fields: CRMField[];
   filters: CRMFilter[];
   onApply: (filters: CRMFilter[]) => void;
@@ -443,7 +445,7 @@ export function FiltersDialog({
     <Modal title="Filter contacts" onClose={onClose}>
       <form onSubmit={apply}>
         <p className="crm-helper">
-          Contacts must match every rule. Selection clears when filters change.
+          Contacts must match every rule. {selectionHint}
         </p>
         <Notice error={error} />
         <div className="crm-filter-rules">
