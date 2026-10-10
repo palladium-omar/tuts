@@ -1,0 +1,15 @@
+.server-student-select { min-width: 0; }
+.server-student-select > label { margin-bottom: 7px; font-size: 12px; font-weight: 600; }
+.server-student-field { display: flex; align-items: center; gap: 7px; }
+.server-student-field select { min-width: 150px; width: 100%; }
+.server-student-field > button { flex-shrink: 0; font-size: 11px; padding: 10px; }
+.server-student-search { background: var(--tint); border: 1px solid var(--line); padding: 12px; border-radius: 8px; margin-top: 10px; }
+.server-student-search label { font-size: 11px; gap: 7px; }
+.server-student-search input { width: 100%; }
+.server-student-pagination { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 11px; margin: 10px 0; }
+.server-student-pagination > div { display: flex; gap: 4px; }
+.server-student-pagination button { font-size: 10px; padding: 5px 7px; }
+.server-student-search > small, .server-student-error { display: block; font-size: 10px; line-height: 1.6; color: var(--muted); }
+.server-student-error { color: #a32929; margin-top: 8px; }
+.server-student-error button { margin-left: 8px; padding: 5px; font-size: 11px; }
+@media (max-width: 650px) { .server-student-field { flex-wrap: wrap; } .server-student-field select { flex: 1; } .server-student-pagination { align-items: flex-start; flex-direction: column; } }

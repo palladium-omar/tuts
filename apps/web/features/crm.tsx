@@ -16,6 +16,7 @@ import { Empty, Modal, Notice } from "../components/shared";
 import "./crm.css";
 import { StudentContacts } from "./student-contacts";
 import { contactDisplayName, navigateTutor, readContactLocation } from "../lib/tutor-workspace";
+import {useListOffset,useListQuery} from '../lib/use-list-query';
 import { DuplicateReview } from "./duplicate-review";
 import { hasPermission } from "@palladium/contracts";
 import {
@@ -46,7 +47,7 @@ const importFields: Record<string, string> = {
 const aliases: Record<string, string[]> = {
   firstName: ["firstname", "givenname"],
   lastName: ["lastname", "surname", "familyname"],
-  displayName: ["name", "fullname", "displayname", "contactname"],
+  displayName: ["name", "fullname", "displayname", "contactname", "studentname"],
   email: ["email", "emailaddress", "e-mail"],
   phone: ["phone", "phonenumber", "mobile"],
   kind: ["kind", "type", "clienttype"],
@@ -77,10 +78,12 @@ export function CRM({
   permissions,
   onMessage,
   onOpenTracker,
+  onImportHistory,
 }: {
   api: Api;
   onConnect: () => void;
   onOpenTracker?: (studentId: string) => void;
+  onImportHistory?: (file: File) => void;
   businessId?: string;
   role?: string;
   permissions?: string[];
@@ -166,17 +169,13 @@ export function CRM({
         );
       } catch {}
   }, [visible, preferencesBusiness, currentBusiness]);
-  const [rows, setRows] = useState<Row[]>([]),
-    [total, setTotal] = useState(0),
-    [offset, setOffset] = useState(0),
-    [search, setSearch] = useState(""),
+  const [search, setSearch] = useState(""),
     [status, setStatus] = useState("");
   const [editor, setEditor] = useState<Row | null>(null),
     [importing, setImporting] = useState(false),
     [error, setError] = useState(""),
     [message, setMessage] = useState(""),
     [busy, setBusy] = useState(false),
-    [loading, setLoading] = useState(true),
     [revision, setRevision] = useState(0);
   function openEditor(row: Row) {
     setError(""); setEditor(row); setDetailTab("record"); setRecordDirty(false);
@@ -211,6 +210,10 @@ export function CRM({
     ...(filters.length ? { filters } : {}),
   };
   const filterKey = JSON.stringify(audienceFilter);
+  const [offset,setOffset]=useListOffset(`${currentBusiness}:${filterKey}:${sortBy}:${sortDirection}`);
+  const listPath=`clients/v1/clients?${new URLSearchParams({limit:'50',offset:String(offset),sortBy,sortDirection,...Object.fromEntries(Object.entries(audienceFilter).map(([key,value])=>[key,key==='filters'?JSON.stringify(value):String(value)]))})}`;
+  const list=useListQuery(api,listPath,{enabled:canRead,revision,scope:currentBusiness,delay:search?250:0});
+  const rows:Row[]=list.data?.items??[],total=list.data?.total??0,loading=list.loading;
   useEffect(() => {
     setSelected(new Set());
     setAllMatching(false);
@@ -247,36 +250,6 @@ export function CRM({
     setOffset(0);
   }
 
-  useEffect(() => {
-    let cancelled = false;
-    if (!canRead) { setRows([]); setTotal(0); setLoading(false); return; }
-    setLoading(true);
-    const timer = setTimeout(
-      () => {
-        api(
-          `clients/v1/clients?${new URLSearchParams({ limit: "50", offset: String(offset), sortBy, sortDirection, ...Object.fromEntries(Object.entries(audienceFilter).map(([key, value]) => [key, key === "filters" ? JSON.stringify(value) : String(value)])) })}`,
-        )
-          .then((data) => {
-            if (!cancelled) {
-              setRows(data.items);
-              setTotal(data.total ?? data.items.length);
-              setError("");
-            }
-          })
-          .catch((e) => {
-            if (!cancelled) setError(errorMessage(e));
-          })
-          .finally(() => {
-            if (!cancelled) setLoading(false);
-          });
-      },
-      search ? 250 : 0,
-    );
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [api, canRead, filterKey, sortBy, sortDirection, offset, revision]);
   async function save(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!canWrite) return;
@@ -390,7 +363,8 @@ export function CRM({
           </button>}
         </div>
       </div>
-      <Notice error={!editor ? error || fieldError : ""} message={message} />
+      <Notice error={!editor ? error || list.error || fieldError : ""} message={message} />
+      {loading && rows.length > 0 && <p role="status" className="crm-helper">Updating contacts…</p>}
       <section className="panel">
         <div className="toolbar">
           <label className="search">
@@ -543,7 +517,7 @@ export function CRM({
             </button>
           </div>
         )}
-        {loading ? (
+        {loading && !rows.length ? (
           <Empty>Loading contacts…</Empty>
         ) : rows.length === 0 ? (
           <Empty>
@@ -636,7 +610,7 @@ export function CRM({
                         type="checkbox"
                         aria-label={`Select ${row.displayName}`}
                         checked={allMatching || selected.has(row.id)}
-                        disabled={allMatching}
+                        disabled={allMatching || loading}
                         onChange={(e) => toggleRow(row.id, e.target.checked)}
                       />
                     </td>
@@ -881,6 +855,7 @@ export function CRM({
         <ImportContacts
           api={api}
           fields={fields}
+          onImportHistory={onImportHistory}
           onClose={() => setImporting(false)}
           onImported={(summary) => {
             setImporting(false);
@@ -898,10 +873,12 @@ function ImportContacts({
   fields,
   onClose,
   onImported,
+  onImportHistory,
 }: {
   api: Api;
   onClose: () => void;
   onImported: (message: string) => void;
+  onImportHistory?: (file: File) => void;
   fields: CRMField[];
 }) {
   const content = useRef<HTMLDivElement>(null);
@@ -938,6 +915,14 @@ function ImportContacts({
       const form = new FormData();
       form.set("file", file);
       const data = await api("clients/v1/imports/parse", "POST", form);
+      const headerKeys = data.item.headers.map((h:string)=>h.toLowerCase().replace(/[^a-z]/g,''));
+      const named = headerKeys.some((h:string)=>['studentname','student','clientname','name'].includes(h));
+      const workFile = named && headerKeys.some((h:string)=>h.startsWith('hoursworked') || h.startsWith('hourlyrate') || h === 'totalhours');
+      const invoiceFile = named && headerKeys.includes('invoicestatus') && headerKeys.some((h:string)=>h.startsWith('total') || h.startsWith('amount')) && !headerKeys.includes('email');
+      if (workFile || invoiceFile) {
+        if (onImportHistory) { onImportHistory(file); onClose(); return; }
+        throw new Error('This file contains work or invoice records. Import it from Dashboard → Work tracker or Monthly invoices with financial access.');
+      }
       setSheet(data.item);
       const initial: Record<string, string> = {};
       for (const [field, options] of Object.entries(aliases)) {

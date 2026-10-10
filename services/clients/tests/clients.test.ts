@@ -136,3 +136,13 @@ test("payer linkage rejects student-as-payer and writes no relationship", async 
   );
   assert.equal(writes, 0);
 });
+
+test('dashboard student counts use one tenant-scoped aggregate and reject student scopes',async()=>{
+ let queries=0;
+ const db={async withTenant(id:string,work:(tx:unknown)=>Promise<unknown>){assert.equal(id,tenant);return work({async query(sql:string){queries++;assert.match(sql,/kind='student' AND merged_into IS NULL/);assert.match(sql,/FILTER/);return {rows:[{total:'8',active:'4',leads:'3',inactive:'1'}]};}});}} as unknown as Database;
+ const controller=new ClientsController(db);
+ assert.deepEqual(await controller.studentStats(context),{item:{total:8,active:4,leads:3,inactive:1}});
+ assert.equal(queries,1);
+ await assert.rejects(controller.studentStats({...context,accessScope:'students',studentIds:[client]}));
+ assert.equal(queries,1);
+});

@@ -234,7 +234,7 @@ function maintenanceResponse(request: Request, env: GatewayEnv): Response {
   return responseWithCors(response, trusted ? origin : undefined);
 }
 
-async function route(request: Request, env: GatewayEnv, requestId: string): Promise<Response> {
+async function route(request: Request, env: GatewayEnv, requestId: string, timings: { identityMs?: number; upstreamMs?: number }): Promise<Response> {
   const url = new URL(request.url);
   if (!safePath(url.pathname)) return notFound();
   const match = /^\/api\/([^/]+)(\/.*)?$/.exec(url.pathname);
@@ -268,6 +268,7 @@ async function route(request: Request, env: GatewayEnv, requestId: string): Prom
   if (service !== "platform" && !hook && !publicReportingLink) {
     const businessId = request.headers.get("x-business-id");
     if (!businessId) return decorate(error(400, "business_required", "Select a business"));
+    const identityStarted = Date.now();
     try {
       if (!env.PLATFORM_INTERNAL_SECRET) throw new Error("Internal identity secret required");
       const contextHeaders = new Headers({
@@ -299,9 +300,12 @@ async function route(request: Request, env: GatewayEnv, requestId: string): Prom
     } catch (reason) {
       logDiagnostic("error", "identity_failed", { error: reason, target: "platform" });
       return decorate(error(503, "identity_unavailable", "Business access could not be verified"));
+    } finally {
+      timings.identityMs = Date.now() - identityStarted;
     }
   }
   const binding = env[service!.toUpperCase() as Uppercase<(typeof serviceNames)[number]>];
+  const upstreamStarted = Date.now();
   try {
     return decorate(await boundFetch(binding, `https://${service}.internal${path}${url.search}`,
       request, headers, limit, 30_000));
@@ -310,6 +314,8 @@ async function route(request: Request, env: GatewayEnv, requestId: string): Prom
     return decorate(reason instanceof BodyTooLarge
       ? error(413, "body_too_large", "Request body is too large")
       : error(503, "service_unavailable", `${service} service is unavailable`));
+  } finally {
+    timings.upstreamMs = Date.now() - upstreamStarted;
   }
 }
 
@@ -318,21 +324,23 @@ export default {
     const requestId = diagnosticId(); // Public callers cannot forge support references.
     return withDiagnostics({ service: 'gateway', requestId, trigger: 'http' }, async () => {
       const started = Date.now();
+      const timings: { identityMs?: number; upstreamMs?: number } = {};
       let response: Response;
-      try { response = env.TUTS_MAINTENANCE === "true" ? maintenanceResponse(request, env) : await route(request, env, requestId); }
+      try { response = env.TUTS_MAINTENANCE === "true" ? maintenanceResponse(request, env) : await route(request, env, requestId, timings); }
       catch (reason) {
         logDiagnostic('error', 'request_failed', { error: reason });
         response = error(503, "service_unavailable", "Gateway is unavailable");
       }
       const path = new URL(request.url).pathname;
       logDiagnostic(response.status >= 500 ? 'error' : response.status >= 400 ? 'warn' : 'info', 'request_completed', {
-        status: response.status, method: request.method, route: path, durationMs: Date.now() - started,
+        status: response.status, method: request.method, route: path, durationMs: Date.now() - started, ...timings,
       });
       const sensitive = /^\/(?:forgot-password|reset-password)(?:\/|$)/.test(path) || path.startsWith("/api/platform/auth/");
       const secured = responseWithSecurityHeaders(response, sensitive);
       const headers = copyResponseHeaders(secured);
       headers.set('x-request-id', requestId);
-      headers.set('access-control-expose-headers', 'X-Request-Id');
+      headers.set('server-timing', [`gateway;dur=${Math.max(0, Date.now()-started)}`, ...Object.entries(timings).map(([name, value]) => `${name === 'identityMs' ? 'identity' : 'service'};dur=${Math.max(0, value)}`)].join(', '));
+      headers.set('access-control-expose-headers', 'X-Request-Id, Server-Timing');
       return new Response(secured.body, { status: secured.status, statusText: secured.statusText, headers });
     });
   },

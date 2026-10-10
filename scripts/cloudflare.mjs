@@ -30,6 +30,7 @@ export function validateDeployment(input, remote = false) {
   if (!/^[a-z][a-z0-9-]{0,29}$/.test(config.prefix)) fail('prefix must be a lowercase resource name, at most 30 characters');
   if (!['worker', 'pages'].includes(config.ingress)) fail('ingress must be worker or pages');
   if (config.authMailEnabled !== undefined && typeof config.authMailEnabled !== 'boolean') fail('authMailEnabled must be a boolean');
+  if (config.databaseRegion !== undefined && !/^(aws|gcp|azure):[a-z][a-z0-9-]{1,63}$/.test(config.databaseRegion)) fail('databaseRegion must be a supported cloud provider region');
   if (config.ingress === 'pages') {
     if (typeof config.pagesProject !== 'string' || !/^[a-z\d](?:[a-z\d-]{0,56}[a-z\d])?$/.test(config.pagesProject)) fail('pagesProject must be a lowercase Pages project name, at most 58 characters');
   }
@@ -114,6 +115,7 @@ export function createConfigs(configInput, subscriptions, projectRoot = root) {
     const consumes = subscriptions.some(subscription => subscription.consumer === name);
     output[name] = {
       ...common, name: `${config.prefix}-${name}`, main: join(projectRoot, 'services', name, 'dist/worker.js'), workers_dev: false,
+      ...(config.databaseRegion ? { placement: { region: config.databaseRegion } } : {}),
       ...(['platform', 'notifications'].includes(name) ? { vars: { ...common.vars, AUTH_MAIL_ENABLED: config.authMailEnabled ? 'true' : 'false' } } : {}),
       queues: { ...(producers.length ? { producers } : {}), ...(consumes ? { consumers: [{ queue: queueName(config, name), max_batch_size: 5, max_batch_timeout: 5, max_retries: 5, dead_letter_queue: queueName(config, name, true) }] } : {}) },
       r2_buckets: [{ binding: 'EVENT_PAYLOADS', bucket_name: `${config.prefix}-event-payloads` }, ...(name === 'learning' ? [{ binding: 'UPLOADS', bucket_name: `${config.prefix}-uploads` }] : [])],

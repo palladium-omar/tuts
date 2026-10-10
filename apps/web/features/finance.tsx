@@ -154,7 +154,7 @@ export function Invoices({ api, business }: { api: Api; business: Business }) {
             {rows.length} {rows.length === 1 ? "invoice" : "invoices"}
           </span>
         </div>
-        {loading ? (
+        {loading && !rows.length ? (
           <Empty>Loading invoices…</Empty>
         ) : !rows.length ? (
           <Empty>
@@ -646,7 +646,7 @@ export function Payments({
             </button>
           )}
         </div>
-        {loading ? (
+        {loading && !connections.length ? (
           <p className="muted">Loading payment accounts…</p>
         ) : connections.length ? (
           connections.map((connection) => (
@@ -754,7 +754,7 @@ export function Payments({
           <h3>Payment activity</h3>
           <span className="tag">Test / simulated</span>
         </div>
-        {loading ? (
+        {loading && !rows.length ? (
           <Empty>Loading payment activity…</Empty>
         ) : !rows.length ? (
           <Empty>

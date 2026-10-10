@@ -38,3 +38,8 @@ export function tutorHomeworkOrder<T extends {status?: string; dueAt?: string | 
     || (left.dueAt ? Date.parse(left.dueAt) : Infinity) - (right.dueAt ? Date.parse(right.dueAt) : Infinity)
     || (left.title ?? '').localeCompare(right.title ?? ''));
 }
+
+/** Dashboard is a shell route; feature routes still require their enabled capability. */
+export function canNavigateTutor(view: string, enabledFeatures: string[], canEditBusiness: boolean) {
+  return view === "dashboard" || (view === "settings" ? canEditBusiness : enabledFeatures.includes(view));
+}

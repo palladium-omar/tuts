@@ -1,6 +1,7 @@
 import {
   Body,
   ConflictException,
+  ForbiddenException,
   Controller,
   Delete,
   Get,
@@ -45,6 +46,23 @@ import {
 @Controller("v1/clients")
 export class ClientsController {
   constructor(@Inject(Database) private readonly db: Database) {}
+
+  @Get("student-stats")
+  @Permissions("clients.read")
+  @ApiOperation({ summary: "Business student counts in one aggregate query" })
+  async studentStats(@CurrentContext() ctx: RequestContext) {
+    if (ctx.accessScope === "students") throw new ForbiddenException("Business access required");
+    return this.db.withTenant(ctx.businessId, async (tx) => {
+      const result = await tx.query<{ total: string; active: string; leads: string; inactive: string }>(
+        `SELECT count(*) AS total,
+          count(*) FILTER (WHERE status='active') AS active,
+          count(*) FILTER (WHERE status='lead') AS leads,
+          count(*) FILTER (WHERE status='inactive') AS inactive
+         FROM clients WHERE kind='student' AND merged_into IS NULL`,
+      );
+      return { item: Object.fromEntries(Object.entries(result.rows[0]!).map(([key, value]) => [key, Number(value)])) };
+    });
+  }
 
   @Get()
   @Permissions("clients.read")

@@ -61,69 +61,89 @@ export function BusinessDashboard({
     [busy, setBusy] = useState(false),
     [loading, setLoading] = useState(true),
     [error, setError] = useState(""),
-    [notice, setNotice] = useState("");
+    [notice, setNotice] = useState(""),
+    [studentSearch, setStudentSearch] = useState(""),
+    [studentOffset, setStudentOffset] = useState(0),
+    [studentTotal, setStudentTotal] = useState(0),
+    [studentsLoading, setStudentsLoading] = useState(false),
+    [studentsError, setStudentsError] = useState(""),
+    [reportMonth, setReportMonth] = useState(""),
+    [financeMonth, setFinanceMonth] = useState(""),
+    [classesMonth, setClassesMonth] = useState("");
   const manage = hasPermission(business, 'billing.manage'),
     billing = business.entitlements.includes("billing") && hasPermission(business, 'billing.read'),
     scheduling = business.entitlements.includes("scheduling") && hasPermission(business, 'scheduling.read');
   const loadSequence = useRef(0);
+  const loadController = useRef<AbortController | null>(null);
   const initializedMonth = useRef(false);
-  async function contacts() {
-    if (!business.entitlements.includes("clients") || !hasPermission(business, 'clients.read')) return [];
-    const all: Row[] = [];
-    for (let offset = 0; offset < 10000; offset += 100) {
-      const r = await api(
-        `clients/v1/clients?kind=student&limit=100&offset=${offset}`,
-      );
-      all.push(...r.items);
-      if (all.length >= r.total || r.items.length < 100) break;
-    }
-    return all;
-  }
-  async function load() {
+  const canReadStudents = business.entitlements.includes("clients") && hasPermission(business, 'clients.read');
+  useEffect(() => {
+    initializedMonth.current = false;
+    setSettings(null); setRates([]); setStudents([]); setClasses([]); setReport(null); setFinance(null);
+    setReportMonth(""); setFinanceMonth(""); setClassesMonth(""); setStudentOffset(0); setStudentSearch("");
+    setPreview(null); setEditor(null); setConfigure(false);
+  }, [api, business.id]);
+  useEffect(() => {
+    if (!canReadStudents) { setStudents([]); setStudentTotal(0); return; }
+    let current = true;
+    const controller = new AbortController();
+    let timeout: ReturnType<typeof setTimeout>;
+    setStudentsLoading(true); setStudentsError("");
+    const timer = setTimeout(() => {
+      timeout = setTimeout(() => controller.abort(), 20_000);
+      const query = new URLSearchParams({ kind: "student", limit: "100", offset: String(studentOffset), sortBy: "displayName", sortDirection: "asc" });
+      if (studentSearch.trim()) query.set("search", studentSearch.trim());
+      void api(`clients/v1/clients?${query}`, "GET", undefined, undefined, { signal: controller.signal }).then(result => {
+        if (current) { setStudents(result.items ?? []); setStudentTotal(result.total ?? 0); }
+      }).catch(e => { if (current) setStudentsError(controller.signal.aborted ? "Student search timed out. Change the search to try again." : errorMessage(e)); })
+        .finally(() => { clearTimeout(timeout); if (current) setStudentsLoading(false); });
+    }, studentSearch ? 250 : 0);
+    return () => { current = false; clearTimeout(timer); clearTimeout(timeout); controller.abort(); };
+  }, [api, business.id, canReadStudents, studentSearch, studentOffset]);
+  async function load(fresh = false) {
     const sequence = ++loadSequence.current;
+    loadController.current?.abort();
+    const controller = new AbortController();
+    loadController.current = controller;
+    const timer = setTimeout(() => controller.abort(), 20_000);
+    const request = (path: string) => api(path, "GET", undefined, undefined, { signal: controller.signal, fresh });
+    const current = () => sequence === loadSequence.current && !controller.signal.aborted;
     setLoading(true);
+    setError("");
     try {
       if (!billing) return;
-      const [s, r, c] = await Promise.all([
-        api("billing/v1/billing-settings"),
-        api("billing/v1/student-rates"),
-        contacts(),
-      ]);
-      if (sequence !== loadSequence.current) return;
-      setSettings(s.item);
-      setRates(r.items);
-      setStudents(c);
-      if (!initializedMonth.current) {
-        initializedMonth.current = true;
-        const parts = new Intl.DateTimeFormat("en-CA", {
-          timeZone: s.item.timeZone,
-          year: "numeric",
-          month: "2-digit",
-        }).formatToParts(new Date());
-        const current = `${parts.find((p) => p.type === "year")!.value}-${parts.find((p) => p.type === "month")!.value}`;
-        const initial = moveMonth(current, -1);
-        if (initial !== month) {
-          setMonth(initial);
-          return;
+      const settingsRequest = request("billing/v1/billing-settings").then(s => {
+        if (!current()) return null;
+        setSettings(s.item);
+        if (!initializedMonth.current) {
+          initializedMonth.current = true;
+          const parts = new Intl.DateTimeFormat("en-CA", { timeZone: s.item.timeZone, year: "numeric", month: "2-digit" }).formatToParts(new Date());
+          const initial = moveMonth(`${parts.find(p => p.type === "year")!.value}-${parts.find(p => p.type === "month")!.value}`, -1);
+          if (initial !== month) setMonth(initial);
         }
-      }
-      const [d, f, l] = await Promise.all([
-        api(`billing/v1/dashboard?month=${month}`),
-        api(`billing/v1/dashboard?month=${moveMonth(month, 1)}`),
-        scheduling
-          ? api(
-              `scheduling/v1/class-ledger?month=${month}&timeZone=${encodeURIComponent(s.item.timeZone)}`,
-            )
-          : Promise.resolve({ items: [] }),
+        return s.item;
+      });
+      // Each successful section appears independently; slow contacts or ledger data never gate billing.
+      const results = await Promise.allSettled([
+        settingsRequest,
+        request("billing/v1/student-rates").then(r => { if (current()) setRates(r.items ?? []); }),
+        request(`billing/v1/dashboard?month=${month}`).then(d => { if (current()) { setReport(d.item); setReportMonth(month); } }),
+        request(`billing/v1/dashboard?month=${moveMonth(month, 1)}`).then(f => { if (current()) { setFinance(f.item); setFinanceMonth(moveMonth(month, 1)); } }),
+        settingsRequest.then(async settings => {
+          if (!settings || !current()) return;
+          if (!scheduling) { setClasses([]); setClassesMonth(month); return; }
+          const result = await request(`scheduling/v1/class-ledger?month=${month}&timeZone=${encodeURIComponent(settings.timeZone)}`);
+          if (current()) { setClasses(result.items ?? []); setClassesMonth(month); }
+        }),
       ]);
-      if (sequence !== loadSequence.current) return;
-      setReport(d.item);
-      setFinance(f.item);
-      setClasses(l.items);
-      setError("");
+      if (sequence === loadSequence.current) {
+        const failures = results.filter(result => result.status === "rejected");
+        if (failures.length) setError(controller.signal.aborted ? "Some billing data took too long to respond. Refresh to try again." : [...new Set(failures.map(result => errorMessage((result as PromiseRejectedResult).reason)))].join(" "));
+      }
     } catch (e) {
       if (sequence === loadSequence.current) setError(errorMessage(e));
     } finally {
+      clearTimeout(timer);
       if (sequence === loadSequence.current) setLoading(false);
     }
   }
@@ -132,8 +152,9 @@ export function BusinessDashboard({
     setPreview(null);
     return () => {
       loadSequence.current++;
+      loadController.current?.abort();
     };
-  }, [api, month]);
+  }, [api, business.id, month, billing, scheduling]);
   async function act(fn: () => Promise<void>) {
     setBusy(true);
     setError("");
@@ -147,8 +168,11 @@ export function BusinessDashboard({
     }
   }
   const names = new Map(students.map((s) => [s.id, s.displayName]));
+  const tableMonth = reportMonth || classesMonth || month;
+  const tableClasses = classesMonth === tableMonth ? classes : [];
+  const classCountsKnown = classesMonth === tableMonth;
   const countByClient = new Map<string, Row>();
-  for (const c of classes) {
+  for (const c of tableClasses) {
     if (!c.clientId) continue;
     const existing = countByClient.get(c.clientId) || {
       clientId: c.clientId,
@@ -171,7 +195,7 @@ export function BusinessDashboard({
     .map(
       (clientId): Row => ({
         ...reportRows.get(clientId),
-        ...(scheduling
+        ...(scheduling && classCountsKnown
           ? {
               completedCount: 0,
               scheduledCount: 0,
@@ -188,42 +212,40 @@ export function BusinessDashboard({
         String(names.get(b.clientId) || b.payerName || b.clientId),
       ),
     );
-  const unmatched = classes.filter(
+  const unmatched = tableClasses.filter(
     (c) => !c.clientId && c.status !== "cancelled",
   );
+  const studentPage = <StudentPageControls search={studentSearch} offset={studentOffset} total={studentTotal} count={students.length} loading={studentsLoading} error={studentsError} onSearch={value => { setStudentSearch(value); setStudentOffset(0); }} onOffset={setStudentOffset} />;
   if (!billing) return null;
   return (
     <section className="business-dashboard">
       <div className="dashboard-toolbar">
         <div>
-          <h2>Your business, month by month.</h2>
+          <h2>Prepare your monthly billing.</h2>
           <p className="muted">
             {labelMonth(month)} classes · invoices on {invoiceDay(month)}
           </p>
         </div>
         <div className="dashboard-month">
           <button
-            disabled={busy || loading}
+            disabled={busy}
             aria-label="Previous service month"
-            onClick={() => setMonth(moveMonth(month, -1))}
+            onClick={() => { initializedMonth.current = true; setMonth(moveMonth(month, -1)); }}
           >
             <ChevronLeft size={16} />
           </button>
-          <strong>{labelMonth(month)}</strong>
+          <label><span className="sr-only">Billing service month</span><input type="month" value={month} disabled={busy} onChange={event => { if (/^\d{4}-\d{2}$/.test(event.target.value)) { initializedMonth.current = true; setMonth(event.target.value); } }} /></label>
           <button
-            disabled={busy || loading}
+            disabled={busy}
             aria-label="Next service month"
-            onClick={() => setMonth(moveMonth(month, 1))}
+            onClick={() => { initializedMonth.current = true; setMonth(moveMonth(month, 1)); }}
           >
             <ChevronRight size={16} />
           </button>
         </div>
       </div>
       <Notice error={error} message={notice} />
-      {loading && !report ? (
-        <div className="panel">Loading your business dashboard…</div>
-      ) : (
-        <>
+      <div className="dashboard-loading-note" role="status">{loading ? report ? `Updating billing${tableMonth !== month ? ` · showing class totals for ${labelMonth(tableMonth)}` : ""}…` : "Loading billing data…" : report && tableMonth !== month ? `Class totals shown for ${labelMonth(tableMonth)}. Refresh to try loading the selected month again.` : ""}<button disabled={loading || busy} aria-label="Refresh monthly billing" onClick={() => void load(true)}><RefreshCw size={14} /> Refresh</button></div>
           <div className="dashboard-currencies">
             {(finance?.currencies?.length
               ? finance.currencies
@@ -240,8 +262,8 @@ export function BusinessDashboard({
               <div key={c.currency}>
                 <span className="eyebrow">
                   {c.currency === "—"
-                    ? "No financial activity yet"
-                    : `${c.currency} · ${labelMonth(moveMonth(month, 1))}`}
+                    ? finance ? "No financial activity yet" : loading ? "Loading financial totals…" : "Financial totals unavailable"
+                    : `${c.currency} · ${labelMonth(financeMonth || moveMonth(month, 1))}`}
                 </span>
                 <div className="dashboard-metrics">
                   {[
@@ -274,13 +296,13 @@ export function BusinessDashboard({
               <div>
                 <h3>Classes & monthly billing</h3>
                 <small className="muted">
-                  Completed classes determine the invoice. Timezone:{" "}
+                  {labelMonth(tableMonth)} · Completed classes determine the invoice. Timezone:{" "}
                   {settings?.timeZone || "UTC"}
                 </small>
               </div>
               <div className="dashboard-actions">
                 <button
-                  disabled={busy || !scheduling}
+                  disabled={busy || loading || !scheduling || !settings}
                   onClick={() =>
                     void act(async () => {
                       await api("billing/v1/monthly/reconcile", "POST", {
@@ -309,7 +331,7 @@ export function BusinessDashboard({
                     </button>
                     <button
                       className="primary"
-                      disabled={busy}
+                      disabled={busy || loading || !settings || tableMonth !== month}
                       onClick={() =>
                         void act(async () => {
                           await api("billing/v1/monthly/reconcile", "POST", {
@@ -354,16 +376,16 @@ export function BusinessDashboard({
                             s.payerName ||
                             shortId(s.clientId)}
                         </td>
-                        <td>{s.completedCount || 0}</td>
-                        <td>{s.scheduledCount || 0}</td>
-                        <td>{s.cancelledCount || 0}</td>
+                        <td>{s.completedCount ?? "—"}</td>
+                        <td>{s.scheduledCount ?? "—"}</td>
+                        <td>{s.cancelledCount ?? "—"}</td>
                         <td>
                           {s.rate
                             ? money(s.rate.unitPriceMinor, s.rate.currency)
                             : "Not set"}
                         </td>
                         <td>
-                          {s.rate
+                          {s.rate && s.completedCount != null
                             ? money(
                                 s.rate.active
                                   ? (s.completedCount || 0) *
@@ -391,7 +413,7 @@ export function BusinessDashboard({
               </div>
             ) : (
               <Empty>
-                No classes recorded for this month. Sync your calendar, then
+                {loading ? "Class and rate records are loading. " : "No classes recorded for this month. "}Sync your calendar, then
                 confirm attendance and link students below.
               </Empty>
             )}
@@ -403,20 +425,21 @@ export function BusinessDashboard({
             )}
             <details className="dashboard-attendance">
               <summary>
-                Review class attendance & student links ({classes.length})
+                Review class attendance & student links ({tableClasses.length})
               </summary>
               <p className="muted">
                 Past bookings stay scheduled until attendance is confirmed.
                 Changes here affect billing; the original calendar booking
                 remains visible.
               </p>
-              {classes.map((c) => (
+              {canReadStudents && studentPage}
+              {tableClasses.map((c) => (
                 <ClassAttendance
                   key={`${c.source}:${c.id || c.classId}`}
                   row={c}
                   timeZone={settings?.timeZone || "UTC"}
                   students={students}
-                  disabled={busy}
+                  disabled={busy || loading || tableMonth !== month}
                   onSave={(patch) =>
                     void act(async () => {
                       await api(
@@ -435,8 +458,6 @@ export function BusinessDashboard({
               ))}
             </details>
           </section>
-        </>
-      )}
       {configure && (
         <Modal
           title="Monthly billing settings"
@@ -551,13 +572,14 @@ export function BusinessDashboard({
             }}
           >
             <Notice error={error} />
+            {canReadStudents && studentPage}
             <label>
               Student
               <select
                 name="clientId"
                 required
                 defaultValue={editor.clientId || ""}
-                disabled={Boolean(editor.id)}
+                disabled={Boolean(editor.id) || studentsLoading}
                 onChange={(e) =>
                   setEditor({
                     ...editor,
@@ -567,6 +589,7 @@ export function BusinessDashboard({
                 }
               >
                 <option value="">Choose a student</option>
+                {editor.clientId && !students.some(student => student.id === editor.clientId) && <option value={editor.clientId}>{editor.payerName || shortId(editor.clientId)} (selected)</option>}
                 {students.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.displayName}
@@ -717,6 +740,17 @@ export function BusinessDashboard({
     </section>
   );
 }
+function StudentPageControls({ search, offset, total, count, loading, error, onSearch, onOffset }: {
+  search: string; offset: number; total: number; count: number; loading: boolean; error: string;
+  onSearch: (value: string) => void; onOffset: (offset: number) => void;
+}) {
+  return <div className="dashboard-student-picker">
+    <label>Find a student for the selectors below<input type="search" value={search} maxLength={160} placeholder="Search name, email or phone" onKeyDown={event => { if (event.key === "Enter") event.preventDefault(); }} onChange={event => onSearch(event.target.value)} /></label>
+    <div className="dashboard-student-pages"><span role="status">{loading ? "Updating student choices…" : total ? `Showing ${offset + 1}–${Math.min(offset + count, total)} of ${total} matching students` : "No matching students"}</span><div><button type="button" disabled={loading || offset === 0} onClick={() => onOffset(Math.max(0, offset - 100))}>Previous</button><button type="button" disabled={loading || offset + 100 >= total} onClick={() => onOffset(offset + 100)}>Next</button></div></div>
+    <small>Choices are loaded 100 at a time. Search or move to another page to find any student; existing selections are kept.</small>
+    <Notice error={error} />
+  </div>;
+}
 function ClassAttendance({
   row,
   timeZone,
@@ -747,8 +781,9 @@ function ClassAttendance({
       </div>
       <label>
         <span className="sr-only">Student for {row.title}</span>
-        <select value={clientId} onChange={(e) => setClientId(e.target.value)}>
+        <select disabled={disabled} value={clientId} onChange={(e) => setClientId(e.target.value)}>
           <option value="">Link a student</option>
+          {clientId && !students.some(student => student.id === clientId) && <option value={clientId}>{row.clientName || row.studentName || shortId(clientId)} (selected)</option>}
           {students.map((s) => (
             <option key={s.id} value={s.id}>
               {s.displayName}
@@ -758,7 +793,7 @@ function ClassAttendance({
       </label>
       <label>
         <span className="sr-only">Attendance for {row.title}</span>
-        <select value={status} onChange={(e) => setStatus(e.target.value)}>
+        <select disabled={disabled} value={status} onChange={(e) => setStatus(e.target.value)}>
           <option value="scheduled">Scheduled</option>
           <option value="completed">Completed</option>
           <option value="cancelled">Cancelled</option>

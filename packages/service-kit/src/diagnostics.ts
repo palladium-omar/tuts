@@ -37,7 +37,7 @@ export function safeDiagnosticError(error: unknown) {
   return { kind, ...(code ? { code } : {}), locations };
 }
 type Event = 'request_completed' | 'request_failed' | 'api_error' | 'identity_failed' | 'upstream_failed' | 'tick_failed' | 'tick_completed' | 'queue_retry' | 'queue_failed' | 'outbox_deferred' | 'background_failed' | 'cleanup_failed' | 'database_failed' | 'password_mail_failed' | 'password_mail_not_configured';
-type Fields = { status?: number; durationMs?: number; method?: string; route?: string; target?: string; error?: unknown };
+type Fields = { status?: number; durationMs?: number; identityMs?: number; upstreamMs?: number; method?: string; route?: string; target?: string; error?: unknown };
 /** Deliberately whitelist fields; never spread an error/request/provider result. */
 export function logDiagnostic(level: 'info' | 'warn' | 'error', event: Event, fields: Fields = {}): void {
   const scope = scopes.getStore();
@@ -47,6 +47,8 @@ export function logDiagnostic(level: 'info' | 'warn' | 'error', event: Event, fi
     trigger: scope?.trigger ?? null, businessId: scope?.businessId ?? null,
     ...(Number.isInteger(fields.status) ? { status: fields.status } : {}),
     ...(Number.isFinite(fields.durationMs) ? { durationMs: Math.max(0, Math.round(fields.durationMs!)) } : {}),
+    ...(Number.isFinite(fields.identityMs) ? { identityMs: Math.max(0, Math.round(fields.identityMs!)) } : {}),
+    ...(Number.isFinite(fields.upstreamMs) ? { upstreamMs: Math.max(0, Math.round(fields.upstreamMs!)) } : {}),
     ...(fields.method && ['GET','HEAD','POST','PATCH','PUT','DELETE','OPTIONS'].includes(fields.method) ? { method: fields.method } : {}),
     ...(fields.route ? { route: diagnosticRoute(fields.route) } : {}),
     ...(fields.target && segments.has(fields.target) ? { target: fields.target } : {}),

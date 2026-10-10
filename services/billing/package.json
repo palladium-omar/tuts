@@ -10,15 +10,17 @@
     "test": "tsx --test test/*.test.ts"
   },
   "dependencies": {
-    "@palladium/contracts": "workspace:*",
-    "@palladium/service-kit": "workspace:*",
     "@nestjs/common": "^11.0.0",
     "@nestjs/core": "^11.0.0",
     "@nestjs/platform-express": "^11.0.0",
     "@nestjs/swagger": "^11.0.0",
+    "@palladium/contracts": "workspace:*",
+    "@palladium/service-kit": "workspace:*",
+    "csv-parse": "^6.2.1",
+    "exceljs": "^4.4.0",
+    "pg": "^8.13.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
-    "pg": "^8.13.1",
     "zod": "^4.0.0"
   },
   "type": "module"

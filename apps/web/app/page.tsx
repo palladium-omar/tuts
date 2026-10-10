@@ -8,7 +8,7 @@ import {
   type CSSProperties,
   type FormEvent,
 } from "react";
-import { featureRegistry, hasPermission } from "@palladium/contracts";
+import { featureRegistry, canReadFinancial, hasPermission } from "@palladium/contracts";
 import { canUseFeature } from '../lib/features';
 import {
   ArrowRight,
@@ -37,11 +37,12 @@ import {
 import { Notice } from "../components/shared";
 import { Registration } from "../features/registration";
 import { BusinessProfile, defaultPalette } from "../features/business-profile";
-import { BusinessDashboard } from "../features/business-dashboard";
+import {DecisionDashboard} from "../features/decision-dashboard";
+import {WorkHistory} from "../features/work-history";
 import { CRM } from "../features/crm";
 import { PlanningWorkspace } from "../features/planning-workspace";
 import { StudentTracker } from "../features/student-tracker";
-import { navigateTutor, tutorLocationKeys } from "../lib/tutor-workspace";
+import { canNavigateTutor, navigateTutor, tutorLocationKeys } from "../lib/tutor-workspace";
 import {
   CampaignComposer,
   CommunicationConnections,
@@ -68,9 +69,10 @@ type ConnectorFilter = "all" | "calendars" | "crm";
 type WorkspaceRoute = { view: string; filter: ConnectorFilter };
 function readRoute(business: Business): WorkspaceRoute {
   const params = new URLSearchParams(window.location.search);
-  const requested = params.get("view") ?? "overview";
+  const rawView=params.get("view");
+  const requested=rawView === "overview" ? "dashboard" : rawView ?? "dashboard";
   const allowed =
-    requested === "overview" ||
+    requested === "dashboard" ||
     (requested === "settings" && hasPermission(business, 'platform.write')) ||
     featureRegistry.some(
       (f) =>
@@ -78,7 +80,7 @@ function readRoute(business: Business): WorkspaceRoute {
     );
   const filter = params.get("filter");
   return {
-    view: allowed ? requested : "overview",
+    view: allowed ? requested : "dashboard",
     filter:
       requested === "integrations" &&
       (filter === "crm" || filter === "calendars")
@@ -126,7 +128,7 @@ export default function Home() {
     [loading, setLoading] = useState(true),
     [newBusiness, setNewBusiness] = useState(false),
     [route, setRoute] = useState<WorkspaceRoute>({
-      view: "overview",
+      view: "dashboard",
       filter: "all",
     }),
     [draftPalette, setDraftPalette] = useState<Row>(defaultPalette);
@@ -146,7 +148,7 @@ export default function Home() {
     if (selected) {
       const next =
         preferred && preferred !== requestedId
-          ? { view: "overview", filter: "all" as const }
+          ? { view: "dashboard", filter: "all" as const }
           : readRoute(selected);
       setRoute(next);
       writeRoute(selected, next, true);
@@ -219,7 +221,7 @@ export default function Home() {
         setRoute(next);
       }}
       onSelect={(selected) => {
-        const next = { view: "overview", filter: "all" as const };
+        const next = { view: "dashboard", filter: "all" as const };
         writeRoute(selected, next);
         setRoute(next);
         setBusiness(selected);
@@ -261,8 +263,11 @@ function Workspace({
   route: WorkspaceRoute;
   onNavigate: (route: WorkspaceRoute) => void;
 }) {
-  const api = useMemo(() => createApi(business.id), [business.id]);
+  const capabilityKey = JSON.stringify([business.role,business.permissions,business.entitlements,business.accessScope,business.studentIds]);
+  const api = useMemo(() => createApi(business.id), [business.id,capabilityKey]);
   const { view, filter } = route;
+  const [historyFile,setHistoryFile]=useState<File|null>(null);
+  const [dashboardTab,setDashboardTab]=useState<"overview"|"work">("overview");
   const [planningStudentId, setPlanningStudentId] = useState<string | undefined>();
   const [learningStudentId, setLearningStudentId] = useState<string | undefined>();
   const [learningAssignmentId, setLearningAssignmentId] = useState<string | undefined>();
@@ -295,8 +300,7 @@ function Workspace({
     canUseFeature(business, f),
   );
   function go(next: string) {
-    if (next === 'settings' && !hasPermission(business, 'platform.write')) return;
-    if (next !== 'overview' && next !== 'settings' && !enabled.some(feature => feature.id === next)) return;
+    if (!canNavigateTutor(next, enabled.map(feature => feature.id), hasPermission(business, 'platform.write'))) return;
     setLearningAssignmentId(undefined);
     onNavigate({ view: next, filter: "all" });
     setMenuOpen(false);
@@ -312,8 +316,8 @@ function Workspace({
     onNavigate({ view: "integrations", filter: type });
   }
   const title =
-    view === "overview"
-      ? "Overview"
+    view === "dashboard"
+      ? "Dashboard"
       : view === "settings"
         ? "Business profile"
         : featureRegistry.find((f) => f.id === view)?.label;
@@ -381,12 +385,12 @@ function Workspace({
           <span className="nav-caption">WORKSPACE</span>
           <nav aria-label="Workspace">
             <button
-              className={view === "overview" ? "active" : ""}
-              aria-current={view === "overview" ? "page" : undefined}
-              onClick={() => go("overview")}
+              className={view === "dashboard" ? "active" : ""}
+              aria-current={view === "dashboard" ? "page" : undefined}
+              onClick={() => go("dashboard")}
             >
               <LayoutDashboard size={18} />
-              Overview
+              Dashboard
             </button>
             {enabled.map((f) => {
               const Icon = icons[f.id];
@@ -450,14 +454,15 @@ function Workspace({
           tabIndex={-1}
         >
           <Notice error={error} message={notice} />
-          {view === "overview" && (
-            <Overview api={api} business={business} user={user} go={go} />
+          {view === "dashboard" && (
+            <DecisionDashboard api={api} business={business} onInvoices={()=>go("billing")} onTracker={()=>go("tracker")} initialTab={dashboardTab} workTracker={<WorkHistory api={api} business={business} initialFile={historyFile} onFileConsumed={()=>setHistoryFile(null)}/>} monthlyInvoices={<WorkHistory api={api} business={business} mode="invoices"/>}/>
           )}
           {view === "tracker" && <StudentTracker api={api} business={business} onOpenCRM={(id) => openTutorRecord("clients", id)} onOpenPlanning={business.entitlements.includes("planning") && hasPermission(business, "planning.read") ? (studentId) => { setPlanningStudentId(studentId); go("planning"); } : undefined} onOpenLearning={business.entitlements.includes("learning") && hasPermission(business, "learning.write") ? (studentId, assignmentId) => { go("learning"); setLearningStudentId(studentId); setLearningAssignmentId(assignmentId); } : undefined} />}
           {view === "clients" && (
             <CRM
               api={api}
               businessId={business.id}
+              onImportHistory={business.entitlements.includes("billing") && canReadFinancial(business) && hasPermission(business,"billing.write") ? file=>{setHistoryFile(file);setDashboardTab("work");go("dashboard");}:undefined}
               onOpenTracker={enabled.some(feature => feature.id === "tracker") ? (id) => openTutorRecord("tracker", id) : undefined}
               role={business.role}
               permissions={business.permissions}
@@ -539,163 +544,5 @@ function Workspace({
         </main>
       </section>
     </div>
-  );
-}
-function Overview({
-  api,
-  business,
-  user,
-  go,
-}: {
-  api: Api;
-  business: Business;
-  user: Row;
-  go: (v: string) => void;
-}) {
-  const [counts, setCounts] = useState<Record<string, number>>({});
-  const entries = [
-    {
-      id: "clients",
-      label: "CRM contacts",
-      path: "clients/v1/clients?limit=1",
-    },
-    {
-      id: "scheduling",
-      label: "Connected sessions",
-      path: "scheduling/v1/external-sessions",
-    },
-    { id: "learning", label: "Assignments", path: "learning/v1/assignments" },
-    { id: "billing", label: "Invoices", path: "billing/v1/invoices" },
-  ].filter((e) => business.entitlements.includes(e.id) && hasPermission(business, `${e.id}.read`));
-  useEffect(() => {
-    let active = true;
-    Promise.allSettled(
-      entries.map(async (e) => {
-        const r = await api(e.path);
-        return [e.id, r.total ?? r.items.length] as const;
-      }),
-    ).then((results) => {
-      if (active)
-        setCounts(
-          Object.fromEntries(
-            results
-              .filter((r) => r.status === "fulfilled")
-              .map(
-                (r) =>
-                  (r as PromiseFulfilledResult<readonly [string, number]>)
-                    .value,
-              ),
-          ),
-        );
-    });
-    return () => {
-      active = false;
-    };
-  }, [api]);
-  return (
-    <>
-      <div className="section-heading">
-        <div>
-          <span className="eyebrow">
-            WELCOME, {String(user.name).split(" ")[0].toUpperCase()}
-          </span>
-          <h1>A little clarity for your day.</h1>
-          <p className="muted">More time for the work that matters.</p>
-        </div>
-      </div>
-      {!business.settings?.profile && hasPermission(business, 'platform.write') && (
-        <div className="onboarding-banner">
-          <div>
-            <strong>Make this workspace yours.</strong>
-            <p>
-              Add your logo, business address, and palette once. We’ll reuse
-              them on invoices.
-            </p>
-          </div>
-          <button onClick={() => go("settings")}>
-            Complete business profile
-            <ArrowRight size={15} />
-          </button>
-        </div>
-      )}
-      {hasPermission(business, 'billing.read') && <BusinessDashboard
-        api={api}
-        business={business}
-        onInvoices={() => go("billing")}
-      />}
-      <div className="stat-grid">
-        {entries.map((e) => {
-          const Icon = icons[e.id];
-          return (
-            <button className="stat-card" key={e.id} onClick={() => go(e.id)}>
-              <div>
-                <span>{e.label}</span>
-                <Icon size={20} />
-              </div>
-              <strong>{counts[e.id] ?? "—"}</strong>
-              <small>
-                Open {e.label.toLowerCase()}
-                <ArrowRight size={13} />
-              </small>
-            </button>
-          );
-        })}
-      </div>
-      <div className="overview-grid">
-        <section className="welcome-card">
-          <span className="eyebrow light">A PRACTICE THAT FITS YOU</span>
-          <h2>
-            Your tools.
-            <br />
-            Your students.
-            <br />
-            One clear view.
-          </h2>
-          <p>
-            Connect your booking calendar, bring your contacts, and keep
-            learning materials close.
-          </p>
-          <button onClick={() => go("integrations")}>
-            Connect your tools
-            <ArrowRight size={17} />
-          </button>
-          <div className="decor-circle">✳</div>
-        </section>
-        <section className="panel">
-          <div className="panel-title">
-            <h3>Your workspace</h3>
-          </div>
-          {featureRegistry
-            .filter((f) => canUseFeature(business, f))
-            .map((f) => {
-              const Icon = icons[f.id];
-              return (
-                <button
-                  className="feature-row"
-                  key={f.id}
-                  onClick={() => go(f.id)}
-                >
-                  <span className="feature-icon">
-                    <Icon size={18} />
-                  </span>
-                  <span>
-                    {f.label}
-                    <small>
-                      {f.id === "clients"
-                        ? "Contacts, imports & relationships"
-                        : f.id === "integrations"
-                          ? "Calendars, forms & data sources"
-                          : f.id === "learning"
-                            ? "Assignments & attached resources"
-                            : "Open this feature"}
-                    </small>
-                  </span>
-                  <ArrowRight size={16} />
-                </button>
-              );
-            })}
-        </section>
-      </div>
-    </>
   );
 }

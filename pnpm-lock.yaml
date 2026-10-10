@@ -147,6 +147,12 @@ importers:
       '@palladium/service-kit':
         specifier: workspace:*
         version: link:../../packages/service-kit
+      csv-parse:
+        specifier: ^6.2.1
+        version: 6.2.1
+      exceljs:
+        specifier: ^4.4.0
+        version: 4.4.0
       pg:
         specifier: ^8.13.1
         version: 8.23.1

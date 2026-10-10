@@ -8,7 +8,7 @@ queues and Worker configuration.
 
 ## API
 
-Private reporting routes are StudentScoped and require signed server context. The bounded public redirect is documented below. `reporting.read`
+Student reporting routes are StudentScoped and require signed server context. The business dashboard requires staff business scope. The bounded public redirect is documented below. `reporting.read`
 protects summaries/history; reconciliation also requires `reporting.write`.
 The server checks every requested student and its canonical alias. An empty
 student scope returns no authorized data, and there is no cross-business bypass.
@@ -20,10 +20,20 @@ student scope returns no authorized data, and there is no cross-business bypass.
 | POST | `/v1/students/:id/reconcile` | `{month,timeZone,includeFinancial?:boolean}`; `{item:StudentSummary}` after source reconciliation |
 | POST | `/v1/activity` | `{studentId,sessionId:UUID,sequence:positiveInteger,activeSeconds:integer0..30}`; `{item:{acceptedSeconds,duplicate,lastSeenAt}}` |
 | GET | `/v1/students/:id/activity` | month/timeZone/limit/offset; `{items:[{date,activeSeconds,lastSeenAt}],total,limit,offset,studentId,month,timeZone,estimated:true,scope:'tuts',asOf}` |
+| GET | `/v1/business-dashboard` | optional month=`YYYY-MM`; `{item:{month,timeZone,asOf,students:{total,active,leads,inactive},analytics,sources}}` |
 
 Month accepts 2000–2200 and timeZone must be a valid IANA zone. Daily history
 pagination defaults to 50, max 100. Dates are grouped by server receipt timestamp
 in the selected timezone. No wall-clock timestamp is accepted from the browser.
+
+Batch summaries use four tenant-scoped SQL statements regardless of whether the
+request contains one or 100 student IDs; financial summaries use five. This
+includes the merge advisory lock, one bounded recursive alias resolution, one
+set aggregate for classes/homework/resources/activity, one coverage read, and the
+optional financial snapshot read. Both requested IDs and resolved canonical IDs
+are checked against signed student access before aggregate reads. Repeated
+requested IDs are deduplicated while separate aliases retain their response
+positions. Missing/partial/financial behavior is unchanged.
 
 StudentSummary is:
 
@@ -229,6 +239,39 @@ currency and real/simulated separation. Amounts are integer minor units.
 Strings are quoted and formula-leading cells are escaped. Files have no-store
 headers and no student names, essays, contact addresses or provider credentials.
 Exports are returned to the requesting authorized user; no vendor receives them.
+
+## Business dashboard composition
+
+The dashboard requires `reporting.read`, Reporting entitlement and staff business
+scope; student/parent roles and student-scoped tutors are denied before source
+reads. It obtains exact student totals and active/lead/inactive status counts
+from one Clients `/v1/clients/student-stats` request. Clients owns its single
+aggregate query excluding merged records and payers. It never pages through
+contacts. Clients permission/entitlement is checked before the request, and
+Reporting validates safe counts and agreement between the total and statuses.
+
+A second concurrent request reads Billing `/v1/business-analytics` only after
+`canReadFinancial` and Billing entitlement checks. It forwards the original
+verified Authorization through `serviceFetch`, using private CLIENTS/BILLING
+bindings on Workers and CLIENTS_URL/BILLING_URL on Node. No database access or
+source imports from another service are involved. Source aggregate schemas
+validate safe nonnegative counts and minor units, valid currencies, unique
+currency/trend buckets, timezone and month, and discard extra response fields.
+Ledger measures and native invoice estimates remain separate per currency.
+
+Every source has an eight-second deadline covering response body consumption,
+including bindings that ignore abort. Each response is limited to 1 MiB, for at
+most two requests and 2 MiB per dashboard. Failed, invalid or unauthorized
+sources produce `status:unavailable` and a generic reason, without forwarding
+upstream errors. Sources are named `clients` and `billing`. Available sources
+have `status:complete`. An unavailable Clients source makes all four counts
+null; unavailable financial analytics become null independently.
+
+When month is omitted, Billing resolves the business-local current month and
+timezone. If Billing is unavailable or financial access is absent, month uses
+the explicit query or current UTC month and timeZone is null to mark the unknown
+business timezone. Dashboard `asOf` is the composition time; Billing retains
+its own aggregate `asOf`. No results are persisted or cached by the composer.
 
 ### Public redirect boundary
 

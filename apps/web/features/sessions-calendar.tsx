@@ -134,6 +134,9 @@ export function Sessions({
   const [revision, setRevision] = useState(0);
   const weekScroll = useRef<HTMLDivElement>(null);
   const agenda = useRef<HTMLElement>(null);
+  const loadedRange = useRef<{ api: Api; from: string; to: string } | null>(
+    null,
+  );
   const today = startOfDay(new Date());
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const rangeStart =
@@ -156,10 +159,22 @@ export function Sessions({
   );
   useEffect(() => {
     let current = true;
+    const controller = new AbortController();
+    const signal = AbortSignal.any([
+      controller.signal,
+      AbortSignal.timeout(25000),
+    ]);
     setLoading(true);
     setError("");
-    setRows([]);
-    setTotal(0);
+    if (
+      loadedRange.current?.api !== api ||
+      loadedRange.current.from !== from ||
+      loadedRange.current.to !== to
+    ) {
+      setRows([]);
+      setTotal(0);
+    }
+    loadedRange.current = { api, from, to };
     (async () => {
       try {
         const all: Session[] = [];
@@ -171,10 +186,19 @@ export function Sessions({
             limit: "200",
             offset: String(all.length),
           });
-          const result = await api(`scheduling/v1/external-sessions?${query}`);
+          const result = await api(
+            `scheduling/v1/external-sessions?${query}`,
+            "GET",
+            undefined,
+            undefined,
+            { signal, fresh: revision > 0 },
+          );
           if (!current) return;
           available = result.total;
           all.push(...result.items);
+          // Paint each bounded page immediately instead of blocking on the entire range.
+          setRows([...all]);
+          setTotal(available);
           if (!result.items.length) break;
         } while (all.length < available && all.length < 5000);
         if (current) {
@@ -182,13 +206,15 @@ export function Sessions({
           setTotal(available);
         }
       } catch (cause) {
-        if (current) setError(errorMessage(cause));
+        if (current && !controller.signal.aborted)
+          setError(errorMessage(cause));
       } finally {
         if (current) setLoading(false);
       }
     })();
     return () => {
       current = false;
+      controller.abort();
     };
   }, [api, from, to, revision]);
   const bookings = useMemo(
@@ -352,7 +378,9 @@ export function Sessions({
       </div>
       <div className="calendar-state" role="status">
         {loading
-          ? "Loading calendar…"
+          ? rows.length
+            ? `Updating calendar · ${bookings.length} sessions available`
+            : "Loading calendar…"
           : error
             ? "Calendar could not be loaded. Use Refresh to try again."
             : `${bookings.length} session${bookings.length === 1 ? "" : "s"} on this calendar${showCancelled ? " · including cancelled" : " · cancelled hidden"}`}
@@ -529,12 +557,14 @@ export function Sessions({
             </span>
           </h3>
           <span className="tag">
-            {loading ? "Loading…" : `${dayBookings.length} sessions`}
+            {loading && !rows.length
+              ? "Loading…"
+              : `${dayBookings.length} sessions${loading ? " · updating" : ""}`}
           </span>
         </div>
-        {loading ? (
+        {loading && !rows.length ? (
           <p className="muted">Loading this day’s sessions…</p>
-        ) : error ? (
+        ) : error && !rows.length ? (
           <p className="muted">Refresh the calendar to load this day.</p>
         ) : dayBookings.length ? (
           <div className="calendar-agenda-list">

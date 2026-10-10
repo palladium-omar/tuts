@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { Download, FileText, Plus, Upload, X } from "lucide-react";
 import {
   date,
@@ -12,6 +12,9 @@ import "./teaching-ux.css";
 import { DatePicker } from "../components/date-picker";
 import { StudentSubmission } from "../components/student-submission";
 import { tutorHomeworkOrder } from "../lib/tutor-workspace";
+import { useListOffset } from "../lib/use-list-query";
+import { ServerStudentSelect } from "./server-student-select";
+import "./server-student-select.css";
 
 const assignmentStatus: Record<string, string> = {
   assigned: "Assigned",
@@ -42,8 +45,8 @@ export function Learning({
   const [filterStudentId, setFilterStudentId] = useState(initialStudentId ?? "");
   const [documents, setDocuments] = useState<{ title: string; url: string }[]>([]);
   useEffect(() => { setFilterStudentId(initialStudentId ?? ""); }, [initialStudentId]);
-  const [rows, setRows] = useState<Row[]>([]),
-    [students, setStudents] = useState<Row[]>([]),
+  const [snapshot, setSnapshot] = useState<{ api: Api; businessId: string; filter: string; offset: number; items: Row[]; total: number } | null>(null),
+    [students, setStudents] = useState<{ api: Api; businessId: string; rows: Record<string, Row> } | null>(null),
     [creating, setCreating] = useState(false),
     [selected, setSelected] = useState<Row | null>(null),
     [files, setFiles] = useState<File[]>([]),
@@ -51,9 +54,15 @@ export function Learning({
     [error, setError] = useState(""),
     [message, setMessage] = useState(""),
     [busy, setBusy] = useState(false),
-    [opening, setOpening] = useState(false),
     [saveStep, setSaveStep] = useState(""),
     [loading, setLoading] = useState(true);
+  const [revision, setRevision] = useState(0), sequence = useRef(0);
+  const [offset, setOffset] = useListOffset(`${businessId}:${filterStudentId}`);
+  const rows = snapshot?.api === api && snapshot.businessId === businessId ? snapshot.items : [];
+  const total = snapshot?.api === api && snapshot.businessId === businessId ? snapshot.total : 0;
+  const names = students?.api === api && students.businessId === businessId ? students.rows : {};
+  const rememberStudents = useCallback((items: Row[]) => setStudents(current => ({ api, businessId, rows: { ...(current?.api === api && current.businessId === businessId ? current.rows : {}), ...Object.fromEntries(items.map(item => [item.id, item])) } })), [api, businessId]);
+  useEffect(() => { setSelected(null); setCreating(false); setFiles([]); setUploaded([]); setDocuments([]); }, [api, businessId]);
   useEffect(() => {
     if (!initialAssignmentId) return;
     let cancelled = false;
@@ -63,57 +72,29 @@ export function Learning({
     }).catch(e => { if (!cancelled) setError(errorMessage(e)); });
     return () => { cancelled = true; };
   }, [api, initialAssignmentId, initialStudentId]);
-  async function loadStudents() {
-    const all: Row[] = [];
-    for (let offset = 0; offset < 2000; offset += 100) {
-      const result = await api(
-        `clients/v1/clients?kind=student&limit=100&offset=${offset}`,
-      );
-      all.push(...result.items);
-      if (result.items.length < 100) break;
-    }
-    if (filterStudentId && !all.some((student) => student.id === filterStudentId)) {
-      const selectedStudent = await api(`clients/v1/clients/${filterStudentId}`);
-      if (selectedStudent.item?.kind === "student") all.push(selectedStudent.item);
-    }
-    setStudents(all);
-    return all;
-  }
-  async function load() {
-    setLoading(true);
-    try {
-      const data = await api(`learning/v1/assignments?${new URLSearchParams({ limit: "200", ...(filterStudentId ? { clientId: filterStudentId } : {}) })}`);
-      setRows(data.items);
-      setError("");
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setLoading(false);
-    }
-  }
+  async function load() { setRevision(current => current + 1); }
   useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    api(`learning/v1/assignments?${new URLSearchParams({ limit: "200", ...(filterStudentId ? { clientId: filterStudentId } : {}) })}`).then((data) => { if (!cancelled) { setRows(data.items); setError(""); } }).catch((e) => { if (!cancelled) setError(errorMessage(e)); }).finally(() => { if (!cancelled) setLoading(false); });
-    void loadStudents().catch(() => setStudents([]));
-    return () => { cancelled = true; };
-  }, [api, filterStudentId]);
-  async function openCreate() {
+    const request = ++sequence.current, controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 20_000);
+    setLoading(true); setError("");
+    const query = new URLSearchParams({ limit: "100", offset: String(offset), ...(filterStudentId ? { clientId: filterStudentId } : {}) });
+    void api(`learning/v1/assignments?${query}`, "GET", undefined, undefined, { signal: controller.signal }).then(data => {
+      if (request === sequence.current && !controller.signal.aborted) setSnapshot({ api, businessId, filter: filterStudentId, offset, items: data.items ?? [], total: data.total ?? 0 });
+    }).catch(e => { if (request === sequence.current) setError(controller.signal.aborted ? "Assignments took too long to load. Refresh to try again." : errorMessage(e)); }).finally(() => { clearTimeout(timeout); if (request === sequence.current) setLoading(false); });
+    return () => { ++sequence.current; clearTimeout(timeout); controller.abort(); };
+  }, [api, businessId, filterStudentId, offset, revision]);
+  useEffect(() => {
+    const id = selected?.clientId;
+    if (!id || names[id]) return;
+    let current = true;
+    const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 20_000);
+    void api(`clients/v1/clients/${encodeURIComponent(id)}`, "GET", undefined, undefined, { signal: controller.signal }).then(data => { if (current && !controller.signal.aborted && data.item?.kind === "student") rememberStudents([data.item]); }).catch(() => {}).finally(() => clearTimeout(timeout));
+    return () => { current = false; clearTimeout(timeout); controller.abort(); };
+  }, [api, selected?.clientId, names[selected?.clientId ?? ""], rememberStudents]);
+  function openCreate() {
     setError("");
     setMessage("");
-    setOpening(true);
-    try {
-      await loadStudents();
-      setFiles([]);
-      setUploaded([]);
-      setDocuments([]);
-      setStudentId(filterStudentId);
-      setCreating(true);
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setOpening(false);
-    }
+    setFiles([]); setUploaded([]); setDocuments([]); setStudentId(filterStudentId); setCreating(true);
   }
   async function create(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -225,23 +206,24 @@ export function Learning({
         </div>
         <button
           className="primary"
-          disabled={opening}
-          onClick={() => void openCreate()}
+          disabled={busy}
+          onClick={openCreate}
         >
           <Plus size={16} />
-          {opening ? "Loading students…" : "New assignment"}
+          New assignment
         </button>
       </div>
       <Notice error={!creating && !selected ? error : ""} message={message} />
       <section className="panel">
         <div className="panel-title">
           <h3>Assignments & materials</h3>
-          <label>Student<select aria-label="Filter assignments by student" value={filterStudentId} onChange={(e) => setFilterStudentId(e.target.value)}><option value="">All students</option>{students.map((student) => <option value={student.id} key={student.id}>{student.displayName}</option>)}</select></label>
+          <ServerStudentSelect key={`filter-${businessId}`} api={api} label="Filter assignments by student" value={filterStudentId} selectedName={names[filterStudentId]?.displayName} onChange={setFilterStudentId} onRows={rememberStudents} emptyLabel="All students" />
           <span className="tag">
-            {rows.length} {rows.length === 1 ? "assignment" : "assignments"}
+            {total} {total === 1 ? "assignment" : "assignments"}
           </span>
         </div>
-        {loading ? (
+        <div className="panel-title"><small className="muted" role="status">{loading && rows.length ? "Updating assignments · previous results remain visible…" : snapshot && (snapshot.filter !== filterStudentId || snapshot.offset !== offset) ? "Showing previous results; refresh to load the selected student and page." : ""}</small><button disabled={loading} onClick={() => void load()}>Refresh</button></div>
+        {loading && !rows.length ? (
           <Empty>Loading assignments…</Empty>
         ) : !rows.length ? (
           <Empty>
@@ -260,8 +242,7 @@ export function Learning({
                   </span>
                 </div>
                 <p className="teaching-student">
-                  {students.find((s) => s.id === row.clientId)?.displayName ??
-                    "Student unavailable"}
+                  {names[row.clientId]?.displayName ?? row.studentName ?? `Student ${String(row.clientId).slice(0, 8)}`}
                 </p>
                 {row.description && <p>{row.description}</p>}
                 {row.dueAt && (
@@ -299,6 +280,7 @@ export function Learning({
             ))}
           </div>
         )}
+        {(total > 100 || offset > 0) && <div className="pagination"><span>{snapshot && total ? `${snapshot.offset + 1}–${Math.min(snapshot.offset + rows.length, total)} of ${total}` : "No assignments on this page"}</span><button disabled={loading || offset === 0} onClick={() => setOffset(current => Math.max(0, current - 100))}>Previous</button><button disabled={loading || offset + 100 >= total} onClick={() => setOffset(current => current + 100)}>Next</button></div>}
       </section>
       {creating && (
         <Modal
@@ -308,49 +290,12 @@ export function Learning({
           }}
         >
           <Notice error={error} />
-          {!students.length ? (
-            <div className="teaching-prerequisite">
-              <FileText size={28} />
-              <h3>Add a student first</h3>
-              <p>
-                Assignments belong to a student. Add a contact in CRM and choose
-                Student as their relationship, then return here.
-              </p>
-              {onOpenClients && (
-                <button
-                  className="primary"
-                  onClick={() => {
-                    setCreating(false);
-                    onOpenClients();
-                  }}
-                >
-                  Open CRM
-                </button>
-              )}
-            </div>
-          ) : (
             <form onSubmit={create}>
               <div className="form-grid">
-                <label>
-                  Student
-                  <select
-                    name="clientId"
-                    value={studentId}
-                    onChange={(e) => setStudentId(e.target.value)}
-                    required
-                    disabled={busy || uploaded.length > 0}
-                  >
-                    <option value="">Choose a student</option>
-                    {students.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.displayName}
-                      </option>
-                    ))}
-                  </select>
-                  {uploaded.length > 0 && (
-                    <input type="hidden" name="clientId" value={studentId} />
-                  )}
-                </label>
+                <div>
+                  <ServerStudentSelect key={`create-${businessId}`} api={api} name="clientId" value={studentId} selectedName={names[studentId]?.displayName} onChange={setStudentId} onRows={rememberStudents} required disabled={busy || uploaded.length > 0} initiallyOpen />
+                  {onOpenClients && <button type="button" className="link" disabled={busy} onClick={() => { setCreating(false); onOpenClients(); }}>Manage students in CRM</button>}
+                </div>
                 <label>
                   Assignment title
                   <input
@@ -462,14 +407,13 @@ export function Learning({
                 >
                   Cancel
                 </button>
-                <button className="primary" disabled={busy}>
+                <button className="primary" disabled={busy || !studentId}>
                   {busy
                     ? saveStep || "Saving assignment…"
                     : "Create assignment"}
                 </button>
               </div>
             </form>
-          )}
         </Modal>
       )}
       {selected && (
@@ -482,8 +426,7 @@ export function Learning({
           <Notice error={error} />
           <div className="teaching-progress-meta">
             <strong>
-              {students.find((s) => s.id === selected.clientId)?.displayName ??
-                "Student unavailable"}
+              {names[selected.clientId]?.displayName ?? selected.studentName ?? `Student ${String(selected.clientId).slice(0, 8)}`}
             </strong>
             <span className={`status ${selected.status}`}>
               {assignmentStatus[selected.status] ?? selected.status}

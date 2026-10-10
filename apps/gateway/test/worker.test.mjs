@@ -23,7 +23,7 @@ function fixture(options = {}) {
     PUBLIC_GATEWAY_URL: origin,
     ASSETS: { async fetch(req) { calls.push({ name: "assets", req }); return new Response("static app"); } },
   };
-  for (const name of ["platform", "clients", "scheduling", "learning", "billing", "payments", "notifications", "integrations"]) {
+  for (const name of ["platform", "clients", "scheduling", "learning", "billing", "payments", "notifications", "integrations", "planning", "reporting"]) {
     env[name.toUpperCase()] = {
       async fetch(req) {
         const body = req.body ? await req.text() : "";
@@ -256,11 +256,11 @@ test("scheduled ticks validate the shared secret before calling any service", as
   assert.equal(f.calls.length, 0);
 });
 
-test("scheduled handler ticks all eight services with private bearer authorization", async () => {
+test("scheduled handler ticks all ten services with private bearer authorization", async () => {
   const f = fixture();
   await worker.scheduled({}, f.env);
-  assert.equal(f.calls.length, 8);
-  assert.equal(new Set(f.calls.map((call) => call.name)).size, 8);
+  assert.equal(f.calls.length, 10);
+  assert.equal(new Set(f.calls.map((call) => call.name)).size, 10);
   for (const { name, req } of f.calls) {
     assert.equal(req.method, "POST");
     assert.equal(req.url, `https://${name}.internal/__runtime/tick`);
@@ -272,7 +272,7 @@ test("one failed scheduled service does not prevent other ticks and fails the ag
   const f = fixture();
   f.env.CLIENTS.fetch = async (req) => { f.calls.push({ name: "clients", req }); return new Response("unavailable", { status: 503 }); };
   await assert.rejects(worker.scheduled({}, f.env), /Scheduled service jobs failed/);
-  assert.equal(f.calls.length, 8);
+  assert.equal(f.calls.length, 10);
 });
 
 test("scheduled ticks use one binding at a time and release each response before the next", async () => {
@@ -280,7 +280,7 @@ test("scheduled ticks use one binding at a time and release each response before
   let active = 0;
   let maxActive = 0;
   let finished = 0;
-  for (const name of ["platform", "clients", "scheduling", "learning", "billing", "payments", "notifications", "integrations"]) {
+  for (const name of ["platform", "clients", "scheduling", "learning", "billing", "payments", "notifications", "integrations", "planning", "reporting"]) {
     f.env[name.toUpperCase()].fetch = async (req) => {
       assert.equal(finished, f.calls.length, "previous response must be released");
       f.calls.push({ name, req });
@@ -294,7 +294,7 @@ test("scheduled ticks use one binding at a time and release each response before
   }
   await worker.scheduled({}, f.env);
   assert.equal(maxActive, 1);
-  assert.equal(finished, 8);
+  assert.equal(finished, 10);
   assert.equal(active, 0);
 });
 
@@ -333,4 +333,13 @@ test("every public response receives the existing security headers without mergi
     "session_data=two; Path=/; HttpOnly; Secure",
   ]);
   assert.equal(await responses[6].text(), "signed in");
+});
+
+test('response timings distinguish verified identity from service work without exposing credentials',async()=>{
+ const f=fixture();
+ const response=await worker.fetch(f.request('/api/clients/v1/clients',{headers:{'x-business-id':businessId,cookie:'private-session'}}),f.env);
+ assert.equal(response.status,200);
+ assert.match(response.headers.get('server-timing'),/^gateway;dur=\d+, identity;dur=\d+, service;dur=\d+$/);
+ assert.doesNotMatch(response.headers.get('server-timing'),/private-session|11111111/);
+ assert.match(response.headers.get('access-control-expose-headers'),/Server-Timing/);
 });

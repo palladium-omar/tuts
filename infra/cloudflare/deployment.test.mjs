@@ -13,9 +13,9 @@ test('manifest requires a secure canonical URL and valid account/resource identi
   assert.throws(() => validateDeployment({ ...deployment, customDomain: 'tuts.example.com' }));
   assert.equal(validateDeployment({ ...deployment, publicUrl: 'https://tuts.example.com', customDomain: 'tuts.example.com' }).customDomain, 'tuts.example.com');
 });
-test('all eight domains remain private with minimal bindings and no credentials in config', () => {
+test('all ten domains remain private with minimal bindings and no credentials in config', () => {
   const configs = createConfigs(deployment, eventConsumerSubscriptions, '/synthetic/repo');
-  assert.equal(Object.keys(configs).length, 9);
+  assert.equal(Object.keys(configs).length, serviceNames.length+1);
   for (const name of serviceNames) {
     const config = configs[name];
     assert.equal(config.workers_dev, false);
@@ -31,14 +31,14 @@ test('all eight domains remain private with minimal bindings and no credentials 
   }
   assert.deepEqual(configs.billing.services, [{ binding: 'SCHEDULING', service: 'tuts-scheduling' }]);
   assert.deepEqual(configs.notifications.services, [{ binding: 'CLIENTS', service: 'tuts-clients' }]);
-  for (const name of serviceNames.filter(name => !['billing', 'notifications'].includes(name))) assert.equal(configs[name].services, undefined);
+  for (const name of serviceNames.filter(name => !['billing', 'notifications','platform','reporting','integrations','planning'].includes(name))) assert.equal(configs[name].services, undefined);
   assert.equal(configs.gateway.workers_dev, true);
-  assert.equal(configs.gateway.services.length, 8);
+  assert.equal(configs.gateway.services.length, serviceNames.length);
   assert.deepEqual(configs.gateway.triggers.crons, ['*/15 * * * *']);
   assert.equal(configs.gateway.assets.binding, 'ASSETS');
   assert.equal(configs.gateway.r2_buckets, undefined);
 });
-test('queue fanout is generated from contract producer prefixes with six consumers and dead letters', () => {
+test('queue fanout is generated from contract producer prefixes with contracted consumers and dead letters', () => {
   const configs = createConfigs(deployment, eventConsumerSubscriptions);
   let consumers = 0;
   for (const name of serviceNames) {
@@ -51,15 +51,15 @@ test('queue fanout is generated from contract producer prefixes with six consume
       assert.equal(config.queues.consumers[0].dead_letter_queue, `tuts-events-${name}-dead`);
     }
   }
-  assert.equal(consumers, 6);
+  assert.equal(consumers, new Set(eventConsumerSubscriptions.map(s=>s.consumer)).size);
 });
 test('secrets are fresh once, preserved on rerun, and scoped to each worker', () => {
   const first = freshSecrets();
   assert.equal(createPublicKey(first.CONTEXT_PRIVATE_KEY).export({ type: 'spki', format: 'pem' }), first.CONTEXT_PUBLIC_KEY);
   assert.deepEqual(freshSecrets(first), first);
-  assert.equal(Object.keys(first.databasePasswords).length, 8);
+  assert.equal(Object.keys(first.databasePasswords).length, serviceNames.length);
   const secretValues = Object.values(first.databasePasswords);
-  assert.equal(new Set(secretValues).size, 8);
+  assert.equal(new Set(secretValues).size, serviceNames.length);
   assert.equal(first.INTERNAL_RUNTIME_SECRET.length >= 32, true);
   for (const name of serviceNames) first.databaseUrls[name] = `postgresql://tuts_${name}:synthetic@db.example.com/tuts_${name}?sslmode=require`;
   for (const name of serviceNames) {
@@ -86,7 +86,7 @@ test('service binding targets deploy before callers and public gateway deploys l
   assert.ok(deployOrder.indexOf('scheduling') < deployOrder.indexOf('billing'));
   assert.ok(deployOrder.indexOf('clients') < deployOrder.indexOf('notifications'));
   assert.equal(deployOrder.at(-1), 'gateway');
-  assert.equal(new Set(deployOrder).size, 9);
+  assert.equal(new Set(deployOrder).size, serviceNames.length+1);
 });
 
 test('deployment refuses cross-service database credentials and insecure URLs', () => {
@@ -113,4 +113,11 @@ test('dedicated event payload lifecycle outlives queue retention and expires pri
   const policy = JSON.parse(await readFile(new URL('./event-payload-lifecycle.json', import.meta.url), 'utf8'));
   assert.deepEqual(policy.rules, [{ id: 'event-payload-expiration', enabled: true, conditions: { prefix: '' }, deleteObjectsTransition: { condition: { type: 'Age', maxAge: 7 * 86400 } } }]);
   assert.ok(policy.rules[0].deleteObjectsTransition.condition.maxAge > 86400);
+});
+
+test('database placement is explicit per backend while gateway stays at the edge',()=>{
+ const configs=createConfigs({...deployment,databaseRegion:'aws:eu-west-2'},eventConsumerSubscriptions);
+ for(const name of serviceNames) assert.deepEqual(configs[name].placement,{region:'aws:eu-west-2'});
+ assert.equal(configs.gateway.placement,undefined);
+ assert.throws(()=>validateDeployment({...deployment,databaseRegion:'https://private-db.example'}));
 });

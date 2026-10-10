@@ -107,3 +107,69 @@ Client merge events install a local alias, preserving historical invoice IDs and
 `billing.invoice-updated.v1` publishes revisioned invoice state after issue/payment allocation for Reporting. It contains IDs and monetary totals, without payer contact details. Reporting uses a scoped Billing reconciliation before showing real collection totals, because invoice paid amounts can contain explicitly simulated payments.
 
 Attendance `no_show` is accepted in the billing projection and is not billable under the current completed-classes policy. Monthly arrears remain unchanged: October 1 drafts September's completed classes.
+
+## Source-preserving business history
+
+Business history endpoints require business access scope, staff role, `billing.read`
+and `reporting.financial`; mutations also require `billing.write`. Student/parent
+roles and tutors restricted to student scope are rejected before reading data.
+
+- `POST /v1/history-imports/preview`: multipart `file` and `options` JSON. Files
+  are CSV, XLSX or PDF, at most 5 MB. Options include `kind`, `sheetName`, `mapping`,
+  `currency`, `statusMap`, and `countAsClasses` (false by default). Canonical mapping
+  keys are `date`, `studentName`, `serviceType`, `hours`, `rateMinor`, `amountMinor`,
+  `currency`, `status`, `invoiceNumber`, `paidDate`, `notes`. Empty mapping values
+  clear inferred fields; empty status mappings explicitly require row review.
+- `POST /v1/history-imports/commit`: `{token,allowPartial:false}` and
+  `Idempotency-Key`. A tenant-scoped persisted preview fixes the exact source and
+  options. Errors block commit until corrected or partial mode is explicitly
+  selected. A same-file/options retry returns the original result; a previously
+  committed file with changed options cannot create another ledger copy.
+- `GET /v1/history-imports?limit=50&offset=0` lists archived sources including
+  `status:staged|committed`, summary, and private download path.
+  `GET /v1/history-imports/:id/download` returns the original authenticated bytes.
+- `GET /v1/work-log` and `GET /v1/invoice-history` accept `month=YYYY-MM`,
+  `status=unsent|pending|paid|unpaid`, `search`, `limit` and `offset`. `unpaid`
+  includes unsent and pending; absent month means all history. Counts cover the
+  entire matching tenant dataset. Invoice history unions native and imported
+  rows with `origin` and payment evidence. Native `paidMinor` is real allocations;
+  `simulatedMinor` is returned separately, even when a test invoice is settled.
+- `GET /v1/work-log/summary` returns exact student-name and currency summaries;
+  currencies are never combined and names do not create or merge CRM contacts.
+- `PATCH /v1/work-log/:id` corrects ledger fields, `countAsClasses`, status and
+  notes; optional `revision` rejects stale edits. Corrected hours/rates recompute
+  the amount. `PATCH /v1/invoice-history/:id` permits only imported status,
+  paid-date and revision corrections; native invoices remain immutable here.
+- `POST /v1/invoice-history` records reviewed metadata `{date,studentName,
+  serviceType?,amountMinor,currency,status,paidDate?,invoiceNumber?,notes?,
+  importId?}` with `Idempotency-Key`. Import IDs may reference a PDF archive.
+  Duplicate invoice numbers (including native IDs) require review. Unnumbered
+  records cannot be automatically reconciled to a native invoice.
+
+PostgreSQL stores original bytes, original raw cells/formulas from every sheet,
+options, normalized preview errors/warnings and accepted ledger rows separately.
+Parsing does not execute formulas. Formula caches are read; missing work totals
+may be derived from valid hours and rate with a rounding warning. The parser
+limits sheets, expanded ZIP size, rows, columns and cells before loading workbooks.
+Calculated sheets and template-only lines remain archived. PDFs are archive-only;
+there is no OCR extraction. CSV monetary values are major units by default, with
+currency-specific decimal exponents; headers containing `minor` indicate exact
+minor units. Fractional hours have at most six decimal places. All financial
+arithmetic uses exact integer rounding and rejects unsafe totals.
+
+`GET /v1/business-analytics?month=YYYY-MM` defaults to the business-local current
+month. The aggregate separates work ledger amounts from invoice revenues. Recorded
+revenue equals real native allocations plus imported invoice paid declarations;
+simulated payments and paid work assertions are excluded. Expected monthly work
+value and native class estimates are separate. When work history exists, hours,
+trends and observed student counts use that ledger; otherwise they use completed
+native classes. Sources cannot be combined safely without reviewed identity links.
+Missing identity/classification data produces null measures with coverage notes.
+Churn describes inactivity relative to the previous month and remains provisional
+until the selected month ends. Importing history never issues invoices, charges
+clients, sends messages, or creates payment transactions.
+
+`BILLING_TEST_DATABASE_URL` enables rollback-only synthetic PostgreSQL tests for
+source bytes/raw retention, tenant boundaries, staged tokens, partial review,
+retries, duplicate prevention, edits and exact multicurrency aggregates. No real
+customer workbook belongs in fixtures or production implementation checks.

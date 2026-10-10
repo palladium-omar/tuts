@@ -27,6 +27,14 @@ export type Coverage = {
     asOf: string | null;
     reason?: string;
 };
+type StoredCoverage = { student_id: string; source: string; status: Coverage['status']; as_of: Date | null; reason: string | null };
+type FinanceSnapshot = { student_id: string; totals: unknown[]; invoice_count: number; as_of: Date; complete: boolean };
+type SummaryAggregate = {
+    student_id: string; scheduling: Date | null; learning: Date | null; resources: Date | null; undated: boolean | null;
+    booked: string | null; class_completed: string | null; cancelled: string | null; no_show: string | null;
+    assigned: string | null; submitted: string | null; homework_completed: string | null; needs_revision: string | null;
+    materials: string | null; submission_files: string | null; active_seconds: string | null; last_seen: Date | null;
+};
 @Injectable()
 export class ReportingService {
     constructor(
@@ -34,33 +42,70 @@ export class ReportingService {
     private readonly db: Database) {
     }
     async summaries(ctx: RequestContext, ids: string[], period: Period, financial = false) {
-        if (financial)
-            assertFinancial(ctx);
+        if (financial) assertFinancial(ctx);
+        const requested = [...new Set(ids)];
+        for (const id of requested) assertStudentAccess(ctx, id);
         return this.db.withTenant(ctx.businessId, async (tx) => {
             await lockReports(tx, ctx.businessId);
-            const items = [];
-            for (const id of [...new Set(ids)])
-                items.push(await this.summary(tx, ctx, id, period, financial));
-            return {
-                items, asOf: items.reduce<string | null>((a, b) => b.asOf && (!a || b.asOf > a) ? b.asOf : a, null)
-            };
+            if (!requested.length) return { items: [], asOf: null };
+            const aliases = await tx.query<{ requested_id: string; student_id: string; depth: number; cycle: boolean }>(`
+                WITH RECURSIVE roots AS (
+                    SELECT id requested_id,id student_id,0 depth,ARRAY[id] path,false cycle FROM unnest($1::uuid[]) id
+                    UNION ALL
+                    SELECT r.requested_id,a.target_id,r.depth+1,r.path||a.target_id,a.target_id=ANY(r.path)
+                    FROM roots r JOIN report_student_aliases a ON a.source_id=r.student_id
+                    WHERE r.depth<50 AND NOT r.cycle
+                ) SELECT DISTINCT ON (requested_id) requested_id,student_id,depth,cycle FROM roots ORDER BY requested_id,depth DESC`, [requested]);
+            const roots = new Map(aliases.rows.map(row => {
+                if (row.depth >= 50) throw new ConflictException('Student alias chain exceeds limit');
+                if (row.cycle) throw new ConflictException('Student identity requires reconciliation');
+                assertStudentAccess(ctx, row.student_id);
+                return [row.requested_id, row.student_id];
+            }));
+            const canonical = [...new Set(requested.map(id => roots.get(id)!))];
+            const aggregates = await tx.query<SummaryAggregate>(`
+                WITH period AS (SELECT ($3||'-01')::date first_day,(($3||'-01')::date+interval '1 month') last_day),
+                classes AS (
+                    SELECT student_id,max(observed_at) scheduling,
+                        count(*) FILTER(WHERE status='scheduled' AND (starts_at AT TIME ZONE $2)::date>=p.first_day AND (starts_at AT TIME ZONE $2)::date<p.last_day) booked,
+                        count(*) FILTER(WHERE status='completed' AND (starts_at AT TIME ZONE $2)::date>=p.first_day AND (starts_at AT TIME ZONE $2)::date<p.last_day) class_completed,
+                        count(*) FILTER(WHERE status='cancelled' AND (starts_at AT TIME ZONE $2)::date>=p.first_day AND (starts_at AT TIME ZONE $2)::date<p.last_day) cancelled,
+                        count(*) FILTER(WHERE status='no_show' AND (starts_at AT TIME ZONE $2)::date>=p.first_day AND (starts_at AT TIME ZONE $2)::date<p.last_day) no_show
+                    FROM report_classes CROSS JOIN period p WHERE student_id=ANY($1::uuid[]) GROUP BY student_id
+                ), homework AS (
+                    SELECT student_id,max(observed_at) learning,bool_or(due_at IS NULL AND created_at IS NULL) undated,
+                        count(*) FILTER(WHERE status='assigned' AND (coalesce(due_at,created_at) AT TIME ZONE $2)::date>=p.first_day AND (coalesce(due_at,created_at) AT TIME ZONE $2)::date<p.last_day) assigned,
+                        count(*) FILTER(WHERE status='submitted' AND (coalesce(due_at,created_at) AT TIME ZONE $2)::date>=p.first_day AND (coalesce(due_at,created_at) AT TIME ZONE $2)::date<p.last_day) submitted,
+                        count(*) FILTER(WHERE status='completed' AND (coalesce(due_at,created_at) AT TIME ZONE $2)::date>=p.first_day AND (coalesce(due_at,created_at) AT TIME ZONE $2)::date<p.last_day) homework_completed,
+                        count(*) FILTER(WHERE status='needs_revision' AND (coalesce(due_at,created_at) AT TIME ZONE $2)::date>=p.first_day AND (coalesce(due_at,created_at) AT TIME ZONE $2)::date<p.last_day) needs_revision
+                    FROM report_assignments CROSS JOIN period p WHERE student_id=ANY($1::uuid[]) GROUP BY student_id
+                ), resources AS (
+                    SELECT student_id,max(observed_at) resources,count(*) FILTER(WHERE assignment_id IS NULL) materials,count(*) FILTER(WHERE assignment_id IS NOT NULL) submission_files
+                    FROM report_resources WHERE student_id=ANY($1::uuid[]) GROUP BY student_id
+                ), activity AS (
+                    SELECT student_id,coalesce(sum(accepted_seconds) FILTER(WHERE (received_at AT TIME ZONE $2)::date>=p.first_day AND (received_at AT TIME ZONE $2)::date<p.last_day),0)::text active_seconds,max(received_at) last_seen
+                    FROM activity_receipts CROSS JOIN period p WHERE student_id=ANY($1::uuid[]) GROUP BY student_id
+                ) SELECT ids.student_id,classes.scheduling,classes.booked,classes.class_completed,classes.cancelled,classes.no_show,
+                    homework.learning,homework.undated,homework.assigned,homework.submitted,homework.homework_completed,homework.needs_revision,
+                    resources.resources,resources.materials,resources.submission_files,activity.active_seconds,activity.last_seen
+                FROM unnest($1::uuid[]) ids(student_id) LEFT JOIN classes USING(student_id) LEFT JOIN homework USING(student_id) LEFT JOIN resources USING(student_id) LEFT JOIN activity USING(student_id)`, [canonical, period.timeZone, period.month]);
+            const stored = await tx.query<StoredCoverage>(`SELECT student_id,source,status,as_of,reason FROM report_coverage WHERE student_id=ANY($1::uuid[]) AND month=$2 AND time_zone=$3 AND source=ANY($4::text[])`, [canonical, period.month, period.timeZone, financial ? ['scheduling','learning','billing'] : ['scheduling','learning']]);
+            const coverage = new Map<string, StoredCoverage[]>();
+            for (const row of stored.rows) coverage.set(row.student_id, [...coverage.get(row.student_id) ?? [], row]);
+            const snapshots = financial ? (await tx.query<FinanceSnapshot>('SELECT student_id,totals,invoice_count,as_of,complete FROM report_finance_snapshots WHERE student_id=ANY($1::uuid[])', [canonical])).rows : [];
+            const snapshotById = new Map(snapshots.map(row => [row.student_id,row]));
+            const aggregateById = new Map(aggregates.rows.map(row => [row.student_id,row]));
+            const items = requested.map(id => {
+                const studentId = roots.get(id)!;
+                return this.summary(studentId,period,financial,aggregateById.get(studentId)!,coverage.get(studentId) ?? [],snapshotById.get(studentId));
+            });
+            return { items, asOf: items.reduce<string | null>((a,b) => b.asOf && (!a || b.asOf>a) ? b.asOf : a,null) };
         });
     }
-    private async summary(tx: PoolClient, ctx: RequestContext, id: string, period: Period, financial: boolean) {
-        const studentId = await authorizedRoot(tx, ctx, id), { month, timeZone } = period;
-        const observed = await tx.query<{
-            scheduling: Date | null;
-            learning: Date | null;
-            resources: Date | null;
-        }>(`SELECT (SELECT max(observed_at) FROM report_classes WHERE student_id=$1) scheduling,(SELECT max(observed_at) FROM report_assignments WHERE student_id=$1) learning,(SELECT max(observed_at) FROM report_resources WHERE student_id=$1) resources`, [studentId]);
-        const stored = await tx.query<{
-            source: string;
-            status: Coverage['status'];
-            as_of: Date | null;
-            reason: string | null;
-        }>(`SELECT * FROM report_coverage WHERE student_id=$1 AND month=$2 AND time_zone=$3 AND source=ANY($4::text[])`, [studentId, month, timeZone, financial ? ['scheduling', 'learning', 'billing'] : ['scheduling', 'learning']]);
+    private summary(studentId: string, period: Period, financial: boolean, aggregate: SummaryAggregate, stored: StoredCoverage[], snapshot?: FinanceSnapshot) {
+        const {month,timeZone} = period;
         const sourceCoverage = (source: string, seen: Date | null): Coverage => {
-            const row = stored.rows.find(r => r.source === source);
+            const row = stored.find(r => r.source === source);
             if (row)
                 return {
                     status: row.status, asOf: [row.as_of?.toISOString(), seen?.toISOString()].filter((v): v is string => Boolean(v)).sort().at(-1) ?? null, ...row.reason ? {
@@ -78,33 +123,10 @@ export class ReportingService {
             learning: Coverage;
             billing?: Coverage;
         } = {
-            scheduling: sourceCoverage('scheduling', observed.rows[0]!.scheduling), learning: sourceCoverage('learning', observed.rows[0]!.learning ?? observed.rows[0]!.resources)
+            scheduling: sourceCoverage('scheduling', aggregate.scheduling), learning: sourceCoverage('learning', aggregate.learning ?? aggregate.resources)
         };
-        const undated = await tx.query('SELECT 1 FROM report_assignments WHERE student_id=$1 AND due_at IS NULL AND created_at IS NULL LIMIT 1', [studentId]);
-        if (undated.rowCount && coverage.learning.status === 'complete')
-            coverage.learning = {
-                ...coverage.learning, status: 'partial', reason: 'Some homework dates are unknown; reconcile source history'
-            };
-        const classes = await tx.query<{
-            booked: string;
-            completed: string;
-            cancelled: string;
-            no_show: string;
-        }>(`SELECT count(*) FILTER(WHERE status='scheduled') booked,count(*) FILTER(WHERE status='completed') completed,count(*) FILTER(WHERE status='cancelled') cancelled,count(*) FILTER(WHERE status='no_show') no_show FROM report_classes WHERE student_id=$1 AND (starts_at AT TIME ZONE $2)::date>=($3||'-01')::date AND (starts_at AT TIME ZONE $2)::date<(($3||'-01')::date+interval '1 month')`, [studentId, timeZone, month]);
-        const homework = await tx.query<{
-            assigned: string;
-            submitted: string;
-            completed: string;
-            needs_revision: string;
-        }>(`SELECT count(*) FILTER(WHERE status='assigned') assigned,count(*) FILTER(WHERE status='submitted') submitted,count(*) FILTER(WHERE status='completed') completed,count(*) FILTER(WHERE status='needs_revision') needs_revision FROM report_assignments WHERE student_id=$1 AND (coalesce(due_at,created_at) AT TIME ZONE $2)::date>=($3||'-01')::date AND (coalesce(due_at,created_at) AT TIME ZONE $2)::date<(($3||'-01')::date+interval '1 month')`, [studentId, timeZone, month]);
-        const activity = await tx.query<{
-            active_seconds: string;
-            last_seen: Date | null;
-        }>(`SELECT coalesce(sum(accepted_seconds) FILTER(WHERE (received_at AT TIME ZONE $2)::date>=($3||'-01')::date AND (received_at AT TIME ZONE $2)::date<(($3||'-01')::date+interval '1 month')),0)::text active_seconds,max(received_at) last_seen FROM activity_receipts WHERE student_id=$1`, [studentId, timeZone, month]);
-        const resources = await tx.query<{
-            materials: string;
-            submission_files: string;
-        }>(`SELECT count(*) FILTER(WHERE assignment_id IS NULL) materials,count(*) FILTER(WHERE assignment_id IS NOT NULL) submission_files FROM report_resources WHERE student_id=$1`, [studentId]);
+        if (aggregate.undated && coverage.learning.status === 'complete')
+            coverage.learning = { ...coverage.learning, status: 'partial', reason: 'Some homework dates are unknown; reconcile source history' };
         const observedCounts = (source: Coverage, value: unknown) => source.status === 'missing' || (source.status === 'unavailable' && !source.asOf) ? null : safeCount(value);
         let finance: undefined | {
             period: 'all_time';
@@ -113,13 +135,6 @@ export class ReportingService {
             asOf: string | null;
         };
         if (financial) {
-            const rows = await tx.query<{
-                totals: unknown[];
-                invoice_count: number;
-                as_of: Date;
-                complete: boolean;
-            }>('SELECT * FROM report_finance_snapshots WHERE student_id=$1', [studentId]);
-            const snapshot = rows.rows[0];
             coverage.billing = snapshot?.complete ? {
                 status: 'complete', asOf: snapshot.as_of.toISOString()
             } : sourceCoverage('billing', snapshot?.as_of ?? null);
@@ -127,16 +142,16 @@ export class ReportingService {
                 period: 'all_time', totalsByCurrency: snapshot?.complete ? snapshot.totals : null, issuedInvoiceCount: snapshot?.complete ? snapshot.invoice_count : null, asOf: snapshot?.as_of.toISOString() ?? null
             };
         }
-        const asOf = [coverage.scheduling.asOf, coverage.learning.asOf, coverage.billing?.asOf, activity.rows[0]!.last_seen?.toISOString()].filter((v): v is string => Boolean(v)).sort().at(-1) ?? null;
+        const asOf = [coverage.scheduling.asOf, coverage.learning.asOf, coverage.billing?.asOf, aggregate.last_seen?.toISOString()].filter((v): v is string => Boolean(v)).sort().at(-1) ?? null;
         return {
             studentId, month, timeZone, bookings: {
-                booked: observedCounts(coverage.scheduling, classes.rows[0]!.booked), completed: observedCounts(coverage.scheduling, classes.rows[0]!.completed), cancelled: observedCounts(coverage.scheduling, classes.rows[0]!.cancelled), noShow: observedCounts(coverage.scheduling, classes.rows[0]!.no_show)
+                booked: observedCounts(coverage.scheduling, aggregate.booked), completed: observedCounts(coverage.scheduling, aggregate.class_completed), cancelled: observedCounts(coverage.scheduling, aggregate.cancelled), noShow: observedCounts(coverage.scheduling, aggregate.no_show)
             }, homework: {
-                assigned: observedCounts(coverage.learning, homework.rows[0]!.assigned), submitted: observedCounts(coverage.learning, homework.rows[0]!.submitted), completed: observedCounts(coverage.learning, homework.rows[0]!.completed), needsRevision: observedCounts(coverage.learning, homework.rows[0]!.needs_revision)
+                assigned: observedCounts(coverage.learning, aggregate.assigned), submitted: observedCounts(coverage.learning, aggregate.submitted), completed: observedCounts(coverage.learning, aggregate.homework_completed), needsRevision: observedCounts(coverage.learning, aggregate.needs_revision)
             }, resources: {
-                period: 'all_time' as const, materials: observedCounts(coverage.learning, resources.rows[0]!.materials), submissionFiles: observedCounts(coverage.learning, resources.rows[0]!.submission_files)
+                period: 'all_time' as const, materials: observedCounts(coverage.learning, aggregate.materials), submissionFiles: observedCounts(coverage.learning, aggregate.submission_files)
             }, activity: {
-                activeSeconds: safeCount(activity.rows[0]!.active_seconds), lastSeenAt: activity.rows[0]!.last_seen?.toISOString() ?? null, estimated: true as const, scope: 'tuts' as const
+                activeSeconds: safeCount(aggregate.active_seconds), lastSeenAt: aggregate.last_seen?.toISOString() ?? null, estimated: true as const, scope: 'tuts' as const
             }, ...finance ? {
                 financial: finance
             } : {}, coverage, asOf, partial: Object.values(coverage).some(c => c.status !== 'complete')
