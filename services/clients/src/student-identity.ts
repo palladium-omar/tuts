@@ -159,7 +159,11 @@ export async function saveRelatedContact(tx: PoolClient, ctx: RequestContext, st
         });
     return (await listRelatedContacts(tx, studentId)).find(c => c.id === id)!;
 }
-const mergeFields = ['photo', 'firstName', 'lastName', 'displayName', 'email', 'phone', 'notes', 'status', 'source', 'emailOptIn', 'whatsappOptIn'] as const;
+const mergeFields = ['photo', 'firstName', 'lastName', 'displayName', 'notes', 'status', 'source', 'emailOptIn', 'whatsappOptIn'] as const;
+const addressKinds = ['email', 'phone'] as const;
+const addressKey = (kind: 'email' | 'phone', value: string) => kind === 'email' ? value.trim().toLowerCase() : normalizePhone(value);
+type MergeAddress = { value: string; label: string };
+type PrimaryAddresses = { email?: string; phone?: string };
 const empty = (value: unknown) => value === null || value === undefined || value === '';
 export async function mergePreview(tx: PoolClient, sourceId: string, targetId: string) {
     if (sourceId === targetId)
@@ -168,6 +172,36 @@ export async function mergePreview(tx: PoolClient, sourceId: string, targetId: s
     // Aliases are resolved for ordinary reads, but must never silently change a merge request.
     if (source.id !== sourceId || target.id !== targetId)
         throw new ConflictException('A selected student was already merged; refresh the selection');
+    const sourceContacts = await listRelatedContacts(tx, sourceId);
+    const targetContacts = await listRelatedContacts(tx, targetId);
+    // Consolidate only the students' own contacts, including contacts retained by
+    // earlier merges. Family, payer and independently linked contacts stay separate.
+    const ownRecords = await tx.query<{ id: string }>(
+        'SELECT id FROM clients WHERE id=ANY($1::uuid[]) OR merged_into=ANY($1::uuid[])', [[sourceId, targetId]]);
+    const ownIds = new Set(ownRecords.rows.map(row => row.id));
+    const ownContacts = [...targetContacts, ...sourceContacts].filter(contact =>
+        contact.id === sourceId || contact.id === targetId ||
+        ownIds.has(contact.id) && ['student', 'self'].includes(contact.relationship));
+    const contactAddresses: { email: MergeAddress[]; phone: MergeAddress[] } = { email: [], phone: [] };
+    const primaryAddresses: PrimaryAddresses = {};
+    for (const kind of addressKinds) {
+        const unique = new Map<string, MergeAddress>();
+        for (const contact of ownContacts) {
+            for (const address of contact[kind === 'email' ? 'emails' : 'phones']) {
+                const key = addressKey(kind, address.value);
+                if (!unique.has(key)) unique.set(key, { value: address.value, label: address.label });
+            }
+        }
+        // Retain legacy values too, even if their contact link was detached.
+        for (const record of [target, source]) {
+            const value = record[kind];
+            if (value && !unique.has(addressKey(kind, value)))
+                unique.set(addressKey(kind, value), { value, label: 'personal' });
+        }
+        contactAddresses[kind] = [...unique.values()];
+        const preferred = target[kind] || source[kind];
+        primaryAddresses[kind] = preferred ? unique.get(addressKey(kind, preferred))!.value : contactAddresses[kind][0]?.value;
+    }
     const a = item(source), b = item(target), conflicts: {
         field: string;
         source: unknown;
@@ -192,8 +226,12 @@ export async function mergePreview(tx: PoolClient, sourceId: string, targetId: s
     const blockedReasons: string[] = [];
     if (source.portal_protected_at || target.portal_protected_at)
         blockedReasons.push('Portal access or an invitation protects a selected student. Review and revoke grants before a separately authorized unlock.');
+    for (const kind of addressKinds)
+        if (contactAddresses[kind].length > 20)
+            blockedReasons.push(`The combined student contact exceeds 20 ${kind === 'email' ? 'email addresses' : 'phone numbers'}. Review the contact details before merging.`);
     return {
-        source: a, target: b, conflicts, affectedLinks: {
+        source: a, target: b, conflicts, contactAddresses, primaryAddresses,
+        sourceContacts, targetContacts, consolidatedContactIds: [...new Set([sourceId, targetId, ...ownContacts.map(contact => contact.id)])], affectedLinks: {
             contacts: Number(counts.rows[0]!.contacts), payers: Number(counts.rows[0]!.payers), sourceIdentities: Number(counts.rows[0]!.source_identities), groups: Number(counts.rows[0]!.groups)
         }, blockedReasons, sourceRevision: source.revision, targetRevision: target.revision
     };
@@ -204,6 +242,7 @@ export async function commitMerge(tx: PoolClient, ctx: RequestContext, input: {
     sourceRevision: number;
     targetRevision: number;
     fieldChoices: Record<string, 'source' | 'target'>;
+    primaryAddresses?: PrimaryAddresses;
 }) {
     const preview = await mergePreview(tx, input.sourceId, input.targetId);
     if (preview.blockedReasons.length)
@@ -211,16 +250,29 @@ export async function commitMerge(tx: PoolClient, ctx: RequestContext, input: {
     if (preview.sourceRevision !== input.sourceRevision || preview.targetRevision !== input.targetRevision)
         throw new ConflictException('Student changed after preview; review a new preview');
     const conflictFields = new Set(preview.conflicts.map(c => c.field));
+    // Older open merge dialogs submit email/phone as a field choice. Interpret
+    // those choices as primary selection; they must never discard an address.
+    for (const kind of addressKinds)
+        if (!empty(preview.source[kind]) && !empty(preview.target[kind]) && preview.source[kind] !== preview.target[kind])
+            conflictFields.add(kind);
     if (preview.conflicts.some(c => !input.fieldChoices[c.field]))
         throw new ConflictException('Choose a survivor value for every conflict');
     if (Object.keys(input.fieldChoices).some(field => !conflictFields.has(field)))
         throw new ConflictException('Field choice does not refer to a current conflict');
     const linkedCount = await tx.query<{
         count: string;
-    }>('SELECT count(DISTINCT contact_id) FROM student_contacts WHERE student_id=ANY($1::uuid[])', [[input.sourceId, input.targetId]]);
-    if (Number(linkedCount.rows[0]!.count) > 100)
+    }>('SELECT count(DISTINCT contact_id) FROM student_contacts WHERE student_id=ANY($1::uuid[]) AND NOT(contact_id=ANY($2::uuid[]))', [[input.sourceId, input.targetId], preview.consolidatedContactIds]);
+    if (Number(linkedCount.rows[0]!.count) + 1 > 100)
         throw new ConflictException('Merged contacts exceed 100; detach unnecessary relationships before merging');
     const patch: Record<string, unknown> = {};
+    for (const kind of addressKinds) {
+        const selected = input.primaryAddresses?.[kind] ??
+            (input.fieldChoices[kind] ? preview[input.fieldChoices[kind]][kind] : preview.primaryAddresses[kind]);
+        const address = selected ? preview.contactAddresses[kind].find(address => addressKey(kind, address.value) === addressKey(kind, selected)) : undefined;
+        if (selected && !address)
+            throw new ConflictException(`Choose a primary ${kind} from the retained addresses`);
+        patch[kind] = address?.value ?? null;
+    }
     for (const field of mergeFields)
         patch[field] = input.fieldChoices[field] === 'source' || empty(preview.target[field]) ? preview.source[field] : preview.target[field];
     patch.tags = [...new Set([...preview.target.tags, ...preview.source.tags])];
@@ -235,9 +287,21 @@ export async function commitMerge(tx: PoolClient, ctx: RequestContext, input: {
     if (Object.keys(custom).length > 100)
         throw new ConflictException('Merged custom fields exceed 100');
     patch.customFields = custom;
+    // The survivor's own contact can also be shared with other students. Check
+    // their scope before adding addresses or changing its primary value.
+    const shared = await tx.query<{ student_id: string }>('SELECT student_id FROM student_contacts WHERE contact_id=$1', [input.targetId]);
+    for (const link of shared.rows) assertStudentAccess(ctx, link.student_id);
+    await tx.query(`INSERT INTO related_contacts(business_id,id,display_name) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`, [ctx.businessId, input.targetId, patch.displayName]);
+    for (const kind of addressKinds)
+        for (const address of preview.contactAddresses[kind])
+            await tx.query(`INSERT INTO contact_addresses(business_id,id,contact_id,kind,value,normalized_value,label,is_primary) VALUES($1,$2,$3,$4,$5,$6,$7,false) ON CONFLICT(business_id,contact_id,kind,normalized_value) DO NOTHING`,
+                [ctx.businessId, randomUUID(), input.targetId, kind, address.value, addressKey(kind, address.value), address.label]);
     const row = await updateContact(tx, ctx.businessId, input.targetId, patch as ContactPatch, ctx.requestId, false);
     await tx.query(`INSERT INTO student_contacts(business_id,student_id,contact_id,relationship,is_primary) SELECT business_id,$2,contact_id,relationship,false FROM student_contacts WHERE student_id=$1 ON CONFLICT DO NOTHING`, [input.sourceId, input.targetId]);
     await tx.query('DELETE FROM student_contacts WHERE student_id=$1', [input.sourceId]);
+    // Their addresses now live on one student contact. Keep original contact
+    // records and their other relationships intact for shared contacts/history.
+    await tx.query('DELETE FROM student_contacts WHERE student_id=$1 AND contact_id=ANY($2::uuid[]) AND contact_id<>$1', [input.targetId, preview.consolidatedContactIds]);
     await tx.query(`INSERT INTO client_payers(business_id,student_id,payer_id,relationship) SELECT business_id,$2,payer_id,relationship FROM client_payers WHERE student_id=$1 ON CONFLICT DO NOTHING`, [input.sourceId, input.targetId]);
     await tx.query('DELETE FROM client_payers WHERE student_id=$1', [input.sourceId]);
     await remapStudentGroups(tx, ctx, input.sourceId, input.targetId);
@@ -246,7 +310,7 @@ export async function commitMerge(tx: PoolClient, ctx: RequestContext, input: {
     await tx.query('UPDATE clients SET merged_into=$2 WHERE merged_into=$1', [input.sourceId, input.targetId]);
     await tx.query('UPDATE clients SET merged_into=$2,merged_at=now(),revision=revision+1,updated_at=now() WHERE id=$1', [input.sourceId, input.targetId]);
     const id = randomUUID();
-    await tx.query('INSERT INTO student_merge_audit(business_id,id,source_id,target_id,actor_id,source_snapshot,target_snapshot,field_choices,revision) VALUES($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9)', [ctx.businessId, id, input.sourceId, input.targetId, ctx.sub, JSON.stringify(preview.source), JSON.stringify(preview.target), JSON.stringify(input.fieldChoices), row.revision]);
+    await tx.query('INSERT INTO student_merge_audit(business_id,id,source_id,target_id,actor_id,source_snapshot,target_snapshot,field_choices,revision) VALUES($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9)', [ctx.businessId, id, input.sourceId, input.targetId, ctx.sub, JSON.stringify({ ...preview.source, contacts: preview.sourceContacts }), JSON.stringify({ ...preview.target, contacts: preview.targetContacts }), JSON.stringify({ ...input.fieldChoices, primaryAddresses: { email: row.email, phone: row.phone } }), row.revision]);
     await emitEvent(tx, {
         type: 'clients.student-merged.v1', producer: 'clients', businessId: ctx.businessId, correlationId: ctx.requestId, data: {
             sourceId: input.sourceId, targetId: input.targetId, revision: row.revision

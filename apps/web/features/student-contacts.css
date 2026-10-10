@@ -28,6 +28,14 @@
 .duplicate-value input { width: 16px; height: 16px; margin-top: 2px; flex-shrink: 0; accent-color: var(--accent); }
 .duplicate-value span { white-space: pre-wrap; }
 .duplicate-link-summary { display: flex; gap: 8px; flex-wrap: wrap; margin: 14px 0; }
+.duplicate-addresses { margin: 20px 0; padding: 18px; border: 1px solid var(--line); border-radius: 10px; }
+.duplicate-addresses h3 { margin: 0 0 8px; }
+.duplicate-addresses fieldset { min-width: 0; border: 0; margin: 18px 0 0; padding: 0; }
+.duplicate-addresses legend { font-weight: 600; padding: 0; }
+.duplicate-addresses select { width: 100%; min-width: 0; }
+.duplicate-retained-addresses { list-style: none; padding: 0; margin: 10px 0 14px; display: grid; gap: 8px; }
+.duplicate-retained-addresses li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; overflow-wrap: anywhere; }
+.duplicate-retained-addresses small { color: var(--muted); }
 .duplicate-confirm { display: flex; align-items: flex-start; gap: 10px; line-height: 1.6; font-size: 13px; }
 .duplicate-confirm input { width: 16px; height: 16px; flex-shrink: 0; margin-top: 3px; accent-color: var(--accent); }
 .duplicate-source-issues { border-top: 1px solid var(--line); margin-top: 24px; padding-top: 18px; }

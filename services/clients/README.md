@@ -154,8 +154,8 @@ use student. Primary addresses are contact-wide; primary contact is per student.
 | DELETE | `/v1/clients/:id/contacts/:contactId` | Detach only; `{item:{studentId,contactId,detached:true}}` |
 | GET | `/v1/duplicates` | `limit`/`offset`; `{items:[{source:client,target:client,reasons:string[]}],total,limit,offset}` |
 | POST | `/v1/duplicates/dismiss` | `{sourceId,targetId}`; `{item:{sourceId,targetId,dismissed:true}}` |
-| POST | `/v1/merges/preview` | `{sourceId,targetId}`; `{item:{source,target,conflicts:[{field,source,target}],affectedLinks:{contacts,payers,sourceIdentities},blockedReasons,sourceRevision,targetRevision}}` |
-| POST | `/v1/merges` | `{sourceId,targetId,sourceRevision,targetRevision,fieldChoices:{[field]:'source'|'target'}}`; `{item:client,merge:{id,sourceId,targetId,revision}}` |
+| POST | `/v1/merges/preview` | `{sourceId,targetId}`; `{item:{source,target,conflicts:[{field,source,target}],contactAddresses:{email:[{value,label}],phone:[{value,label}]},primaryAddresses:{email?,phone?},sourceContacts,targetContacts,consolidatedContactIds,affectedLinks:{contacts,payers,sourceIdentities,groups},blockedReasons,sourceRevision,targetRevision}}` |
+| POST | `/v1/merges` | `{sourceId,targetId,sourceRevision,targetRevision,fieldChoices:{[field]:'source'|'target'},primaryAddresses?:{email?,phone?}}`; `{item:client,merge:{id,sourceId,targetId,revision}}` |
 
 New contacts require displayName; contactId links an existing tenant contact.
 An explicitly supplied emails/phones array replaces that contact's addresses,
@@ -174,6 +174,27 @@ tags are unioned, and contact/payer/source links move to the survivor. Existing
 survivor relationships win when the same contact or payer is linked twice.
 Revision changes reject stale previews. More than 30 merged tags or 100 custom
 fields requires reducing values before commit.
+
+Email and phone are collections, not mutually exclusive field conflicts. A merge
+unions the addresses on both students' own contacts into the survivor's own
+contact, including student/self contacts retained from earlier merges. Legacy
+email/phone values are included even when their contact link was detached.
+`primaryAddresses` selects an existing retained address; omission defaults to the
+survivor's current value, then the source's value, then the first retained address.
+The selection updates the legacy email/phone projection used for default delivery.
+It does not discard additional addresses. Email identity trims whitespace and
+ignores case, but does not strip dots or plus tags. Phone identity uses the existing
+phone normalizer. Identical normalized addresses are stored once, keeping existing
+survivor labels; more than 20 distinct addresses per kind blocks the merge.
+
+Only links to the consolidated own contacts are removed from the survivor.
+Original contact records and their other student relationships remain intact;
+family, payer and other independently linked contacts retain their own addresses.
+Scoped staff must have access to every student sharing the survivor's own contact.
+The transaction, tenant lock, stale-preview checks and portal-access protections
+also cover address consolidation. The audit snapshots include pre-merge contact
+details and the chosen primary values. Older clients' email/phone field choices
+are accepted as primary selections while retaining all addresses.
 
 The source record remains a tombstone with merged_into/merged_at, its original
 fields and revision. Ordinary GET/PATCH resolves aliases; lists and recipients
