@@ -19,6 +19,9 @@ import { fromNodeHeaders } from "better-auth/node";
 import type { Request } from "express";
 import { timingSafeEqual } from "node:crypto";
 import { initialBusinessEntitlements } from "./schemas.js";
+import type { RequestContext } from "@palladium/contracts";
+import type { PoolClient } from "pg";
+import { membershipPolicy, type MembershipPolicyRow } from "./membership-policy.js";
 
 @Injectable()
 export class IdentityService implements OnModuleInit {
@@ -143,6 +146,31 @@ export class IdentityService implements OnModuleInit {
     if (!session)
       throw new UnauthorizedException("A valid browser session is required");
     return session;
+  }
+
+  async requireBusinessContext(
+    session: { user: { id: string } },
+    businessId: string,
+    transaction?: PoolClient,
+  ) {
+    const resolve = async (tx: PoolClient) => {
+      const result = await tx.query<MembershipPolicyRow & { entitlements: string[] }>(
+        "SELECT m.role,m.permissions_override,m.access_scope,b.entitlements FROM memberships m JOIN businesses b USING (business_id) WHERE m.user_id=$1",
+        [session.user.id],
+      );
+      const membership = result.rows[0];
+      if (!membership)
+        throw new ForbiddenException("Business membership is required");
+      const policy = await membershipPolicy(tx, session.user.id, membership);
+      return {
+        sub: session.user.id,
+        businessId,
+        role: membership.role,
+        entitlements: membership.entitlements,
+        ...policy,
+      } satisfies Omit<RequestContext, "requestId">;
+    };
+    return transaction ? resolve(transaction) : this.database.withTenant(businessId, resolve);
   }
 
   assertMutationOrigin(request: Request) {

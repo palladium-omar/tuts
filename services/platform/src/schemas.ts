@@ -129,6 +129,44 @@ export const settingsSchema = z
 export const internalContextSchema = z
   .object({ businessId: businessIdSchema })
   .strict();
+
+/** Browser settings use declared display/profile fields, never an opaque saved bag. */
+export function visibleBusinessSettings(
+  current: Record<string, unknown>,
+  includeProfile: boolean,
+): Record<string, unknown> {
+  const record = (value: unknown): Record<string, unknown> =>
+    value !== null && typeof value === "object" && !Array.isArray(value)
+      ? value as Record<string, unknown> : {};
+  const pickValid = (source: Record<string, unknown>, fields: Record<string, z.ZodType>) => {
+    const result: Record<string, unknown> = {};
+    for (const [key, schema] of Object.entries(fields)) {
+      if (!Object.prototype.hasOwnProperty.call(source, key)) continue;
+      const parsed = schema.safeParse(source[key]);
+      if (parsed.success && parsed.data !== undefined) result[key] = parsed.data;
+    }
+    return result;
+  };
+  const timezone = timezoneSchema.safeParse(current.timezone);
+  const language = settingsSchema.shape.language.safeParse(current.language);
+  const result: Record<string, unknown> = {
+    version: 1,
+    timezone: timezone.success ? timezone.data : "UTC",
+    language: language.success && language.data ? language.data : "en",
+    branding: pickValid(record(current.branding), brandingSchema.shape),
+  };
+  if (includeProfile) {
+    const source = record(current.profile);
+    const { address: addressSchema, ...profileFields } = profileSchema.shape;
+    const profile = pickValid(source, profileFields);
+    if (source.address === null) profile.address = null;
+    else if (source.address !== undefined) {
+      profile.address = pickValid(record(source.address), addressSchema.unwrap().unwrap().shape);
+    }
+    result.profile = profile;
+  }
+  return result;
+}
 export const STARTER_ENTITLEMENTS = [
   "clients",
   "scheduling",

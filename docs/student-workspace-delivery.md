@@ -5,7 +5,7 @@ Architecture: [accepted implementation contract](architecture/student-workspace.
 | Phase | Status | Evidence / limitations |
 | --- | --- | --- |
 | Architecture and scope | Documented | Existing Cloudflare/Neon deployment; capability-based account scope; enterprise provisioning deferred |
-| 1. CRM and permission foundation | Pending | |
+| 1. CRM and permission foundation | Implemented, awaiting full rollout | Additive contacts/merge migration; explicit import review; scoped capability context; Clients/Platform builds, web typecheck and service import boundary check passed. Runtime flows pending. |
 | 2. Groups and invitations | Pending | |
 | 3. Student portal and Cal.com | Pending | |
 | 4. Reporting and money | Pending | |

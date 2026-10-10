@@ -17,6 +17,7 @@ import {
   Database,
   parseBody,
   Roles,
+  Permissions,
 } from "@palladium/service-kit";
 import type { RequestContext } from "@palladium/contracts";
 import { importRequestSchema } from "./schemas.js";
@@ -30,6 +31,7 @@ import { parseImportFile, MAX_FILE_BYTES } from "./parse-import.js";
 export class ImportsController {
   constructor(@Inject(Database) private readonly db: Database) {}
   @Post("parse")
+  @Permissions("clients.write")
   @ApiConsumes("multipart/form-data")
   @ApiOperation({
     summary:
@@ -55,6 +57,7 @@ export class ImportsController {
     return { item: await parseImportFile(file.originalname, file.buffer) };
   }
   @Post("preview")
+  @Permissions("clients.write")
   @ApiOperation({
     summary:
       "Validate mapped rows and preview create, update, skip and row errors",
@@ -66,6 +69,7 @@ export class ImportsController {
     }));
   }
   @Post("commit")
+  @Permissions("clients.write")
   @ApiOperation({
     summary:
       "Commit mapped import; requires an Idempotency-Key scoped to this business",
@@ -97,6 +101,7 @@ export class ImportsController {
         Object.entries(input.mapping).sort(([a], [b]) => a.localeCompare(b)),
       ),
       duplicateMode: input.duplicateMode,
+      decisions: [...(input.decisions ?? [])].sort((a,b)=>a.rowNumber-b.rowNumber),
     };
     const digest = createHash("sha256")
       .update(JSON.stringify(canonical))

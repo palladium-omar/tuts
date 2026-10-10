@@ -17,6 +17,7 @@ import {
   emitEvent,
   parseBody,
   Roles,
+  Permissions,
 } from "@palladium/service-kit";
 import type { RequestContext } from "@palladium/contracts";
 import {
@@ -45,6 +46,7 @@ export class ClientsController {
   constructor(@Inject(Database) private readonly db: Database) {}
 
   @Get()
+  @Permissions("clients.read")
   @ApiOperation({
     summary: "List student/payer records, bounded to 100 items; staff only",
   })
@@ -71,6 +73,7 @@ export class ClientsController {
   }
 
   @Post()
+  @Permissions("clients.write")
   @ApiOperation({ summary: "Create a contact with editable CRM properties" })
   async create(@CurrentContext() ctx: RequestContext, @Body() body: unknown) {
     const input = parseBody(createClientSchema, body);
@@ -85,6 +88,7 @@ export class ClientsController {
   }
 
   @Get(":id")
+  @Permissions("clients.read")
   @ApiOperation({ summary: "Get one client within the verified business" })
   async get(@CurrentContext() ctx: RequestContext, @Param("id") value: string) {
     const id = parseBody(clientIdSchema, value);
@@ -94,6 +98,7 @@ export class ClientsController {
   }
 
   @Patch(":id")
+  @Permissions("clients.write")
   @ApiOperation({ summary: "Update a client; student/payer kind is immutable" })
   async update(
     @CurrentContext() ctx: RequestContext,
@@ -113,6 +118,7 @@ export class ClientsController {
   }
 
   @Delete(":id")
+  @Permissions("clients.write")
   @Roles("owner", "admin")
   @ApiOperation({
     summary:
@@ -125,7 +131,11 @@ export class ClientsController {
     const id = parseBody(clientIdSchema, value);
     return this.db.withTenant(ctx.businessId, async (tx) => {
       await lockContacts(tx, ctx.businessId);
-      await requireClient(tx, id);
+      const client=await requireClient(tx, id);
+      if(client.id!==id) throw new ConflictException("Merged identities must be retained");
+      if(client.portal_protected_at) throw new ConflictException("Portal protected students cannot be deleted");
+      const aliases=await tx.query("SELECT 1 FROM clients WHERE merged_into=$1 LIMIT 1",[id]);
+      if(aliases.rowCount) throw new ConflictException("A merge survivor must be retained");
       await tx.query("DELETE FROM clients WHERE id=$1", [id]);
       await emitEvent(tx, {
         type: "clients.client-deleted.v1",
@@ -139,6 +149,7 @@ export class ClientsController {
   }
 
   @Get(":id/payers")
+  @Permissions("clients.read")
   @ApiOperation({
     summary: "List payer relationships for a student; staff only",
   })
@@ -153,11 +164,11 @@ export class ClientsController {
         throw new ConflictException("Payer relationships require a student");
       const result = await tx.query<ClientRow & { relationship: string }>(
         `SELECT c.*, cp.relationship FROM client_payers cp JOIN clients c ON c.business_id=cp.business_id AND c.id=cp.payer_id WHERE cp.student_id=$1 ORDER BY cp.created_at DESC,c.id LIMIT 100`,
-        [id],
+        [student.id],
       );
       return {
         items: result.rows.map((row) => ({
-          studentId: id,
+          studentId: student.id,
           payerId: row.id,
           relationship: row.relationship,
           payer: item(row),
@@ -167,6 +178,7 @@ export class ClientsController {
   }
 
   @Post(":id/payers")
+  @Permissions("clients.write")
   @ApiOperation({
     summary:
       "Create or revise a relationship between a student and a payer in the same business",
@@ -188,8 +200,10 @@ export class ClientsController {
         );
       await tx.query(
         `INSERT INTO client_payers (business_id,student_id,payer_id,relationship) VALUES ($1,$2,$3,$4) ON CONFLICT (business_id,student_id,payer_id) DO UPDATE SET relationship=EXCLUDED.relationship`,
-        [ctx.businessId, studentId, input.payerId, input.relationship],
+        [ctx.businessId, student.id, payer.id, input.relationship],
       );
+      await tx.query(`INSERT INTO student_contacts(business_id,student_id,contact_id,relationship) VALUES($1,$2,$3,$4) ON CONFLICT(business_id,student_id,contact_id) DO UPDATE SET relationship=EXCLUDED.relationship`,[ctx.businessId,student.id,payer.id,input.relationship]);
+      await tx.query("UPDATE clients SET revision=revision+1 WHERE id=$1",[student.id]);
       await emitEvent(tx, {
         type: "clients.payer-linked.v1",
         producer: "clients",

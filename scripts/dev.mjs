@@ -81,12 +81,14 @@ const launches = [...names, "gateway", "web"].map((name, index) => {
         "PLATFORM_INTERNAL_SECRET",
         "BETTER_AUTH_SECRET",
         "AUTH_MAIL_INTERNAL_SECRET",
+        "PORTAL_INTERNAL_SECRET",
         "AUTH_MAIL_ENABLED",
         "PUBLIC_APP_URL",
         "PUBLIC_GATEWAY_URL",
       ]),
-      { NOTIFICATIONS_URL: configuration.NOTIFICATIONS_URL || "http://127.0.0.1:4007" },
+      { NOTIFICATIONS_URL: configuration.NOTIFICATIONS_URL || "http://127.0.0.1:4007", CLIENTS_URL: configuration.CLIENTS_URL || 'http://127.0.0.1:4002' },
     );
+  if (name === 'clients') Object.assign(env, select(['PORTAL_INTERNAL_SECRET']));
   if (name === "payments")
     Object.assign(
       env,

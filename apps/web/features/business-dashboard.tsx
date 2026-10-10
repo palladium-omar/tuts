@@ -15,6 +15,7 @@ import {
   type Row,
 } from "../lib/api";
 import "./business-dashboard.css";
+import { hasPermission } from '@palladium/contracts';
 const previousMonth = () => {
   const d = new Date();
   d.setDate(1);
@@ -61,13 +62,13 @@ export function BusinessDashboard({
     [loading, setLoading] = useState(true),
     [error, setError] = useState(""),
     [notice, setNotice] = useState("");
-  const manage = ["owner", "admin"].includes(business.role),
-    billing = business.entitlements.includes("billing"),
-    scheduling = business.entitlements.includes("scheduling");
+  const manage = hasPermission(business, 'billing.manage'),
+    billing = business.entitlements.includes("billing") && hasPermission(business, 'billing.read'),
+    scheduling = business.entitlements.includes("scheduling") && hasPermission(business, 'scheduling.read');
   const loadSequence = useRef(0);
   const initializedMonth = useRef(false);
   async function contacts() {
-    if (!business.entitlements.includes("clients")) return [];
+    if (!business.entitlements.includes("clients") || !hasPermission(business, 'clients.read')) return [];
     const all: Row[] = [];
     for (let offset = 0; offset < 10000; offset += 100) {
       const r = await api(

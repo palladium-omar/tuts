@@ -3,9 +3,13 @@ import { randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
 import { emitEvent } from "@palladium/service-kit";
 import type { ContactInput, ContactPatch } from "./schemas.js";
+import { normalizeName, syncLegacyContact } from "./student-identity.js";
 import { validateCustomFields } from "./custom-fields.js";
 export type ClientRow = {
   id: string;
+  revision: number;
+  merged_into: string | null;
+  portal_protected_at: Date | null;
   kind: "student" | "payer";
   display_name: string;
   first_name: string;
@@ -25,6 +29,8 @@ export type ClientRow = {
 export const item = (r: ClientRow) => ({
   id: r.id,
   kind: r.kind,
+  revision: r.revision,
+  portalProtected: Boolean(r.portal_protected_at),
   firstName: r.first_name,
   lastName: r.last_name,
   displayName: r.display_name,
@@ -45,7 +51,7 @@ export async function requireClient(
   id: string,
 ): Promise<ClientRow> {
   const result = await tx.query<ClientRow>(
-    "SELECT * FROM clients WHERE id=$1",
+    `WITH RECURSIVE canonical AS (SELECT * FROM clients WHERE id=$1 UNION ALL SELECT c.* FROM clients c JOIN canonical a ON c.id=a.merged_into AND c.business_id=a.business_id) SELECT * FROM canonical WHERE merged_into IS NULL LIMIT 1`,
     [id],
   );
   if (!result.rows[0]) throw new NotFoundException("Client was not found");
@@ -95,6 +101,8 @@ export async function createContact(
       input.whatsappOptIn ?? false,
     ],
   );
+  await tx.query("UPDATE clients SET normalized_name=$2 WHERE id=$1", [id, normalizeName(displayName)]);
+  await syncLegacyContact(tx, businessId, result.rows[0]!);
   await emitEvent(tx, {
     type: "clients.client-created.v1",
     producer: "clients",
@@ -129,8 +137,11 @@ export async function updateContact(
   input: ContactPatch,
   correlationId?: string,
   composeName = true,
+  syncRelated = true,
 ) {
   await validateCustomFields(tx, input.customFields ?? {});
+  const currentCanonical = await requireClient(tx, id);
+  id = currentCanonical.id;
   const patch = { ...input };
   if (patch.email) patch.email = normalizeEmail(patch.email);
   if (patch.tags) patch.tags = [...new Set(patch.tags)];
@@ -164,10 +175,12 @@ export async function updateContact(
   });
   if (!assignments.length) return requireClient(tx, id);
   const result = await tx.query<ClientRow>(
-    `UPDATE clients SET ${assignments.join(",")},updated_at=now() WHERE id=$1 RETURNING *`,
+    `UPDATE clients SET ${assignments.join(",")},updated_at=now(),revision=revision+1 WHERE id=$1 RETURNING *`,
     values,
   );
   if (!result.rows[0]) throw new NotFoundException("Client was not found");
+  await tx.query("UPDATE clients SET normalized_name=$2 WHERE id=$1", [id, normalizeName(result.rows[0]!.display_name)]);
+  if (syncRelated) await syncLegacyContact(tx, businessId, result.rows[0]!);
   await emitEvent(tx, {
     type: "clients.client-updated.v1",
     producer: "clients",
@@ -183,7 +196,7 @@ export async function updateContact(
 }
 export async function contactsByEmails(tx: PoolClient, emails: string[]) {
   const result = await tx.query<ClientRow>(
-    "SELECT * FROM clients WHERE lower(btrim(email))=ANY($1::text[]) ORDER BY id",
+    "SELECT * FROM clients WHERE merged_into IS NULL AND lower(btrim(email))=ANY($1::text[]) ORDER BY id",
     [emails],
   );
   const matches = new Map<string, ClientRow[]>();

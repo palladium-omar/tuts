@@ -15,6 +15,7 @@ import {
   CurrentContext,
   Database,
   Roles,
+  Permissions,
   parseBody,
   emitEvent,
 } from "@palladium/service-kit";
@@ -34,12 +35,14 @@ import { lockContacts } from "./contact-store.js";
 export class FieldsController {
   constructor(@Inject(Database) private readonly db: Database) {}
   @Get()
+  @Permissions("clients.read")
   async list(@CurrentContext() ctx: RequestContext) {
     return this.db.withTenant(ctx.businessId, async (tx) => ({
       items: (await loadFields(tx)).map(fieldItem),
     }));
   }
   @Post()
+  @Permissions("clients.write")
   @Roles("owner", "admin")
   async create(@CurrentContext() ctx: RequestContext, @Body() body: unknown) {
     const input = parseBody(createFieldSchema, body);
@@ -72,6 +75,7 @@ export class FieldsController {
     });
   }
   @Patch(":id")
+  @Permissions("clients.write")
   @Roles("owner", "admin")
   async update(
     @CurrentContext() ctx: RequestContext,

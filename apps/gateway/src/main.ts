@@ -34,6 +34,7 @@ app.use(
         proxyReq.removeHeader("cookie");
         proxyReq.removeHeader("x-platform-internal-secret");
         proxyReq.removeHeader("x-auth-mail-secret");
+        proxyReq.removeHeader("x-portal-internal-secret");
         proxyReq.removeHeader("x-business-id");
       },
       error(_error, _req, res) {

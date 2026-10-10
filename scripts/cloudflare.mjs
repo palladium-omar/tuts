@@ -55,14 +55,14 @@ export function freshSecrets(existing = {}) {
     defaults.CONTEXT_PRIVATE_KEY = keys.privateKey;
     defaults.CONTEXT_PUBLIC_KEY = keys.publicKey;
   }
-  for (const name of ['PLATFORM_INTERNAL_SECRET', 'INTERNAL_RUNTIME_SECRET', 'BETTER_AUTH_SECRET', 'AUTH_MAIL_INTERNAL_SECRET']) defaults[name] = token();
+  for (const name of ['PLATFORM_INTERNAL_SECRET', 'INTERNAL_RUNTIME_SECRET', 'BETTER_AUTH_SECRET', 'AUTH_MAIL_INTERNAL_SECRET', 'PORTAL_INTERNAL_SECRET']) defaults[name] = token();
   for (const name of ['PAYMENT_ENCRYPTION_KEY', 'INTEGRATIONS_ENCRYPTION_KEY', 'COMMUNICATIONS_ENCRYPTION_KEY']) defaults[name] = randomBytes(32).toString('base64');
   const secrets = { ...defaults, ...existing, databasePasswords: { ...existing.databasePasswords }, databaseUrls: { ...existing.databaseUrls } };
   for (const name of serviceNames) secrets.databasePasswords[name] ??= token();
   return secrets;
 }
 function checkSecrets(secrets) {
-  for (const name of ['CONTEXT_PRIVATE_KEY', 'CONTEXT_PUBLIC_KEY', 'PLATFORM_INTERNAL_SECRET', 'INTERNAL_RUNTIME_SECRET', 'BETTER_AUTH_SECRET', 'AUTH_MAIL_INTERNAL_SECRET', 'PAYMENT_ENCRYPTION_KEY', 'INTEGRATIONS_ENCRYPTION_KEY', 'COMMUNICATIONS_ENCRYPTION_KEY']) {
+  for (const name of ['CONTEXT_PRIVATE_KEY', 'CONTEXT_PUBLIC_KEY', 'PLATFORM_INTERNAL_SECRET', 'INTERNAL_RUNTIME_SECRET', 'BETTER_AUTH_SECRET', 'AUTH_MAIL_INTERNAL_SECRET', 'PORTAL_INTERNAL_SECRET', 'PAYMENT_ENCRYPTION_KEY', 'INTEGRATIONS_ENCRYPTION_KEY', 'COMMUNICATIONS_ENCRYPTION_KEY']) {
     if (typeof secrets[name] !== 'string' || secrets[name].length < 32) fail(`Missing or invalid ${name} in .cloudflare/secrets.json; run init`);
   }
   for (const name of serviceNames) if (!/^[a-f\d]{48}$/i.test(secrets.databasePasswords?.[name] ?? '')) fail(`Missing or invalid database password for ${name}; run init`);
@@ -119,7 +119,7 @@ export function createConfigs(configInput, subscriptions, projectRoot = root) {
       r2_buckets: [{ binding: 'EVENT_PAYLOADS', bucket_name: `${config.prefix}-event-payloads` }, ...(name === 'learning' ? [{ binding: 'UPLOADS', bucket_name: `${config.prefix}-uploads` }] : [])],
       ...(name === 'billing' ? { services: [{ binding: 'SCHEDULING', service: `${config.prefix}-scheduling` }] } : {}),
       ...(name === 'notifications' ? { services: [{ binding: 'CLIENTS', service: `${config.prefix}-clients` }] } : {}),
-      ...(name === 'platform' ? { services: [{ binding: 'NOTIFICATIONS', service: `${config.prefix}-notifications` }] } : {}),
+      ...(name === 'platform' ? { services: [{ binding: 'NOTIFICATIONS', service: `${config.prefix}-notifications` }, { binding: 'CLIENTS', service: `${config.prefix}-clients` }] } : {}),
     };
   }
   output.gateway = {
@@ -196,6 +196,7 @@ export function secretsFor(name, secrets) {
   if (!value.DATABASE_URL) fail(`Missing ${name} database URL; run migrate before deploy`);
   if (name === 'platform') Object.assign(value, { PLATFORM_INTERNAL_SECRET: secrets.PLATFORM_INTERNAL_SECRET, BETTER_AUTH_SECRET: secrets.BETTER_AUTH_SECRET });
   if (['platform', 'notifications'].includes(name)) value.AUTH_MAIL_INTERNAL_SECRET = secrets.AUTH_MAIL_INTERNAL_SECRET;
+  if (['platform', 'clients'].includes(name)) value.PORTAL_INTERNAL_SECRET = secrets.PORTAL_INTERNAL_SECRET;
   if (name === 'notifications') for (const key of ['AUTH_MAIL_PROVIDER', 'AUTH_MAIL_FROM', 'AUTH_MAIL_API_KEY']) {
     if (typeof secrets[key] === 'string' && secrets[key]) value[key] = secrets[key];
   }

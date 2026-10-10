@@ -24,7 +24,7 @@ unavailable.
 | POST   | `/v1/imports/commit`     | Same body plus `Idempotency-Key` header; `{item:{created,updated,skipped,errors,skippedRows}}`                                                                                             |
 
 Client shape: `{id,kind,firstName,lastName,displayName,email,phone,notes,status,tags,
-source,customFields,emailOptIn,whatsappOptIn,createdAt,updatedAt}`. Create requires displayName or a first/last name.
+source,customFields,emailOptIn,whatsappOptIn,createdAt,updatedAt,revision,portalProtected}`. Create requires displayName or a first/last name.
 `kind` defaults to `student` and is immutable; `status` is lead/active/inactive,
 defaulting to lead for new contacts. Existing contacts retain all data and migrate
 to active. First/last names default to empty strings; existing display names are
@@ -51,18 +51,19 @@ No cell formula is executed; cached formula results can be read.
 `{"firstName":"First name","lastName":"Surname","email":"Email","tags":"Labels"}`.
 Supported fields are firstName, lastName, displayName, email, phone, notes,
 status, tags, kind, source, emailOptIn and whatsappOptIn. Custom columns use `custom:<fieldId>` keys. Numbers, ISO dates, select values and booleans are validated against this tenant's definitions; boolean/consent file cells accept true/false, yes/no or 1/0. Tags in files accept comma/semicolon/pipe separators.
-`duplicateMode` defaults to `skip`; `update` explicitly permits replacing mapped
-nonblank fields on an email match. Unmapped and blank values never overwrite
-contact properties. Name-only updates recompose the display name.
-
-Preview rows are `{rowNumber,action,clientId?,contact?,errors,message?}`, where
-action is create/update/skip/error. Row numbers include the file header (first data
-row is 2). Summary is `{created,updated,skipped,errors}` with error row count.
-Missing email rows skip with an explanation, repeated file emails use the first
-valid row, and multiple CRM matches are errors. Missing names are an error only
-for a new contact. Commit re-evaluates matches within a serialized tenant mutation
-transaction and applies valid rows atomically with outbox events. Per-row errors
-are returned as `{rowNumber,messages}` and skips as `{rowNumber,message}`.
+`duplicateMode` remains accepted for compatibility, but matching identities require
+explicit review decisions. An existing email or normalized name produces `review`,
+never an automatic student update. `decisions` contains
+`{rowNumber,action:'create'|'update'|'skip',clientId?}`; only update requires a
+clientId. A create decision intentionally keeps a separate student, including
+siblings sharing an email. Complete names can create without email. Exact repeated
+name/email/phone/kind rows within the file are skipped unless explicitly reviewed.
+Preview rows are `{rowNumber,action,clientId?,contact?,errors,message?,candidates?}`.
+Candidates contain `{id,displayName,email,kind,reasons}` and summary includes
+`review` alongside created/updated/skipped/errors. Commit rejects unresolved review
+rows and re-evaluates all decisions under the tenant mutation lock. Decisions are
+part of the persistent idempotency digest. Existing selected aliases must be
+refreshed to their canonical IDs before an import update.
 
 Use one stable `Idempotency-Key` (1–160 printable characters) per import attempt.
 Its tenant-scoped digest and result persist in the same transaction as contacts.
@@ -81,14 +82,13 @@ tombstone under the same connection advisory lock used by contact intake. Any
 contact event processed after that disconnect is ignored, including delayed or
 retried batches. Existing imported CRM contacts and source links are retained; a
 new connection UUID is required to reconnect. RLS scopes durable external mappings by business, connection and external
-ID. Existing mappings win; otherwise normalized email can link a single existing
-contact. Email ambiguity or malformed rows produce issues. Source contacts with
-stable external IDs can be created without an email.
-
-Connectors fill empty fields only, preserving local edits, display names, existing
-status and nonempty tags. New source contacts default to student/lead. A nonblank
-existing email is preserved when the source changes its email. Filling a blank
-email is rejected if it would introduce a duplicate. Each delivery emits
+ID. Existing mappings are the only automatic identity match. A new external ID
+creates a separate student even when an email or name resembles an existing one;
+manual duplicate review offers merge/dismissal afterward. Connectors fill empty
+fields on established identities, preserving local edits, display names, status
+and tags. Shared family addresses remain valid. Source mapping retains both the
+current canonical `client_id` and its `original_client_id` through a merge.
+Each delivery emits
 `clients.source-synced.v1` with `{connectionId,created,updated,skipped,errors,
 issues:[{externalId,reason}]}` for the integrations service to record its outcome.
 
@@ -131,3 +131,70 @@ Checks: `pnpm --filter @palladium/clients build` and `pnpm --filter @palladium/c
 ## Cloudflare runtime
 
 `src/worker.ts` exports this domain as an independent Worker through the shared Nest runtime; `src/main.ts` remains the Node entrypoint. The service retains its own PostgreSQL database, signed caller context, tenant RLS and event contracts. Migrations are applied during deployment, outside requests. Worker secrets and bindings are supplied by the deployment configuration.
+
+## Canonical student identity and contact API
+
+Migration 005 preserves every client UUID and original email/phone column. It
+backfills one related contact per legacy record and existing payer relationships.
+A contact can link to several students, with up to 20 emails and 20 phones per
+contact. Addresses are unique only inside a contact; student emails are not unique.
+All new tenant tables force RLS. The migration temporarily releases FORCE for the
+owning migration role's existing-table backfill and restores it before commit.
+
+Related contact shape:
+`{id,displayName,relationship,isPrimary,emails:[{id,value,label,isPrimary}],phones:[{id,value,label,isPrimary}]}`.
+Relationships are student/parent/guardian/sponsor/self/other. Own student contacts
+use student. Primary addresses are contact-wide; primary contact is per student.
+
+| Method | Path | Body / response |
+| --- | --- | --- |
+| GET | `/v1/clients/:id/contacts` | `{items:relatedContact[]}` |
+| POST | `/v1/clients/:id/contacts` | `{contactId?,displayName?,relationship?,isPrimary?,emails?,phones?}`; `{item:relatedContact}` |
+| PATCH | `/v1/clients/:id/contacts/:contactId` | Same editable fields, without contactId; `{item:relatedContact}` |
+| DELETE | `/v1/clients/:id/contacts/:contactId` | Detach only; `{item:{studentId,contactId,detached:true}}` |
+| GET | `/v1/duplicates` | `limit`/`offset`; `{items:[{source:client,target:client,reasons:string[]}],total,limit,offset}` |
+| POST | `/v1/duplicates/dismiss` | `{sourceId,targetId}`; `{item:{sourceId,targetId,dismissed:true}}` |
+| POST | `/v1/merges/preview` | `{sourceId,targetId}`; `{item:{source,target,conflicts:[{field,source,target}],affectedLinks:{contacts,payers,sourceIdentities},blockedReasons,sourceRevision,targetRevision}}` |
+| POST | `/v1/merges` | `{sourceId,targetId,sourceRevision,targetRevision,fieldChoices:{[field]:'source'|'target'}}`; `{item:client,merge:{id,sourceId,targetId,revision}}` |
+
+New contacts require displayName; contactId links an existing tenant contact.
+An explicitly supplied emails/phones array replaces that contact's addresses,
+including when it is shared among students. Address values are `{value,label?,isPrimary?}`.
+Omitted arrays retain existing addresses; `[]` clears them. Changes to a legacy
+record's own contact synchronize its legacy displayName/email/phone. Legacy CRM
+edits preserve historical addresses and select the updated address as primary.
+Scoped staff can edit a shared contact only when all linked students are in scope.
+
+Candidate matching uses Unicode NFKC, whitespace and case normalization while
+preserving display values. Shared email candidates may be siblings. Dismissal
+records a tenant-scoped pair and actor. Merges require clients.merge in addition
+to staff role restrictions; each field conflict requires an explicit decision.
+Custom field choices use `custom:<UUID>`. Nonconflicting populated values survive,
+tags are unioned, and contact/payer/source links move to the survivor. Existing
+survivor relationships win when the same contact or payer is linked twice.
+Revision changes reject stale previews. More than 30 merged tags or 100 custom
+fields requires reducing values before commit.
+
+The source record remains a tombstone with merged_into/merged_at, its original
+fields and revision. Ordinary GET/PATCH resolves aliases; lists and recipients
+exclude tombstones. A retained audit contains actor, both pre-merge snapshots,
+choices and survivor revision. Alias chains are flattened. Tombstones, survivors
+with aliases and portal protected students cannot be deleted. Issued invoice
+snapshots remain the Billing service's authority. Merge emits transactional
+`clients.student-merged.v1` `{sourceId,targetId,revision}`; consumers repoint their
+own references idempotently. Contact edits emit `clients.contacts-updated.v1`
+`{clientId,revision}` for every student sharing the changed contact.
+
+### Private portal validation
+
+POST `/internal/portal-students` accepts `{businessId,studentId,protect:boolean}`
+with constant-time-checked `x-portal-internal-secret` against
+`PORTAL_INTERNAL_SECRET`. The public gateway never exposes this route. It returns
+`{item:{id,displayName,revision,portalProtected,contacts:relatedContact[]}}`.
+Protect=true locks the same tenant mutation lock as merge, rejects aliases,
+nonstudents and inactive students, then permanently protects the student before
+Platform issues an invitation or grant. Merge rejects either protected student.
+There is no automatic unlock from events or revocation; a future explicit reviewed
+unlock workflow is required. Protect=false canonicalizes an alias for trusted reads.
+Missing configuration returns unavailable, and invalid secret returns forbidden.
+Student/parent presentation routes remain a later phase.

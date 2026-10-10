@@ -4,6 +4,9 @@ export type Business = {
   name: string;
   role: string;
   entitlements: string[];
+  permissions?: string[];
+  accessScope?: 'business' | 'students';
+  studentIds?: string[];
   settings: Row;
 };
 export type Api = (

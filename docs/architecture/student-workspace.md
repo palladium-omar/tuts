@@ -48,10 +48,12 @@ Capabilities use `<domain>.read` and `<domain>.write` plus explicit sensitive
 actions: `clients.merge`, `clients.groups.manage`, `platform.invites.manage`,
 `billing.manage`, `payments.manage`, `integrations.manage`,
 `notifications.manage`. `reporting.financial` is required for financial summaries.
-`Permissions(...)` checks the named capabilities independently of role labels;
-`assertStudentAccess(context, studentId)` is mandatory for student-owned records.
-Legacy staff endpoints continue requiring their role restriction in addition to
-the domain permission. New student endpoints require explicit relationship scope.
+`Permissions(...)` checks named capabilities; any explicit legacy `Roles(...)`
+restriction still applies. `StudentScoped()` opts a reviewed controller into
+student/guardian and restricted tutor access. Such controllers must also use
+`assertStudentAccess(context, studentId)` and scoped list queries. Unreviewed
+endpoints reject scoped actors. Versioned contexts require every policy field;
+partial modern contexts never fall back to a more permissive legacy preset.
 
 Roles are default policy presets, not financial ownership. Owner/admin initially
 retain their existing rights; tutor defaults preserve current product behavior.
@@ -84,7 +86,10 @@ old student, source links and a merge audit. Preserve issued invoice snapshots.
 Emit `clients.student-merged.v1` with `{sourceId,targetId,revision}`. Consumers
 repoint their own student references idempotently; they never query Clients SQL.
 Access grants must not be transferred to another person as a merge side effect.
-Reject merging records with portal access until grants have been reviewed/revoked.
+Platform protects the Clients record through a private, constant-time-secret
+authenticated endpoint before creating an invitation. Protection and merging use
+the same Clients transaction lock, avoiding a grant/merge race. Protected records
+remain merge-blocked until a separately reviewed revoke/unlock workflow exists.
 
 Normalize names for candidate matching (Unicode, whitespace, case); keep original
 display values. Matching names produce review candidates, not automatic merges.

@@ -11,20 +11,22 @@ import {
 } from "@nestjs/common";
 import { ApiOperation, ApiTags } from "@nestjs/swagger";
 import { Database, emitEvent, parseBody, Public } from "@palladium/service-kit";
-import type { RequestContext } from "@palladium/contracts";
+import { defaultPermissions, hasPermission, type RequestContext } from "@palladium/contracts";
 import type { Request } from "express";
 import { randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
 import { IdentityService } from "./identity.service.js";
+import { membershipPolicy, type MembershipPolicy, type MembershipPolicyRow } from "./membership-policy.js";
 import {
   businessIdSchema,
   businessSchema,
   internalContextSchema,
   settingsSchema,
   mergeSettings,
+  visibleBusinessSettings,
 } from "./schemas.js";
 
-type BusinessRow = {
+type BusinessRow = MembershipPolicyRow & {
   business_id: string;
   name: string;
   entitlements: string[];
@@ -33,13 +35,15 @@ type BusinessRow = {
   role: RequestContext["role"];
   business_profile_revision: string;
 };
-const businessItem = (row: BusinessRow) => ({
+const businessItem = (row: BusinessRow, policy: MembershipPolicy) => ({
   id: row.business_id,
   name: row.name,
   role: row.role,
   entitlements: row.entitlements,
-  settings: row.settings,
+  settings: visibleBusinessSettings(row.settings,
+    policy.accessScope === "business" && hasPermission({role: row.role, ...policy}, "platform.read")),
   createdAt: row.created_at,
+  ...policy,
 });
 
 async function emitBusinessProfile(tx: PoolClient, row: BusinessRow) {
@@ -91,10 +95,11 @@ export class BusinessesController {
     for (const entry of directory.rows) {
       const item = await this.db.withTenant(entry.business_id, async (tx) => {
         const result = await tx.query<BusinessRow>(
-          "SELECT b.*, m.role FROM businesses b JOIN memberships m USING (business_id) WHERE m.user_id = $1",
+          "SELECT b.*, m.role,m.permissions_override,m.access_scope FROM businesses b JOIN memberships m USING (business_id) WHERE m.user_id = $1",
           [session.user.id],
         );
-        return result.rows[0] ? businessItem(result.rows[0]) : null;
+        const row = result.rows[0];
+        return row ? businessItem(row, await membershipPolicy(tx, session.user.id, row)) : null;
       });
       if (item) items.push(item);
     }
@@ -151,8 +156,13 @@ export class BusinessesController {
         businessId: id,
         data: { businessId: id },
       });
-      await emitBusinessProfile(tx, { ...result.rows[0]!, role: "owner" });
-      return { item: businessItem({ ...result.rows[0]!, role: "owner" }) };
+      const owner = { ...result.rows[0]!, role: "owner" as const,
+        permissions_override: null, access_scope: "business" as const };
+      await emitBusinessProfile(tx, owner);
+      return { item: businessItem(owner, {
+        permissions: defaultPermissions("owner"), accessScope: "business",
+        studentIds: [], policyVersion: 1,
+      }) };
     });
   }
 
@@ -172,7 +182,7 @@ export class BusinessesController {
     const input = parseBody(settingsSchema, body);
     return this.db.withTenant(id, async (tx) => {
       const result = await tx.query<BusinessRow>(
-        "SELECT b.*,m.role FROM businesses b JOIN memberships m USING (business_id) WHERE m.user_id = $1 FOR UPDATE OF b",
+        "SELECT b.*,m.role,m.permissions_override,m.access_scope FROM businesses b JOIN memberships m USING (business_id) WHERE m.user_id = $1 FOR UPDATE OF b",
         [session.user.id],
       );
       const current = result.rows[0];
@@ -180,6 +190,9 @@ export class BusinessesController {
         throw new ForbiddenException("Business membership is required");
       if (!["owner", "admin"].includes(current.role))
         throw new ForbiddenException("Owner or admin role is required");
+      const policy = await membershipPolicy(tx, session.user.id, current);
+      if (policy.accessScope !== "business" || !hasPermission({ role: current.role, ...policy }, "platform.write"))
+        throw new ForbiddenException("Business settings permission is required");
       const settings = mergeSettings(current.settings, input);
       const updated = await tx.query<BusinessRow>(
         "UPDATE businesses SET settings=$1, updated_at=now(), business_profile_revision=business_profile_revision+1 WHERE business_id=$2 RETURNING *",
@@ -194,9 +207,11 @@ export class BusinessesController {
       await emitBusinessProfile(tx, {
         ...updated.rows[0]!,
         role: current.role,
+        permissions_override: current.permissions_override,
+        access_scope: current.access_scope,
       });
       return {
-        item: businessItem({ ...updated.rows[0]!, role: current.role }),
+        item: businessItem({ ...updated.rows[0]!, role: current.role }, policy),
       };
     });
   }
@@ -219,24 +234,6 @@ export class ContextController {
     this.identity.assertInternalSecret(req);
     const session = await this.identity.requireSession(req);
     const { businessId } = parseBody(internalContextSchema, body);
-    return this.db.withTenant(businessId, async (tx) => {
-      const result = await tx.query<{
-        role: RequestContext["role"];
-        entitlements: string[];
-      }>(
-        "SELECT m.role,b.entitlements FROM memberships m JOIN businesses b USING (business_id) WHERE m.user_id=$1",
-        [session.user.id],
-      );
-      if (!result.rows[0])
-        throw new ForbiddenException("Business membership is required");
-      return {
-        item: {
-          sub: session.user.id,
-          businessId,
-          role: result.rows[0].role,
-          entitlements: result.rows[0].entitlements,
-        },
-      };
-    });
+    return { item: await this.identity.requireBusinessContext(session, businessId) };
   }
 }

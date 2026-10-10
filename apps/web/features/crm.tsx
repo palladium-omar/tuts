@@ -14,6 +14,9 @@ import {
 import { errorMessage, type Api, type Row } from "../lib/api";
 import { Empty, Modal, Notice } from "../components/shared";
 import "./crm.css";
+import { StudentContacts } from "./student-contacts";
+import { DuplicateReview } from "./duplicate-review";
+import { hasPermission } from "@palladium/contracts";
 import {
   builtinColumns,
   defaultColumns,
@@ -56,29 +59,38 @@ const summaryLabels: Record<string, string> = {
   updated: "to update",
   skipped: "skipped",
   errors: "need attention",
+  review: "need a decision",
 };
 const actionLabels: Record<string, string> = {
   create: "Add",
   update: "Update",
   skip: "Skip",
   error: "Fix row",
+  review: "Review match",
 };
 export function CRM({
   api,
   onConnect,
   businessId,
   role,
+  permissions,
   onMessage,
 }: {
   api: Api;
   onConnect: () => void;
   businessId?: string;
   role?: string;
+  permissions?: string[];
   onMessage?: (audience: {
     clientIds?: string[];
     filter?: Record<string, unknown>;
   }) => void;
 }) {
+  const canRead = hasPermission({ role: role ?? "", permissions }, "clients.read");
+  const canWrite = hasPermission({ role: role ?? "", permissions }, "clients.write");
+  const canMerge = hasPermission({ role: role ?? "", permissions }, "clients.merge");
+  const [detailTab, setDetailTab] = useState("record"), [duplicatesOpen, setDuplicatesOpen] = useState(false);
+  const [recordDirty, setRecordDirty] = useState(false);
   const [fields, setFields] = useState<CRMField[]>([]),
     [fieldError, setFieldError] = useState("");
   const [columnsOpen, setColumnsOpen] = useState(false),
@@ -114,6 +126,7 @@ export function CRM({
     let cancelled = false;
     setFields([]);
     setFieldError("");
+    if (!canRead) return;
     api("clients/v1/fields")
       .then((data) => {
         if (!cancelled) setFields(data.items ?? []);
@@ -124,7 +137,7 @@ export function CRM({
     return () => {
       cancelled = true;
     };
-  }, [api]);
+  }, [api, canRead]);
   useEffect(() => {
     let keys = defaultColumns;
     try {
@@ -211,6 +224,7 @@ export function CRM({
 
   useEffect(() => {
     let cancelled = false;
+    if (!canRead) { setRows([]); setTotal(0); setLoading(false); return; }
     setLoading(true);
     const timer = setTimeout(
       () => {
@@ -237,9 +251,10 @@ export function CRM({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [api, filterKey, sortBy, sortDirection, offset, revision]);
+  }, [api, canRead, filterKey, sortBy, sortDirection, offset, revision]);
   async function save(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (!canWrite) return;
     const f = new FormData(e.currentTarget);
     const firstName = String(f.get("firstName")).trim(),
       lastName = String(f.get("lastName")).trim();
@@ -318,10 +333,14 @@ export function CRM({
     setOffset(0);
   }
   function addContact() {
+    if (!canWrite) return;
     setError("");
     setMessage("");
     setEditor({});
+    setDetailTab("record");
+    setRecordDirty(false);
   }
+  if (!canRead) return <Empty>You do not have access to this business's CRM.</Empty>;
   return (
     <div className="crm-workspace">
       <div className="section-heading">
@@ -337,14 +356,15 @@ export function CRM({
             <Plug size={16} />
             Sources
           </button>
-          <button onClick={() => setImporting(true)}>
+          <button onClick={() => setDuplicatesOpen(true)}>Review duplicates</button>
+          {canWrite && <button onClick={() => setImporting(true)}>
             <Upload size={16} />
             Import contacts
-          </button>
-          <button className="primary" onClick={addContact}>
+          </button>}
+          {canWrite && <button className="primary" onClick={addContact}>
             <Plus size={16} />
             Add contact
-          </button>
+          </button>}
         </div>
       </div>
       <Notice error={!editor ? error || fieldError : ""} message={message} />
@@ -519,12 +539,12 @@ export function CRM({
                 <button onClick={clearFilters}>Clear filters</button>
               ) : (
                 <>
-                  <button className="primary" onClick={addContact}>
+                  {canWrite && <button className="primary" onClick={addContact}>
                     <Plus size={16} /> Add contact
-                  </button>
-                  <button onClick={() => setImporting(true)}>
+                  </button>}
+                  {canWrite && <button onClick={() => setImporting(true)}>
                     <Upload size={16} /> Import spreadsheet
-                  </button>
+                  </button>}
                 </>
               )}
             </div>
@@ -608,10 +628,12 @@ export function CRM({
                         onClick={() => {
                           setError("");
                           setEditor(row);
+                          setDetailTab("record");
+                          setRecordDirty(false);
                         }}
                       >
                         <Pencil size={15} />
-                        Edit
+                        {canWrite ? "Edit" : "View"}
                       </button>
                     </td>
                   </tr>
@@ -646,7 +668,7 @@ export function CRM({
       </section>
       {editor && (
         <Modal
-          title={editor.id ? "Edit contact" : "Add contact"}
+          title={editor.id ? editor.displayName : "Add contact"}
           onClose={() => {
             if (!busy) {
               setEditor(null);
@@ -655,10 +677,15 @@ export function CRM({
           }}
         >
           <Notice error={error} />
+          {editor.id && editor.kind === "student" && <div className="student-detail-tabs" role="tablist" aria-label="Student details"><button role="tab" disabled={busy} aria-selected={detailTab === "record"} onClick={() => setDetailTab("record")}>Record details</button><button role="tab" disabled={busy || recordDirty} aria-selected={detailTab === "contacts"} onClick={() => setDetailTab("contacts")}>Related contacts</button></div>}
+          {recordDirty && editor.kind === "student" && <p className="crm-helper">Save your record changes before editing related contacts.</p>}
+          {editor.id && editor.kind === "student" && <div hidden={detailTab !== "contacts"}><StudentContacts api={api} student={editor} canWrite={canWrite} onBusyChange={setBusy} onChanged={async () => { const data = await api(`clients/v1/clients/${editor.id}`); setEditor(data.item); setRevision((n) => n + 1); }} /></div>}
+          <div hidden={detailTab !== "record"}>
           <p className="crm-helper">
             Provide at least one name. Email and the other details are optional.
           </p>
-          <form onSubmit={save}>
+          <form key={`${editor.id ?? "new"}:${editor.revision ?? 0}`} onSubmit={save} onChange={() => setRecordDirty(true)}>
+            <fieldset disabled={!canWrite || busy} className="crm-record-fields">
             <div className="form-grid">
               <label>
                 First name
@@ -783,6 +810,7 @@ export function CRM({
                 maxLength={4000}
               />
             </label>
+            </fieldset>
             <div className="form-actions">
               <button
                 type="button"
@@ -794,11 +822,12 @@ export function CRM({
               >
                 Cancel
               </button>
-              <button className="primary" disabled={busy}>
+              {canWrite && <button className="primary" disabled={busy}>
                 {busy ? "Saving…" : "Save contact"}
-              </button>
+              </button>}
             </div>
           </form>
+          </div>
         </Modal>
       )}
       {columnsOpen && (
@@ -807,7 +836,7 @@ export function CRM({
           columns={columns}
           visible={visible}
           fields={fields}
-          canManage={role === "owner" || role === "admin"}
+          canManage={canWrite && (role === "owner" || role === "admin")}
           onChange={setVisible}
           onField={(field) => {
             setFields((previous) => [
@@ -829,7 +858,8 @@ export function CRM({
           onClose={() => setFiltersOpen(false)}
         />
       )}
-      {importing && (
+      {duplicatesOpen && <DuplicateReview api={api} canWrite={canWrite} canMerge={canMerge} fieldLabels={Object.fromEntries(fields.map((field) => [`custom:${field.id}`, field.label]))} onClose={() => setDuplicatesOpen(false)} onChanged={() => { setRevision((n) => n + 1); setSelected(new Set()); setAllMatching(false); }} />}
+      {importing && canWrite && (
         <ImportContacts
           api={api}
           fields={fields}
@@ -859,7 +889,9 @@ function ImportContacts({
   const content = useRef<HTMLDivElement>(null);
   const [sheet, setSheet] = useState<Row | null>(null),
     [mapping, setMapping] = useState<Record<string, string>>({}),
-    [mode, setMode] = useState("skip"),
+    [decisions, setDecisions] = useState<Record<number, { action: "create" | "update" | "skip"; clientId?: string }>>({}),
+    [previewDirty, setPreviewDirty] = useState(false),
+    [previewOffset, setPreviewOffset] = useState(0),
     [preview, setPreview] = useState<Row | null>(null),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
@@ -872,13 +904,17 @@ function ImportContacts({
   const payload = () => ({
     rows: sheet?.rows,
     mapping: Object.fromEntries(Object.entries(mapping).filter(([, v]) => v)),
-    duplicateMode: mode,
+    duplicateMode: "skip",
+    decisions: Object.entries(decisions).map(([rowNumber, decision]) => ({ rowNumber: Number(rowNumber), ...decision })),
   });
   async function parse(file: File) {
     setBusy(true);
     setError("");
     setPreview(null);
     setSheet(null);
+    setDecisions({});
+    setPreviewDirty(false);
+    setPreviewOffset(0);
     setFileName(file.name);
     try {
       const form = new FormData();
@@ -906,9 +942,9 @@ function ImportContacts({
     }
   }
   async function check() {
-    if (!mapping.email) {
+    if (!mapping.displayName && !mapping.firstName && !mapping.lastName) {
       setError(
-        "Choose the column containing email addresses before previewing. Email is used to match existing contacts.",
+        "Map a display name, first name or last name column before previewing.",
       );
       return;
     }
@@ -917,6 +953,7 @@ function ImportContacts({
     try {
       const data = await api("clients/v1/imports/preview", "POST", payload());
       setPreview(data.item);
+      setPreviewDirty(false);
       setKey(crypto.randomUUID());
     } catch (e) {
       setError(errorMessage(e));
@@ -925,6 +962,7 @@ function ImportContacts({
     }
   }
   async function commit() {
+    if (previewDirty || preview?.summary?.review) return;
     setBusy(true);
     setError("");
     try {
@@ -997,8 +1035,8 @@ function ImportContacts({
         {!preview && (
           <p className="muted">
             CSV or Excel (.xlsx), up to 5 MB and 2,000 rows. Match your columns,
-            review the result, then import. Email identifies duplicates; rows
-            without an email are skipped.
+            review the result, then import. Matching names and emails require an
+            explicit decision. Shared family emails are allowed.
           </p>
         )}
         <Notice error={error} />
@@ -1064,6 +1102,7 @@ function ImportContacts({
                         onChange={(e) => {
                           setMapping({ ...mapping, [field]: e.target.value });
                           setPreview(null);
+                          setDecisions({});
                         }}
                       >
                         <option value="">Do not import</option>
@@ -1084,30 +1123,7 @@ function ImportContacts({
                     </label>
                   ))}
                 </div>
-                <label>
-                  When an email already exists
-                  <select
-                    value={mode}
-                    disabled={busy}
-                    onChange={(e) => {
-                      setMode(e.target.value);
-                      setPreview(null);
-                    }}
-                  >
-                    <option value="skip">
-                      Keep existing contacts, skip duplicates
-                    </option>
-                    <option value="update">
-                      Update matching contacts with non-empty imported values
-                    </option>
-                  </select>
-                </label>
-                {!mapping.email && (
-                  <p className="crm-helper">
-                    Map an email column to continue. Rows without an email can
-                    be added manually.
-                  </p>
-                )}
+                <p className="crm-helper">Email is optional. When a row could match an existing record, choose to create a separate record, update a specific record or skip the row.</p>
                 <p className="crm-helper">
                   Stage accepts lead, active or inactive. Relationship accepts
                   student or payer. Unmapped values use the contact defaults.
@@ -1116,7 +1132,7 @@ function ImportContacts({
                   <div className="form-actions">
                     <button
                       className="primary"
-                      disabled={busy || !mapping.email}
+                      disabled={busy || !(mapping.displayName || mapping.firstName || mapping.lastName)}
                       onClick={() => void check()}
                     >
                       {busy ? "Reading…" : "Preview import"}
@@ -1131,10 +1147,7 @@ function ImportContacts({
           <>
             <h3>Review before importing</h3>
             <p className="crm-helper">
-              {mode === "skip"
-                ? "Existing contacts will be kept. Duplicate emails will be skipped."
-                : "Matching contacts will be updated using non-empty values from this file."}{" "}
-              Skipped rows and rows with errors will not be imported.
+              Choose a decision for every possible match. Updates replace mapped non-empty values in the selected record. Skipped rows and rows with errors will not be imported.
             </p>
             <div className="import-summary">
               {Object.entries(preview.summary ?? {}).map(([name, value]) => (
@@ -1154,7 +1167,7 @@ function ImportContacts({
                   </tr>
                 </thead>
                 <tbody>
-                  {preview.rows?.slice(0, 100).map((row: Row) => (
+                  {preview.rows?.slice(previewOffset, previewOffset + 100).map((row: Row) => (
                     <tr key={row.rowNumber}>
                       <td>{row.rowNumber}</td>
                       <td>
@@ -1176,6 +1189,7 @@ function ImportContacts({
                         {[...(row.errors ?? []), row.message]
                           .filter(Boolean)
                           .join("; ")}
+                        {row.candidates?.length > 0 && <div className="crm-import-decision"><ul className="duplicate-reasons">{row.candidates.map((candidate: Row) => <li key={candidate.id}><strong>{candidate.displayName}</strong>{candidate.email ? ` · ${candidate.email}` : ""} · {(candidate.reasons ?? []).join(", ")}</li>)}</ul><label>Decision for row {row.rowNumber}<select disabled={busy} value={decisions[row.rowNumber]?.action === "update" ? `update:${decisions[row.rowNumber].clientId}` : decisions[row.rowNumber]?.action ?? ""} onChange={(e) => { const value = e.target.value; setDecisions((current) => { const next = { ...current }; if (!value) delete next[row.rowNumber]; else next[row.rowNumber] = value.startsWith("update:") ? { action: "update", clientId: value.slice(7) } : { action: value as "create" | "skip" }; return next; }); setPreviewDirty(true); }}><option value="">Choose a decision…</option><option value="create">Create separate record</option>{row.candidates.map((candidate: Row) => <option value={`update:${candidate.id}`} key={candidate.id}>Update {candidate.displayName} · …{String(candidate.id).slice(-8)}</option>)}<option value="skip">Skip this row</option></select></label></div>}
                       </td>
                     </tr>
                   ))}
@@ -1184,10 +1198,13 @@ function ImportContacts({
             </div>
             {preview.rows?.length > 100 && (
               <p className="small-note">
-                Showing the first 100 rows. Summary includes every row.
+                Showing rows {previewOffset + 1}–{Math.min(previewOffset + 100, preview.rows.length)} of {preview.rows.length}. Review every page before importing.
               </p>
             )}
-            {!(preview.summary?.created || preview.summary?.updated) && (
+            {preview.rows?.length > 100 && <div className="pagination"><button disabled={busy || previewOffset === 0} onClick={() => setPreviewOffset((n) => Math.max(0, n - 100))}>Previous rows</button><button disabled={busy || previewOffset + 100 >= preview.rows.length} onClick={() => setPreviewOffset((n) => n + 100)}>Next rows</button></div>}
+            {previewDirty && <p role="status" className="student-contact-warning">Decisions changed. Refresh the preview to check the result before importing.</p>}
+            {preview.summary?.review > 0 && <p className="crm-helper">{preview.summary.review} rows still need a decision. All possible matches must be resolved before import.</p>}
+            {!(preview.summary?.created || preview.summary?.updated || preview.summary?.review || previewDirty) && (
               <p className="crm-helper">
                 There are no contacts to add or update. Go back to change the
                 mapping or choose another file.
@@ -1197,10 +1214,13 @@ function ImportContacts({
               <button disabled={busy} onClick={() => setPreview(null)}>
                 Back to mapping
               </button>
+              <button disabled={busy} onClick={() => void check()}>{busy ? "Checking…" : "Refresh preview"}</button>
               <button
                 className="primary"
                 disabled={
                   busy ||
+                  previewDirty ||
+                  preview.summary?.review > 0 ||
                   !(preview.summary?.created || preview.summary?.updated)
                 }
                 onClick={() => void commit()}

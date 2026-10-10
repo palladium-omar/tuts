@@ -27,6 +27,7 @@ const defaults = {
   PLATFORM_INTERNAL_SECRET: token(),
   BETTER_AUTH_SECRET: token(),
   AUTH_MAIL_INTERNAL_SECRET: token(),
+  PORTAL_INTERNAL_SECRET: token(),
   AUTH_MAIL_ENABLED: "false",
   PAYMENT_ENCRYPTION_KEY: randomBytes(32).toString("base64"),
   INTEGRATIONS_ENCRYPTION_KEY: randomBytes(32).toString("base64"),

@@ -1,0 +1,34 @@
+.student-detail-tabs { display: flex; gap: 8px; margin: 0 0 20px; border-bottom: 1px solid var(--line); padding-bottom: 12px; }
+.student-detail-tabs button[aria-selected="true"] { background: var(--tint); color: var(--accent); border-color: var(--accent); }
+.student-contact-list, .duplicate-list { display: grid; gap: 14px; margin: 18px 0; }
+.student-contact-card, .duplicate-card { border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+.student-contact-heading, .duplicate-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.student-contact-heading h3, .duplicate-heading h3 { margin: 0 0 5px; }
+.student-contact-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+.student-contact-address { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 9px; overflow-wrap: anywhere; }
+.student-contact-address small { color: var(--muted); }
+.student-contact-form { padding: 18px; border: 1px solid var(--line); border-radius: 10px; margin-top: 18px; }
+.student-address-fields { display: grid; grid-template-columns: 100px minmax(0, 1fr) 110px auto; gap: 10px; align-items: end; margin-bottom: 12px; }
+.student-address-fields label { margin: 0; min-width: 0; }
+.student-address-fields input, .student-address-fields select { width: 100%; }
+.student-address-controls { display: flex; align-items: center; gap: 8px; padding-bottom: 5px; }
+.student-address-controls input { width: 16px; height: 16px; accent-color: var(--accent); }
+.student-contact-warning { background: var(--tint); padding: 14px; border-radius: 8px; font-size: 13px; line-height: 1.6; margin: 16px 0; }
+.student-contact-editor-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 14px 0; }
+.duplicate-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 14px 0; }
+.duplicate-person { padding: 12px; background: var(--tint); border-radius: 8px; overflow-wrap: anywhere; }
+.duplicate-person strong, .duplicate-person small { display: block; }
+.duplicate-person small { color: var(--muted); margin-top: 5px; }
+.duplicate-reasons { color: var(--muted); font-size: 13px; padding-left: 20px; margin: 12px 0; }
+.duplicate-conflicts { display: grid; gap: 12px; margin: 18px 0; }
+.duplicate-conflict { border-top: 1px solid var(--line); padding-top: 12px; }
+.duplicate-conflict fieldset { border: 0; padding: 0; margin: 0; }
+.duplicate-conflict legend { font-weight: 600; margin-bottom: 8px; }
+.duplicate-value { display: flex; gap: 8px; align-items: flex-start; padding: 8px; background: var(--tint); border-radius: 6px; margin-bottom: 6px; overflow-wrap: anywhere; }
+.duplicate-value input { width: 16px; height: 16px; margin-top: 2px; flex-shrink: 0; accent-color: var(--accent); }
+.duplicate-value span { white-space: pre-wrap; }
+.duplicate-link-summary { display: flex; gap: 8px; flex-wrap: wrap; margin: 14px 0; }
+.duplicate-confirm { display: flex; align-items: flex-start; gap: 10px; line-height: 1.6; font-size: 13px; }
+.duplicate-confirm input { width: 16px; height: 16px; flex-shrink: 0; margin-top: 3px; accent-color: var(--accent); }
+.duplicate-source-issues { border-top: 1px solid var(--line); margin-top: 24px; padding-top: 18px; }
+@media (max-width: 640px) { .student-contact-heading { flex-wrap: wrap; } .student-address-fields { grid-template-columns: 100px minmax(0, 1fr); } .student-address-controls { grid-column: 1 / -1; } .duplicate-pair { grid-template-columns: 1fr; } }

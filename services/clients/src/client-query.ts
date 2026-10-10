@@ -33,7 +33,7 @@ export async function buildClientQuery(
     values.push(value);
     return `$${values.length}`;
   };
-  const conditions: string[] = [];
+  const conditions: string[] = ["merged_into IS NULL"];
   const fields = new Map((await loadFields(tx)).map((f) => [f.id, f]));
   function customExpression(field: FieldRow) {
     const key = add(field.id);

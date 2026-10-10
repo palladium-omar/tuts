@@ -1,4 +1,6 @@
 import "reflect-metadata";
+import { IdentityController } from "./identity.controller.js";
+import { PortalInternalController } from "./portal-internal.controller.js";
 import { ClientsController } from "./clients.controller.js";
 import { ImportsController } from "./imports.controller.js";
 import { FieldsController } from "./fields.controller.js";
@@ -10,6 +12,8 @@ export const appOptions = {
   port: 4002,
   controllers: [
     ClientsController,
+    IdentityController,
+    PortalInternalController,
     ImportsController,
     FieldsController,
     RecipientsController,

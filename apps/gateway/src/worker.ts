@@ -28,7 +28,7 @@ const BODY_LIMIT = 25 * 1024 * 1024;
 const HOOK_BODY_LIMIT = 1024 * 1024;
 const keys = new WeakMap<GatewayEnv, ReturnType<typeof importPKCS8>>();
 const trustedHeaderNames = new Set([
-  "authorization", "cookie", "x-platform-internal-secret", "x-auth-mail-secret", "x-business-id",
+  "authorization", "cookie", "x-platform-internal-secret", "x-auth-mail-secret", "x-portal-internal-secret", "x-business-id",
   "x-user-id", "x-role", "x-entitlements", "x-context", "x-request-id",
   "x-real-ip", "forwarded", "host", "connection", "keep-alive",
   "proxy-authenticate", "proxy-authorization", "te", "trailer",

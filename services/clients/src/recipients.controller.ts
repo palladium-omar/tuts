@@ -4,6 +4,7 @@ import {
   CurrentContext,
   Database,
   Roles,
+  Permissions,
   parseBody,
 } from "@palladium/service-kit";
 import { recipientRequestSchema } from "./schemas.js";
@@ -15,12 +16,13 @@ import { item, type ClientRow } from "./contact-store.js";
 export class RecipientsController {
   constructor(@Inject(Database) private readonly db: Database) {}
   @Post()
+  @Permissions("clients.write")
   async resolve(@CurrentContext() ctx: RequestContext, @Body() body: unknown) {
     const input = parseBody(recipientRequestSchema, body);
     return this.db.withTenant(ctx.businessId, async (tx) => {
       const query = input.clientIds
         ? {
-            where: "id=ANY($1::uuid[])",
+            where: "merged_into IS NULL AND id=ANY($1::uuid[])",
             order: "id ASC",
             values: [[...new Set(input.clientIds)]] as unknown[],
             countValues: [[...new Set(input.clientIds)]] as unknown[],

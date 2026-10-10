@@ -37,10 +37,10 @@ Gateway external prefix is `/api/platform`; it removes this prefix upstream.
 - `POST /auth/reset-password`: native Better Auth `{token,newPassword}`; accepts a trusted app Origin. Tokens expire after 30 minutes, are consumed once, and a successful reset revokes all the user's sessions. Password limits remain 8–128 characters.
 - `GET /auth/get-session`: native Better Auth session response.
 - `GET /v1/session`: `{item:{user,expiresAt}}`, no session token.
-- `GET /v1/businesses`: `{items:[{id,name,role,entitlements,settings,createdAt}]}`, maximum 100.
+- `GET /v1/businesses`: `{items:[{id,name,role,entitlements,settings,createdAt,permissions,accessScope,studentIds,policyVersion:1}]}`, maximum 100. Settings use validated field allowlists. Business scope plus `platform.read` permits the seller profile; other memberships receive only version, timezone, language and branding. Unknown historical settings keys are never returned.
 - `POST /v1/businesses`: `{name,timezone?,profile?,branding?}`, creates owner membership and returns `{item:business}`.
-- `PATCH /v1/businesses/:id/settings`: owner/admin only; accepts `profile`, `branding`, `timezone`, `language` and returns `{item:business}`. Branding accepts partial `displayName`, hexadecimal `primaryColor`, `secondaryColor`, `backgroundColor`, `textColor`, optional HTTPS `logoUrl`, and nullable `logoDataUrl`. Logo data URLs must contain PNG, JPEG or WebP image signatures and canonical base64 encoding with at most 256 KiB of image bytes; SVG is rejected. Profile accepts optional `legalName`, `email`, `phone`, HTTP/HTTPS `website`, `taxId` and `address:{line1,line2,city,region,postalCode,country}`. Contact/address values may be null to clear. Nested profile/address/branding patches preserve absent saved values. Rejects unknown keys including entitlements.
-- `POST /internal/context`: gateway secret header `X-Platform-Internal-Secret`, browser Cookie, body `{businessId}`. Returns `{item:{sub,businessId,role,entitlements}}`. This route must never be publicly proxied by the gateway.
+- `PATCH /v1/businesses/:id/settings`: owner/admin, business scope and `platform.write` required; accepts `profile`, `branding`, `timezone`, `language` and returns `{item:business}`. Branding accepts partial `displayName`, hexadecimal `primaryColor`, `secondaryColor`, `backgroundColor`, `textColor`, optional HTTPS `logoUrl`, and nullable `logoDataUrl`. Logo data URLs must contain PNG, JPEG or WebP image signatures and canonical base64 encoding with at most 256 KiB of image bytes; SVG is rejected. Profile accepts optional `legalName`, `email`, `phone`, HTTP/HTTPS `website`, `taxId` and `address:{line1,line2,city,region,postalCode,country}`. Contact/address values may be null to clear. Nested profile/address/branding patches preserve absent saved values. Rejects unknown keys including entitlements.
+- `POST /internal/context`: gateway secret header `X-Platform-Internal-Secret`, browser Cookie, body `{businessId}`. Returns `{item:{sub,businessId,role,entitlements,permissions,accessScope,studentIds,policyVersion:1}}`. This route must never be publicly proxied by the gateway.
 
 The native authentication response shapes belong to Better Auth. Object/list
 wrappers apply to the platform-owned endpoints. Browser requests use
@@ -75,6 +75,23 @@ business directory contains only user/business IDs for preselection discovery;
 role and entitlement reads always require tenant transactions and membership.
 No membership invitations, email verification transport or production
 subscription administration are implemented.
+
+## Membership capability policy
+
+Apply `005_capability_policy.sql` before issuing modern contexts. Memberships
+resolve `permissions_override` when present, including an empty array that denies
+all capabilities; null selects `defaultPermissions(role)`. Scope is `business` or
+`students`. Student and parent memberships always use student scope. Active
+`portal_student_access` relationship records supply their student IDs; a membership
+or group without an explicit grant yields no student access. The access table
+forces tenant RLS and references the tenant membership. Revoked grants are excluded
+from subsequent contexts. Existing signed contexts expire after 60 seconds.
+
+`IdentityService.requireBusinessContext` verifies the browser session's membership
+inside a tenant transaction; the global directory only discovers candidate tenant
+IDs and cannot grant membership. Missing memberships deny access even when an old
+directory row remains. Business creation inserts the owner membership and directory
+entry in the same transaction and returns the explicit owner policy preset.
 
 ## Password recovery delivery
 

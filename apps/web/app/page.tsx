@@ -8,7 +8,8 @@ import {
   type CSSProperties,
   type FormEvent,
 } from "react";
-import { featureRegistry } from "@palladium/contracts";
+import { featureRegistry, hasPermission } from "@palladium/contracts";
+import { canUseFeature } from '../lib/features';
 import {
   ArrowRight,
   BookOpen,
@@ -62,10 +63,10 @@ function readRoute(business: Business): WorkspaceRoute {
   const requested = params.get("view") ?? "overview";
   const allowed =
     requested === "overview" ||
-    requested === "settings" ||
+    (requested === "settings" && hasPermission(business, 'platform.write')) ||
     featureRegistry.some(
       (f) =>
-        f.id === requested && business.entitlements.includes(f.entitlement),
+        f.id === requested && canUseFeature(business, f),
     );
   const filter = params.get("filter");
   return {
@@ -424,9 +425,11 @@ function Workspace({
   };
   const businessName = branding.displayName ?? business.name;
   const enabled = featureRegistry.filter((f) =>
-    business.entitlements.includes(f.entitlement),
+    canUseFeature(business, f),
   );
   function go(next: string) {
+    if (next === 'settings' && !hasPermission(business, 'platform.write')) return;
+    if (next !== 'overview' && next !== 'settings' && !enabled.some(feature => feature.id === next)) return;
     onNavigate({ view: next, filter: "all" });
     setMenuOpen(false);
     setPreview(null);
@@ -529,14 +532,14 @@ function Workspace({
             })}
           </nav>
           <div className="sidebar-bottom">
-            <button
+            {hasPermission(business, 'platform.write') && <button
               className={view === "settings" ? "active" : ""}
               aria-current={view === "settings" ? "page" : undefined}
               onClick={() => go("settings")}
             >
               <Settings2 size={18} />
               Business profile
-            </button>
+            </button>}
             <button className="new-business" onClick={onAddBusiness}>
               + Add a business
             </button>
@@ -583,8 +586,9 @@ function Workspace({
               api={api}
               businessId={business.id}
               role={business.role}
+              permissions={business.permissions}
               onMessage={
-                business.entitlements.includes("notifications")
+                business.entitlements.includes("notifications") && hasPermission(business, 'notifications.write')
                   ? setMessageAudience
                   : undefined
               }
@@ -683,7 +687,7 @@ function Overview({
     },
     { id: "learning", label: "Assignments", path: "learning/v1/assignments" },
     { id: "billing", label: "Invoices", path: "billing/v1/invoices" },
-  ].filter((e) => business.entitlements.includes(e.id));
+  ].filter((e) => business.entitlements.includes(e.id) && hasPermission(business, `${e.id}.read`));
   useEffect(() => {
     let active = true;
     Promise.allSettled(
@@ -720,7 +724,7 @@ function Overview({
           <p className="muted">More time for the work that matters.</p>
         </div>
       </div>
-      {!business.settings?.profile && (
+      {!business.settings?.profile && hasPermission(business, 'platform.write') && (
         <div className="onboarding-banner">
           <div>
             <strong>Make this workspace yours.</strong>
@@ -735,11 +739,11 @@ function Overview({
           </button>
         </div>
       )}
-      <BusinessDashboard
+      {hasPermission(business, 'billing.read') && <BusinessDashboard
         api={api}
         business={business}
         onInvoices={() => go("billing")}
-      />
+      />}
       <div className="stat-grid">
         {entries.map((e) => {
           const Icon = icons[e.id];
@@ -783,7 +787,7 @@ function Overview({
             <h3>Your workspace</h3>
           </div>
           {featureRegistry
-            .filter((f) => business.entitlements.includes(f.entitlement))
+            .filter((f) => canUseFeature(business, f))
             .map((f) => {
               const Icon = icons[f.id];
               return (

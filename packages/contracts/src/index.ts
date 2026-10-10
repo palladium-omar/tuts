@@ -1,4 +1,6 @@
 import { z } from "zod";
+export { permissionNames, defaultPermissions, hasPermission, canAccessStudent, canReadFinancial } from './permissions.js';
+export type { Permission, PermissionSubject } from './permissions.js';
 export const serviceNames = [
   "platform",
   "clients",
@@ -23,6 +25,15 @@ export const requestContextSchema = z.object({
   role: roleSchema,
   entitlements: z.array(z.string()),
   requestId: z.string().min(1),
+  permissions: z.array(z.string().regex(/^[a-z]+\.[a-z.]+$/)).max(100).optional(),
+  accessScope: z.enum(['business', 'students']).optional(),
+  studentIds: z.array(z.uuid()).max(500).optional(),
+  policyVersion: z.literal(1).optional(),
+}).superRefine((context, validation) => {
+  if (context.policyVersion === 1 &&
+      (context.permissions === undefined || context.accessScope === undefined || context.studentIds === undefined)) {
+    validation.addIssue({ code: 'custom', message: 'Versioned policy context requires complete permissions and resource scope' });
+  }
 });
 export type RequestContext = z.infer<typeof requestContextSchema>;
 export const platformEventSchema = z.object({

@@ -81,7 +81,9 @@
         "AUTH_MAIL_ENABLED": "${AUTH_MAIL_ENABLED:-false}",
         "NOTIFICATIONS_URL": "http://notifications:4007",
         "PUBLIC_APP_URL": "${PUBLIC_APP_URL}",
-        "PUBLIC_GATEWAY_URL": "${PUBLIC_GATEWAY_URL}"
+        "PUBLIC_GATEWAY_URL": "${PUBLIC_GATEWAY_URL}",
+        "PORTAL_INTERNAL_SECRET": "${PORTAL_INTERNAL_SECRET:-}",
+        "CLIENTS_URL": "http://clients:4002"
       },
       "depends_on": {
         "postgres": {
@@ -115,7 +117,8 @@
         "PORT": "4002",
         "DATABASE_URL": "postgresql://clients:${CLIENTS_DB_PASSWORD}@postgres:5432/clients",
         "RABBITMQ_URL": "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672",
-        "CONTEXT_PUBLIC_KEY": "${CONTEXT_PUBLIC_KEY}"
+        "CONTEXT_PUBLIC_KEY": "${CONTEXT_PUBLIC_KEY}",
+        "PORTAL_INTERNAL_SECRET": "${PORTAL_INTERNAL_SECRET:-}"
       },
       "depends_on": {
         "postgres": {

@@ -155,41 +155,9 @@ export class SourceIntake implements OnModuleInit {
       let current: ClientRow | undefined;
       if (link.rows[0])
         current = await requireClient(tx, link.rows[0].client_id);
-      else if (contact.email) {
-        const matches = await contactsByEmails(tx, [
-            normalizeEmail(contact.email),
-          ]),
-          found = matches.get(normalizeEmail(contact.email)) ?? [];
-        if (found.length > 1) {
-          issue(
-            externalId,
-            "Email matches multiple CRM contacts; resolve the duplicates",
-          );
-          continue;
-        }
-        current = found[0];
-      }
       let clientId: string;
       if (current) {
         const patch = blankPatch(current, contact);
-        // An established external link wins over email rematching, while filling
-        // an empty local email must still avoid introducing another duplicate.
-        if (patch.email) {
-          const matches = await contactsByEmails(tx, [
-            normalizeEmail(patch.email),
-          ]);
-          if (
-            (matches.get(normalizeEmail(patch.email)) ?? []).some(
-              (c) => c.id !== current!.id,
-            )
-          ) {
-            issue(
-              externalId,
-              "Incoming email belongs to a different CRM contact",
-            );
-            continue;
-          }
-        }
         clientId = current.id;
         if (Object.keys(patch).length) {
           await updateContact(
@@ -231,8 +199,8 @@ export class SourceIntake implements OnModuleInit {
         result.created++;
       }
       await tx.query(
-        `INSERT INTO client_external_sources(business_id,connection_id,external_id,client_id,source)
-        VALUES($1,$2,$3,$4,$5) ON CONFLICT(business_id,connection_id,external_id)
+        `INSERT INTO client_external_sources(business_id,connection_id,external_id,client_id,source,original_client_id)
+        VALUES($1,$2,$3,$4,$5,$4) ON CONFLICT(business_id,connection_id,external_id)
         DO UPDATE SET source=EXCLUDED.source,last_seen_at=now()`,
         [
           event.businessId,

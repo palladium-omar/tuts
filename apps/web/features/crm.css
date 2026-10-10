@@ -1,6 +1,7 @@
 .crm-workspace .search input {
   padding-right: 42px;
 }
+.crm-record-fields { border: 0; margin: 0; padding: 0; min-width: 0; }
 .crm-workspace .crm-search-clear {
   position: absolute;
   right: 6px;
@@ -87,9 +88,11 @@
 }
 .crm-import .import-summary {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
   gap: 12px;
 }
+.crm-import-decision { min-width: 260px; max-width: 420px; }
+.crm-import-decision select { width: 100%; }
 .crm-import .import-summary strong {
   display: block;
 }
