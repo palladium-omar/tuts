@@ -1,5 +1,7 @@
 # Learning service
 
+> Current cross-service context: [system](../../docs/architecture/system.md), [API/schema inventory](../../docs/service-inventory.md), [security/performance audit](../../docs/reviews/2026-10-10-platform-audit.md). Service descriptions below define APIs and local behavior; provider/configuration readiness is separate.
+
 Independent NestJS process on port 4004 with its own PostgreSQL database. Requires `DATABASE_URL`, `RABBITMQ_URL`, `CONTEXT_PUBLIC_KEY` and the `learning` entitlement. Staff endpoints require owner/admin/tutor membership plus learning.read or learning.write. Scoped tutors additionally require a grant for each referenced student. Dedicated portal endpoints admit student/parent roles with the same signed relationship scope; no portal endpoint creates assignments, reviews homework or creates tutor material.
 
 | Method | Route | Behavior |

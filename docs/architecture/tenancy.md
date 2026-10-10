@@ -1,6 +1,6 @@
 # Business isolation, permissions and customization
 
-> **Contract scope:** The repository implements tenant-scoped databases and row-level security, and services validate signed gateway context. Business profiles and branding are implemented, with seller details projected into billing. Learning files use private persistent disk storage. The role model here includes intended future behavior; student/parent portal relationships, remote object storage, and production paid-entitlement provisioning are not implemented. See the [repository status](../../README.md#what-works-today).
+> **Current contract:** Tenant RLS, signed capability/resource context, business branding, scoped student/guardian grants and private Learning storage (R2 in production, disk locally) are implemented. Enterprise licensing/delegation and paid subscription provisioning are future work. See [security boundaries](security.md) and [current system](system.md).
 
 A user can belong to multiple businesses with a different role in each. Roles begin as `owner`, `admin`, `tutor`, `student` and `parent`. Staff roles do not imply access across businesses. A parent/payer and a student are distinct records; one parent may pay for several students. Student/parent portal authorization additionally requires an explicit resource relationship, not merely business membership.
 

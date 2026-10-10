@@ -1,5 +1,7 @@
 # Cloudflare and Neon agent setup
 
+> The table below is a historical tooling/authentication snapshot. For the current ten-service deployment, live delivery flags and verification limits, read the [documentation index](README.md) and [10 October audit](reviews/2026-10-10-platform-audit.md). A browser session never proves CLI/API access.
+
 ## Status on October 4, 2026
 
 Official Cloudflare and Neon guidance is installed, and the MCP server URLs are
@@ -155,9 +157,9 @@ a fresh permitted flow and complete it in its originating profile.
 ## Preserve the deployment boundaries
 
 Tool setup grants no permission to replace the existing Neon project or combine
-the eight services' data. Deployment keeps separate PostgreSQL databases and
+the ten services' data. Deployment keeps separate PostgreSQL databases and
 roles for Platform, Clients, Scheduling, Learning, Billing, Payments,
-Notifications, and Integrations, with tenant RLS enforced in each service.
+Notifications, Integrations, Planning and Reporting, with tenant RLS enforced in each service.
 The existing BetterAuth implementation remains the identity provider.
 
 Use pooled connections for Worker application traffic and direct connections

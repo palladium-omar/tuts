@@ -8,7 +8,7 @@ Accepted: user explicitly requires decoupled services. Each domain runs in a sep
 
 ## ADR-002: Public HTTP contracts and durable events
 
-REST/OpenAPI serves synchronous requests and independent app integrations. RabbitMQ carries asynchronous facts and has durable service queues. It is portable for local/self-hosted development. Future cloud deployment must provide persistent broker hosting and continuously available consumers; blindly placing a persistent consumer on request-only compute is not sufficient.
+REST/OpenAPI serves synchronous requests and independent app integrations. RabbitMQ carries asynchronous facts and has durable service queues. It is portable for local/self-hosted development. The deployed Cloudflare adapter uses per-consumer Queues, private bindings, R2 event pointers and scheduled recovery. Node retains RabbitMQ. Both preserve the same contracts; no persistent AMQP consumer runs inside a Worker.
 
 ## ADR-003: Database per service
 
@@ -25,3 +25,15 @@ Shared packages contain wire types and infrastructure primitives only. They must
 ## ADR-006: Payment processors are adapters
 
 Business-owned connections are selected per payment attempt. Invoices and provider state are separate service responsibilities. Provider capabilities are explicit. Live PayPal onboarding needs platform approval; automated bank settlement requires regional integration. Local simulated payments are labeled sandbox and gated by environment.
+
+## ADR-007: Capabilities and explicit resource scope
+
+Accepted: Platform resolves feature/action permissions independently from role names and signs business or student scope. Services enforce both action and resource policy. This supports future enterprise provisioning without moving financial ownership into tutor UI. Enterprise hierarchy, licenses and trusted cross-tenant aggregation are deferred.
+
+## ADR-008: Derived reporting, source-preserving history
+
+Accepted: Reporting owns rebuildable event projections and HTTP composition; it never joins Billing/Clients databases. Billing retains imported source files and historical work/invoice assertions separately from native invoice/payment facts. Dashboard coverage labels incomplete identity/history and provisional inactivity measures.
+
+## ADR-009: Optimistic interaction with server authority
+
+Accepted: Kanban updates render locally and save through ordered revision-checked requests. Memory caches and optimistic state improve interaction; they do not grant access or establish financial truth. Transport/connection/cache/lock optimizations remain proposed in the current audit until benchmarked and tested.

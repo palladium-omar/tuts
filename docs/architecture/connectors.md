@@ -1,6 +1,6 @@
 # External connectors and data exchange
 
-> **Current status:** Tuts has an integrations service with real token-based Calendly and Cal.com readers, an HTTPS JSON contact reader, and authenticated form webhooks. The code connects to these protocols, but live behavior still depends on each business entering its own credentials and has not been verified here. The connectors use user-supplied tokens, not an OAuth application. See the [integrations service README](../../services/integrations/README.md) for limits and provider documentation.
+> **Current status:** Tuts has an integrations service with real token-based Calendly and Cal.com readers, an HTTPS JSON contact reader, and authenticated form webhooks. The Node target connects to these protocols; Cloudflare permits fixed Cal.com/Calendly endpoints and form hooks but rejects arbitrary customer JSON endpoint pulls without a safe egress adapter. Live behavior still depends on each business entering its own credentials and has not been verified here. The connectors use user-supplied tokens, not an OAuth application. See the [integrations service README](../../services/integrations/README.md) for limits and provider documentation.
 
 ## Ownership and user flow
 

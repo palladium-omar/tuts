@@ -1,5 +1,7 @@
 # Billing service
 
+> Current cross-service context: [system](../../docs/architecture/system.md), [API/schema inventory](../../docs/service-inventory.md), [security/performance audit](../../docs/reviews/2026-10-10-platform-audit.md). Service descriptions below define APIs and local behavior; provider/configuration readiness is separate.
+
 Independent NestJS process (4005), dedicated PostgreSQL database, `billing` entitlement. Gateway prefix `/api/billing`; service prefix `/v1/invoices`. Runtime authenticates business membership and staff roles. Clients/parents have no financial endpoint access in this release.
 
 - `POST /v1/invoices`: `{payerName,clientId?,currency,items:[{description,quantity,unitPriceMinor}]}`.
@@ -100,7 +102,7 @@ Billing reconciliation uses the `SCHEDULING` service binding and forwards signed
 
 ## Scoped student financial history
 
-`GET /v1/portal/finance?studentId=<uuid>&limit=50&offset=0` requires the Billing entitlement, `billing.read`, and access to that student. It returns issued invoices, paginated recorded payments, counts and complete totals separated by currency. Drafts and payment credentials are excluded. Simulated allocations are labeled and never counted as real collections. Totals are all-time; the student report month does not redefine their period.
+`GET /v1/portal/finance?studentId=<uuid>&limit=50&offset=0` is staff-only (`owner`, `admin`, `tutor`) and requires the Billing entitlement, `billing.read`, and access to that student. Students/guardians cannot read it, despite the historical `/portal/finance` path name. It returns issued invoices, paginated recorded payments, counts and complete totals separated by currency. Drafts and payment credentials are excluded. Simulated allocations are labeled and never counted as real collections. Totals are all-time; the student report month does not redefine their period.
 
 Client merge events install a local alias, preserving historical invoice IDs and seller/payer snapshots. Alias rates are retained but disabled for staff review; the survivor's existing rate is preserved. Monthly drafting recognizes earlier invoices under the merged identity and retains billed-class review flags. A merge never silently changes a price or combines issued invoices.
 

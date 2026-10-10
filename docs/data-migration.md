@@ -1,4 +1,6 @@
-# Moving existing Tuts data to Cloudflare and Neon
+# Historical initial data migration to Cloudflare and Neon
+
+> **Historical eight-service procedure:** This records the initial cutover. `migrate-local-data.mjs` still has an explicit legacy table/service allowlist and fails closed on today's expanded schemas; it does not support current ten-service backup/restore. Do not use it as the current recovery runbook. See [operations](operations.md) and audit A-05. Current maintenance tooling covers all nine consumer queues; counts below refer to the initial release.
 
 `scripts/cloudflare.mjs migrate` creates databases, roles and schema. It does **not** copy existing accounts, business records or uploads. A new hosting environment must include an explicit data transfer before it replaces an existing installation. Ordinary code deployments against the existing hosted databases do not require another import.
 

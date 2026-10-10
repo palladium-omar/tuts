@@ -1,5 +1,7 @@
 # Reporting service
 
+> Current cross-service context: [system](../../docs/architecture/system.md), [API/schema inventory](../../docs/service-inventory.md), [security/performance audit](../../docs/reviews/2026-10-10-platform-audit.md). Service descriptions below define APIs and local behavior; provider/configuration readiness is separate.
+
 Separate NestJS/Worker service on port 4010, entitlement `reporting`, with its own
 PostgreSQL database and tenant RLS. It stores rebuildable projections and scalar
 first-party activity aggregates. It never imports another service's source or

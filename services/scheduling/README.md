@@ -1,5 +1,7 @@
 # Scheduling
 
+> Current cross-service context: [system](../../docs/architecture/system.md), [API/schema inventory](../../docs/service-inventory.md), [security/performance audit](../../docs/reviews/2026-10-10-platform-audit.md). Service descriptions below define APIs and local behavior; provider/configuration readiness is separate.
+
 This service owns local session records and a separate read-only external session projection. Imported Calendly/Cal.com appointments are delivered through `integrations.sessions-synced.v1`, batch validated, tenant scoped, inbox deduplicated, and upserted by connection/external ID. Provider update/observation watermarks take precedence over older replayed updates; legacy deliveries cannot overwrite a modern projection.
 
 `GET /v1/external-sessions` accepts optional `status`, `connectionId`, `from`, `to`, `limit`, and `offset`. Owner/admin users see the business projection; tutors see connections created under their own user ID. Items contain provider, connectionId, externalId, attendeeName, attendeeEmail, bookingUrl and `readOnly:true`. The web calendar reads this projection and uses bookingUrl for external navigation. It must not call the local edit/cancel/complete routes for these external IDs.
@@ -18,7 +20,7 @@ The client reads pages of 200 for the visible range, up to 5,000 records. If mor
 
 External data has no local overlap exclusion constraint: real remote appointments are retained even if they overlap. Local `/v1/sessions` remains its existing API and is not merged automatically. Disconnect events delete that source's external appointments and retain a tombstone to suppress delayed sync deliveries. Synchronization never creates, cancels or edits a provider booking.
 
-Build: `pnpm --filter @palladium/scheduling build`. No tests were added or run under the current task instruction. Actual provider synchronization requires administrator supplied credentials.
+Build: `pnpm --filter @palladium/scheduling build`. The 10 October audit ran all five Scheduling tests with the ordinary local database role, including its PostgreSQL isolation/ledger tests. Actual provider synchronization requires administrator supplied credentials.
 
 ## Canonical class ledger and attendance reconciliation
 

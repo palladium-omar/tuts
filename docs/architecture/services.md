@@ -2,7 +2,7 @@
 
 > **Contract scope:** This page defines how Tuts features are composed and how future services should be added. It is not a claim that every feature or workflow below is shipped. See the [repository status](../../README.md#what-works-today) for implemented scope. Student workspace contracts are detailed in [the student workspace architecture](student-workspace.md).
 
-Each service is an independently built Docker image and Node process, exposes `/health` and `/openapi.json`, and owns a PostgreSQL database. Local Compose may place the databases on one PostgreSQL server, but grants restrict each service role to its database. A database is never a shared integration surface.
+Each service has an independently built Docker/Node target and a private production Worker, exposes `/health`, and owns a PostgreSQL database. `/openapi.json` is declared but currently returns 404 in the audited runtime (audit A-03); use the generated [route/schema inventory](../service-inventory.md) and validation source until fixed. Local Compose may place the databases on one PostgreSQL server, but grants restrict each service role to its database. A database is never a shared integration surface.
 
 ## Composition
 
@@ -28,7 +28,7 @@ The integrations service polls business-connected Calendly/Cal.com calendars and
 
 Billing and payments integrate through invoice/payment events. A payment attempt has an immutable amount, currency, business ID, invoice ID, and selected business connection. Billing remains the source of truth for invoice balance; payments remains the source of truth for provider transaction state. Learning can be used without a booking or invoice. Notifications consumes events and has its own delivery state. Platform business profile changes project the seller details and branding into billing; issuing an invoice snapshots the latest available profile.
 
-Reporting owns rebuildable projections from revisioned events, with authorized HTTP reconciliation for existing history. It never queries another service database. Planning owns boards and versioned templates independently from Learning; moving a task does not approve homework. Portal screens compose scoped Clients, Learning, Scheduling, Billing, Planning and Reporting APIs. Feature scope and permission are resolved per request, leaving enterprise hierarchy/licensing for future provisioning.
+Reporting owns rebuildable projections from revisioned events, with authorized HTTP reconciliation for existing history. It never queries another service database. Planning owns boards and versioned templates independently from Learning; moving a task does not approve homework. Tutor tracker screens compose scoped Clients, Learning, Scheduling, Billing, Planning and Reporting APIs. Student portal screens expose learning, safe booking/session and planning resources; financial and administrative reporting remains staff-only. Feature scope and permission are resolved per request, leaving enterprise hierarchy/licensing for future provisioning.
 
 ## Failure behavior
 

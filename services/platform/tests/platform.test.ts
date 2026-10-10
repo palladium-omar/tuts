@@ -52,7 +52,10 @@ test('auth passthrough restores gateway auth path and preserves multiple cookies
 test('internal context rejects absent membership inside selected tenant', async () => {
   let selected = '';
   const db = { async withTenant(id: string, work: (tx: unknown) => Promise<unknown>) { selected = id; return work({ query: async () => ({ rows: [] }) }); } } as unknown as Database;
-  const identity = { assertInternalSecret() {}, requireSession: async () => ({ user: { id: 'user-a' } }) } as unknown as IdentityService;
+  const identity = Object.assign(Object.create(IdentityService.prototype), {
+    database: db, assertInternalSecret() {},
+    requireSession: async () => ({ user: { id: 'user-a' } }),
+  }) as IdentityService;
   await assert.rejects(new ContextController(db, identity).context({} as Request, { businessId: tenant }), /Business membership is required/);
   assert.equal(selected, tenant);
 });

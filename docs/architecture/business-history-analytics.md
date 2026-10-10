@@ -183,3 +183,9 @@ responsible for normalization, validation and the immutable staged preview used
 by commit. The client sends only explicit matching/status corrections. Changing
 a file or worksheet clears obsolete mappings, and review must refresh after
 edits before commit. No tenant, permission or service ownership changes are made.
+
+## Audit clarification (10 October 2026)
+
+The performance section above documents existing batching and intended interaction behavior. It does not mean all navigation paths retain snapshots: caches/state are mounted-view scoped, summary POST reads are not included in GET coalescing, and Worker responses still await outbox work. The [audit](../reviews/2026-10-10-platform-audit.md) records these open issues and the missing pooling binding.
+
+Imported engagement groups by source `studentName`; no canonical CRM link is inferred. Identical names can combine and name changes can split activity. These are source-history metrics with explicit coverage, not reliable person-level retention. Linking reviewed rows to canonical student IDs is recommended before cohort/business decisions.

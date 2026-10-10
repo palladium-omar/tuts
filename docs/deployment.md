@@ -4,19 +4,19 @@ Target: `https://tuts.palladiumscholars.com`.
 
 ## Current status
 
-Deployment configuration is implemented. The production web image starts and serves HTTP successfully; Compose and Caddy configuration validation pass. On October 4, 2026, provisioning was blocked because `palladiumscholars-firebase` had no enabled billing account and the only accessible billing account was closed. This document does **not** claim that the domain is live. Update this section with the deployed revision and verification results after deployment.
+Deployment configuration is implemented. The production web image starts and serves HTTP successfully; Compose and Caddy configuration validation pass. On October 4, 2026, provisioning was blocked because `palladiumscholars-firebase` had no enabled billing account and the only accessible billing account was closed. This container/GCP target was not provisioned. The live domain instead uses the [Cloudflare deployment](cloudflare-deployment.md); this document does not establish its backup/restore configuration. The Compose source now includes Planning and Reporting, but its current ten-service production deployment has not been exercised here.
 
 ## Topology
 
-The initial deployment uses one dedicated Debian 12 Compute Engine VM in `europe-west1-b`, with 2 vCPUs, 8 GiB RAM and an 80 GiB persistent boot disk. Each of the eight domain services, the gateway and the web app has an independent container/image. Databases retain separate roles, passwords, migrations and tenant RLS. Sharing a host does not change the application service boundaries. This initial host is a single availability boundary; independent hosts or managed databases can replace components through the existing HTTP/event contracts.
+The initial deployment uses one dedicated Debian 12 Compute Engine VM in `europe-west1-b`, with 2 vCPUs, 8 GiB RAM and an 80 GiB persistent boot disk. Each of the ten domain services, the gateway and the web app has an independent container/image. Databases retain separate roles, passwords, migrations and tenant RLS. Sharing a host does not change the application service boundaries. This initial host is a single availability boundary; independent hosts or managed databases can replace components through the existing HTTP/event contracts.
 
 ```mermaid
 flowchart LR
   DNS[GoDaddy tuts A record] --> Edge[Caddy HTTPS]
   Edge --> Web[Next.js web container]
   Edge --> Gateway[Gateway container]
-  Gateway --> Services[Eight independent service containers]
-  Services --> DB[PostgreSQL: eight private databases and roles]
+  Gateway --> Services[Ten independent service containers]
+  Services --> DB[PostgreSQL: ten private databases and roles]
   Services --> Broker[Persistent RabbitMQ]
   Learning[Learning container] --> Files[Private persistent uploads]
 ```
@@ -38,7 +38,7 @@ Caddy handles TLS issuance/renewal, HTTP redirects, a 25 MB request limit and se
 
 ## Production feature policy
 
-`INITIAL_BUSINESS_ENTITLEMENTS` is an explicit platform server setting. The deployment grants the seven implemented product features to newly created businesses. Setting it to an empty string grants none; unspecified production deployments default to none. Browser requests cannot set grants, and this setting does not retrofit existing businesses.
+`INITIAL_BUSINESS_ENTITLEMENTS` is an explicit platform server setting. The deployment grants the nine domain feature entitlements to newly created businesses. Setting it to an empty string grants none; unspecified production deployments default to none. Browser requests cannot set grants, and this setting does not retrofit existing businesses.
 
 All domain services run with `NODE_ENV=production`. Sandbox simulation is disabled. Live Stripe/OAuth/PayPal/bank payment execution remains unimplemented; hosting does not enable test-only Stripe actions in production. Invoice accounting, monthly draft billing and recorded payment allocations remain available.
 

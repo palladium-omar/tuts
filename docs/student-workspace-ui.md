@@ -1,5 +1,7 @@
 # Student workspace UI
 
+> Updated for the 10 October release: billing, financial summaries and administrative Progress/Activity are tutor tracker features, not student portal tabs. See [current architecture](architecture/system.md) and [learner UX](architecture/learner-planning-ux.md).
+
 ## Entry points
 
 - Tutor workspace `/`: the **Student tracker** opens groups and student cards. Student details link to a student-filtered Learning workspace and the student's Planning workspace.
@@ -26,8 +28,6 @@ Tabs appear only with the corresponding entitlement and read permission:
 | Resources | Learning portal resources and protected downloads. Google Docs remain subject to Google's separate sharing rules. |
 | Book a session | Server-approved official Cal.com URLs with authorized name/email prefill. External provider UI handles availability and changes. |
 | Sessions | Scoped Scheduling session history. External bookings appear only after explicit staff association. |
-| Invoices & payments | Scoped Billing issued invoices, recorded payments and all-time currency totals. Simulated payments are clearly separated. |
-| Progress / Activity | Reporting month summaries and daily activity. Coverage, partial history and timestamps remain visible. |
 | Planning | Independent Planning boards for the selected authorized student. |
 | Contacts | Read-only safe Clients contact details. |
 

@@ -45,12 +45,15 @@ Queues limits each message to 128,000 bytes including metadata. Larger event bod
 
 | Consumer queue | Subscribed event types |
 | --- | --- |
-| Billing | `payments.payment-confirmed.v1`, `platform.business-profile-updated.v1`, `scheduling.class-updated.v1` |
-| Integrations | `clients.source-synced.v1` |
-| Clients | `integrations.contacts-received.v1`, `integrations.connection-disconnected.v1` |
-| Scheduling | `integrations.sessions-synced.v1`, `integrations.connection-disconnected.v1` |
-| Payments | `billing.invoice-issued.v1` |
-| Notifications | `clients.client-created.v1`, `clients.client-updated.v1`, `scheduling.session-created.v1`, `scheduling.session-completed.v1`, `learning.assignment-created.v1`, `billing.invoice-issued.v1`, `payments.payment-confirmed.v1` |
+| billing | `payments.payment-confirmed.v1`, `platform.business-profile-updated.v1`, `scheduling.class-updated.v1`, `clients.student-merged.v1` |
+| integrations | `clients.source-synced.v1` |
+| clients | `integrations.contacts-received.v1`, `integrations.connection-disconnected.v1` |
+| scheduling | `clients.student-merged.v1`, `integrations.sessions-synced.v1`, `integrations.connection-disconnected.v1` |
+| planning | `clients.student-merged.v1` |
+| reporting | `scheduling.class-updated.v1`, `learning.assignment-created.v1`, `learning.assignment-submitted.v1`, `learning.assignment-reviewed.v1`, `learning.assignment-updated.v1`, `learning.resource-created.v1`, `learning.resource-updated.v1`, `billing.invoice-updated.v1`, `clients.student-merged.v1` |
+| learning | `clients.student-merged.v1` |
+| payments | `billing.invoice-issued.v1` |
+| notifications | `clients.client-created.v1`, `clients.client-updated.v1`, `scheduling.session-created.v1`, `scheduling.session-completed.v1`, `learning.assignment-created.v1`, `billing.invoice-issued.v1`, `payments.payment-confirmed.v1` |
 
 Producer bindings use `EVENTS_<CONSUMER>` names. Queues perform fanout between independent consumers; one shared queue with competing consumers would lose the required subscription behavior. Successful HTTP and queue invocations attempt outbox flushing. A single `*/15 * * * *` gateway schedule also ticks **all ten** services sequentially, so pending events in services without a domain job can recover. Sequential ticks leave room for database/provider calls within Cloudflare's six pending-connection slots, which are shared by service-bound Workers within the top-level invocation. [Connection limits](https://developers.cloudflare.com/workers/platform/limits/#simultaneous-open-connections). Ticks require a shared `INTERNAL_RUNTIME_SECRET` of at least 32 characters and remain private; the gateway rejects public runtime paths. A failed tick fails the scheduled invocation after all services have been attempted, and each tick has a 30-second deadline. The ten deadlines total five minutes, below the cron's 15-minute wall-time limit. Billing additionally runs automatic arrears drafting, Integrations polls enabled connections, and Notifications advances approved campaign jobs. These jobs are eventually consistent and may wait until the next tick.
 
@@ -186,3 +189,7 @@ token; all management/report/export endpoints require signed context.
 System invitation/recovery email requires a real sender; deployment does not
 enable outbound delivery, charges or enterprise administration. Current delivery
 evidence is in [the delivery tracker](student-workspace-delivery.md).
+
+## Current audit snapshot — 10 October 2026
+
+All ten private domain Workers were inspected and have targeted placement; none has a Hyperdrive binding. Platform and Notifications both have AUTH_MAIL_ENABLED=false; outbound campaigns and sandbox payments are false. Live PostgreSQL metadata verified ordinary roles and forced RLS on all 76 domain tables carrying business_id, with the two documented internal directories exempt. See the [audit](reviews/2026-10-10-platform-audit.md) for tests, measurements and limits. Earlier deployment counts above describe the initial installation, not today's resource inventory.

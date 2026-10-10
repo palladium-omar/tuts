@@ -55,3 +55,19 @@ The table covers cross-service flows relevant to the current implementation. Ind
 | `integrations.connection-disconnected.v1` | integrations | clients, scheduling | connectionId |
 
 Optional automation must check tenant configuration. Financial reconciliation consumers continue settling previously accepted payments even after feature access changes. Emit a new event version for incompatible payload changes. Adding consumers must not require changing the producer's implementation.
+
+## Active subscription registry (10 October 2026)
+
+Cloudflare uses per-consumer queues and private R2 pointers for oversized envelopes; Node uses RabbitMQ. The registry is the exact subscription source for fanout and provisioning. Selected examples above are not its complete list. Changes must update contracts, handlers, transport configuration, docs and retry tests together.
+
+| Consumer queue | Subscribed event types |
+| --- | --- |
+| billing | `payments.payment-confirmed.v1`, `platform.business-profile-updated.v1`, `scheduling.class-updated.v1`, `clients.student-merged.v1` |
+| integrations | `clients.source-synced.v1` |
+| clients | `integrations.contacts-received.v1`, `integrations.connection-disconnected.v1` |
+| scheduling | `clients.student-merged.v1`, `integrations.sessions-synced.v1`, `integrations.connection-disconnected.v1` |
+| planning | `clients.student-merged.v1` |
+| reporting | `scheduling.class-updated.v1`, `learning.assignment-created.v1`, `learning.assignment-submitted.v1`, `learning.assignment-reviewed.v1`, `learning.assignment-updated.v1`, `learning.resource-created.v1`, `learning.resource-updated.v1`, `billing.invoice-updated.v1`, `clients.student-merged.v1` |
+| learning | `clients.student-merged.v1` |
+| payments | `billing.invoice-issued.v1` |
+| notifications | `clients.client-created.v1`, `clients.client-updated.v1`, `scheduling.session-created.v1`, `scheduling.session-completed.v1`, `learning.assignment-created.v1`, `billing.invoice-issued.v1`, `payments.payment-confirmed.v1` |

@@ -19,4 +19,8 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
+      - run: pnpm check:boundaries
+      - run: node scripts/document-service-inventory.mjs --check
+      - run: pnpm typecheck
+      - run: pnpm -r --no-bail --if-present test
       - run: node scripts/test-workbook-runtime.mjs

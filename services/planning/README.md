@@ -1,5 +1,7 @@
 # Planning
 
+> Current cross-service context: [system](../../docs/architecture/system.md), [API/schema inventory](../../docs/service-inventory.md), [security/performance audit](../../docs/reviews/2026-10-10-platform-audit.md). Service descriptions below define APIs and local behavior; provider/configuration readiness is separate.
+
 Independent Nest/PostgreSQL service, port **4009**, entitlement `planning`.
 Node and Worker adapters share the same domain behavior. Every service-owned
 table forces business tenant RLS. Run the additive migration through the existing

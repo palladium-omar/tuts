@@ -1,6 +1,6 @@
 # Production debugging
 
-Tuts emits structured `tuts.diagnostic.v1` console records into Cloudflare Workers Logs. The configuration generator enables persistent logs on the eight service Workers and gateway, with 100% head sampling. This is diagnostic logging, not product usage analytics.
+Tuts emits structured `tuts.diagnostic.v1` console records into Cloudflare Workers Logs. The configuration generator enables persistent logs on the ten service Workers and gateway, with 100% head sampling. This is diagnostic logging, not product usage analytics.
 
 ## Find an incident
 
@@ -43,3 +43,7 @@ The generator in `scripts/cloudflare.mjs` owns logging configuration so future d
 All nine production Workers were deployed and their logging settings read back through the Cloudflare API. A harmless unauthenticated business-list request returned 401 with a newly generated support reference: the same UUID appeared in its response body/header, gateway completion log, Platform API error log and Platform completion log. A spoofed caller-supplied UUID was replaced. The ordinary session endpoint also returned 200 with a matching Platform completion record. No accounts or business records were created or changed by these checks.
 
 Service-kit checks passed (17), including three diagnostic redaction/context checks; gateway checks passed (19). TypeScript builds and the static web build passed. The private deployment receipt and narrowly scoped tail captures are under the ignored `.cloudflare/audits/` directory.
+
+## Current verification and performance follow-up
+
+The [10 October audit](reviews/2026-10-10-platform-audit.md) rechecked live log configuration and runtime flags. General API timing is available; database connect/query/outbox phases and frontend failures still need dedicated instrumentation. Existing log retention is provider-managed and is not a backup strategy. Keep audit captures private.

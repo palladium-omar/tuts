@@ -1,5 +1,7 @@
 # External scheduling and contact connectors
 
+> Current cross-service context: [system](../../docs/architecture/system.md), [API/schema inventory](../../docs/service-inventory.md), [security/performance audit](../../docs/reviews/2026-10-10-platform-audit.md). Service descriptions below define APIs and local behavior; provider/configuration readiness is separate.
+
 This independent Nest process runs on port 4008 and owns its PostgreSQL database. Owner/admin users connect, update, sync and disconnect providers; authenticated staff may read credential-free connection metadata. Every business API requires verified membership context and the `integrations` entitlement. Data tables force tenant RLS. The service-owned discovery directory stores only business UUIDs so a worker can enter each tenant context.
 
 ## Configuration

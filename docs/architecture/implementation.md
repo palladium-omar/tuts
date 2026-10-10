@@ -1,6 +1,6 @@
 # Shared implementation contract
 
-> **Contract scope:** This document describes the shared interfaces and contributor requirements. The runtime, eight domain services, and some workflows are implemented, but a listed interface does not mean every feature that could use it is shipped. See the [repository status](../../README.md#what-works-today), [connector contract](connectors.md), and service READMEs for current behavior. Student/parent portal authorization and production integrations remain future work.
+> **Current contract:** Ten domain services, staff/student portals and Cloudflare/Node adapters are implemented. Feature delivery limits and audit findings are recorded in the [documentation index](../README.md) and [current system](system.md). Enterprise hierarchy/licensing, live payment activation and arbitrary provider egress remain future work.
 
 This document fixes the common interface used by independently implemented services. Ask the coordinating agent before changing shared packages or these interfaces.
 
@@ -17,6 +17,8 @@ services/billing/
 services/payments/
 services/notifications/
 services/integrations/     external scheduling and contact connectors
+services/planning/         boards, templates and ordered card persistence
+services/reporting/        projections, activity, business dashboard and attribution
 packages/contracts/        wire types only
 packages/service-kit/      Nest bootstrap, auth, database, events
 infra/                     local database provisioning
@@ -30,6 +32,8 @@ type RequestContext = {
   sub: string; businessId: string;
   role: 'owner' | 'admin' | 'tutor' | 'student' | 'parent';
   entitlements: string[]; requestId: string;
+  permissions?: string[]; accessScope?: 'business' | 'students';
+  studentIds?: string[]; policyVersion?: 1;
 };
 // Also exported by @palladium/contracts.
 
@@ -43,6 +47,10 @@ class Database {
 CurrentContext(): ParameterDecorator;
 Public(): MethodDecorator & ClassDecorator;
 Roles(...roles: RequestContext['role'][]): MethodDecorator & ClassDecorator;
+Permissions(...permissions: string[]): MethodDecorator & ClassDecorator;
+StudentScoped(): MethodDecorator & ClassDecorator;
+assertPermission(ctx: RequestContext, permission: string): void;
+assertStudentAccess(ctx: RequestContext, studentId: string): void;
 
 parseBody<T>(schema: ZodType<T>, input: unknown): T;
 // Writes to outbox using the caller's open transaction.
@@ -62,7 +70,7 @@ bootstrap({
 }): Promise<void>;
 ```
 
-Nest providers can use `OnModuleInit` and inject `EventBus` to register subscriptions. Registration occurs before the broker connects. Services use `@Controller('v1/...')`, `@CurrentContext()`, `@Roles(...)`, `Database.withTenant`, parameterized SQL and `parseBody(zodSchema, body)`. The runtime globally validates signed context and the configured service entitlement except on explicitly public routes. Default routes are staff-only until a documented resource relationship check is added for students/parents.
+Nest providers can use `OnModuleInit` and inject `EventBus` to register subscriptions. Registration occurs before the broker connects. Services use `@Controller('v1/...')`, `@CurrentContext()`, `@Roles(...)`, `Database.withTenant`, parameterized SQL and `parseBody(zodSchema, body)`. The runtime globally validates signed context and the configured service entitlement except on explicitly public routes. Default routes are staff-only. Student/scoped tutor routes opt into StudentScoped and must check requested and canonical student IDs. Versioned contexts require all permission/resource fields; use explicit permissions for new endpoints.
 
 SQL migrations live in `services/<name>/migrations/*.sql`, run in lexical order once and are tracked transactionally. Runtime creates service-owned `service_outbox`, `service_inbox` and `service_migrations`. Do not create those tables in service migrations.
 
@@ -82,7 +90,7 @@ Do not add guessed success stubs for external providers. A provider connection o
 
 Workers use invocation-scoped PostgreSQL pools, private service bindings through `serviceFetch`, contract-derived Cloudflare Queue fanout, and the same transactional outbox/inbox. `currentCloudflareBindings` exposes runtime storage bindings to a service's own adapter. Learning alone owns its R2 binding. No service imports another service's application source.
 
-The public gateway's 15-minute schedule invokes private authenticated ticks on all eight services. A service's optional scheduled callback advances its own jobs; all ticks also recover pending outbox publication. Migrations run outside Workers. The [Cloudflare guide](../cloudflare-deployment.md) documents runtime configuration, provider limitations, costs, and deployment evidence.
+The public gateway's 15-minute schedule invokes private authenticated ticks on all ten services. A service's optional scheduled callback advances its own jobs; all ticks also recover pending outbox publication. Migrations run outside Workers. The [Cloudflare guide](../cloudflare-deployment.md) documents runtime configuration, provider limitations, costs, and deployment evidence.
 
 ## Agent boundaries
 

@@ -1,5 +1,7 @@
 # Platform identity and business service
 
+> Current cross-service context: [system](../../docs/architecture/system.md), [API/schema inventory](../../docs/service-inventory.md), [security/performance audit](../../docs/reviews/2026-10-10-platform-audit.md). Service descriptions below define APIs and local behavior; provider/configuration readiness is separate.
+
 Owns the only authentication database. Better Auth handles password hashing and
 persistent sessions using its real PostgreSQL adapter and the explicit core SQL
 migration. No service may read these identity tables directly.

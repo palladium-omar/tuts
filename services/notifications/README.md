@@ -1,5 +1,7 @@
 # Notifications and communications service
 
+> Current cross-service context: [system](../../docs/architecture/system.md), [API/schema inventory](../../docs/service-inventory.md), [security/performance audit](../../docs/reviews/2026-10-10-platform-audit.md). Service descriptions below define APIs and local behavior; provider/configuration readiness is separate.
+
 Independent NestJS process on port 4007 with its own PostgreSQL database. All domain tables force tenant RLS. HTTP calls need a gateway-signed business context and the `notifications` entitlement. Existing activity intents remain separate from campaign delivery.
 
 ## System password recovery email

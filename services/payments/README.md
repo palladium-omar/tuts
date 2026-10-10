@@ -1,5 +1,7 @@
 # Payments service
 
+> Current cross-service context: [system](../../docs/architecture/system.md), [API/schema inventory](../../docs/service-inventory.md), [security/performance audit](../../docs/reviews/2026-10-10-platform-audit.md). Service descriptions below define APIs and local behavior; provider/configuration readiness is separate.
+
 Independent NestJS process (4006), dedicated PostgreSQL database, `payments` entitlement. Gateway prefix `/api/payments`; service routes use `/v1`. It supports the existing local sandbox simulator and an existing business Stripe account in **test mode only**. PayPal and bank adapters remain unavailable.
 
 ## Existing Stripe account and explicit actions

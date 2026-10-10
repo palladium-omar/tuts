@@ -263,7 +263,7 @@ test("recipient lookup forwards signed caller context and rejects truncated CRM 
   let forwarded = "";
   try {
     global.fetch = (async (_input, options) => {
-      forwarded = (options?.headers as Record<string, string>).Authorization;
+      forwarded = new Headers(options?.headers).get('authorization') ?? '';
       return new Response(
         JSON.stringify({ items: [contact], total: 1, truncated: false }),
         { status: 200 },

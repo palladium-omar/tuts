@@ -1,5 +1,7 @@
 # Clients CRM service
 
+> Current cross-service context: [system](../../docs/architecture/system.md), [API/schema inventory](../../docs/service-inventory.md), [security/performance audit](../../docs/reviews/2026-10-10-platform-audit.md). Service descriptions below define APIs and local behavior; provider/configuration readiness is separate.
+
 Port `4002`, gateway prefix `/api/clients`, service-owned PostgreSQL database.
 Every endpoint requires verified gateway membership, the `clients` entitlement,
 and an owner/admin/tutor role. Delete and custom-field creation/editing additionally require owner/admin. Domain
