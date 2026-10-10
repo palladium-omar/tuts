@@ -30,7 +30,7 @@ The current-release encrypted database/configuration/file bundle authenticated 1
 
 System email: the dedicated Resend sender domain is DNS-verified, its restricted sending credential is stored as a deployment secret, and both mail flags are enabled. Live tracing first exposed a 502 in the Notifications provider call. The provider now binds native fetch correctly and uses portable bounded timeout handling; safe failure categories/status are logged without provider content or recipient/token data. After redeployment, the actual production Forgot password form generated a second reset email and Resend confirmed Delivered. The owner account password was not changed. Local synthetic tests cover expiry, reuse and session revocation; invitation delivery uses the same provider but a real student invitation was not sent as part of this check.
 
-The final run passed 157 ordinary-role database tests with zero failures/skips, 46 frontend tests and 31 service-kit tests. Final provider checks passed, and the production dependency audit returned zero known advisories. Login and Forgot password pages rendered in the isolated browser without console errors.
+The final run passed 157 ordinary-role database tests with zero failures/skips, 46 frontend tests and 32 service-kit tests. Final provider checks passed, and the production dependency audit returned zero known advisories. Login and Forgot password pages rendered in the isolated browser without console errors.
 
 ## Operational limits
 

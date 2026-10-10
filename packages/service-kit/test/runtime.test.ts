@@ -13,6 +13,7 @@ test('concurrent invocation bindings and retained pool methods stay in their own
   const results = await Promise.all(['first', 'second'].map(async name => {
     return withCloudflareInvocation({ DATABASE_URL: `postgres://user:password@${name}/db`, NAME: name }, async () => {
       assert.equal(isCloudflareRuntime(), true);
+      assert.equal(stablePool.options.idleTimeoutMillis, 0);
       const before = stablePool.options.connectionString;
       await new Promise(resolve => setTimeout(resolve, name === 'first' ? 10 : 1));
       assert.equal(stablePool.options.connectionString, before);
@@ -100,4 +101,36 @@ test('registered mutation work retains invocation pools until background publica
     await Promise.all(retained);
     assert.deepEqual(stages, ['published', 'pool closed']);
   } finally { Pool.prototype.end = oldEnd; }
+});
+
+
+test('pool errors retain their owner diagnostic scope when emitted in another invocation', async () => {
+  const { invocationPool } = await import('../src/runtime.js');
+  const { withDiagnostics } = await import('../src/diagnostics.js');
+  const ownerId = '11111111-1111-4111-8111-111111111111';
+  const otherId = '22222222-2222-4222-8222-222222222222';
+  let pool!: Pool;
+  let emit!: () => void;
+  const gate = new Promise<void>(resolve => { emit = resolve; });
+  const output: string[] = [];
+  const previous = console.error;
+  console.error = (value: string) => { output.push(value); };
+  try {
+    const owner = withDiagnostics({service:'platform', requestId:ownerId, trigger:'http'}, () =>
+      withCloudflareInvocation({DATABASE_URL:'postgres://synthetic/db'}, async () => {
+        pool = invocationPool({});
+        await gate;
+      }));
+    await withDiagnostics({service:'notifications', requestId:otherId, trigger:'http'}, () =>
+      withCloudflareInvocation({}, async () => { pool.emit('error', new TypeError('private socket detail')); }));
+    emit();
+    await owner;
+    assert.equal(output.length, 1);
+    const record = JSON.parse(output[0]!);
+    assert.equal(record.requestId, ownerId);
+    assert.equal(record.service, 'platform');
+    assert.equal(record.event, 'database_failed');
+    assert.equal(record.level, 'error');
+    assert.ok(!output[0]!.includes('private socket detail'));
+  } finally { emit(); console.error = previous; }
 });

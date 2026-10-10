@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { Pool } from 'pg';
-import { currentDiagnosticId, logDiagnostic } from './diagnostics.js';
+import { captureDiagnosticScope, currentDiagnosticId, logDiagnostic } from './diagnostics.js';
 
 export type CloudflareBindings = Record<string, unknown>;
 type Invocation = { bindings: CloudflareBindings; pools: Map<object, Pool>; backgroundTasks: Set<Promise<void>> };
@@ -54,11 +54,14 @@ export function invocationPool(owner: object): Pool {
     const hyperdrive = scope.bindings.HYPERDRIVE as { connectionString?: string } | undefined;
     const connectionString = hyperdrive?.connectionString ?? scope.bindings.DATABASE_URL ?? process.env.DATABASE_URL;
     if (typeof connectionString !== 'string' || !connectionString) throw new Error('DATABASE_URL or HYPERDRIVE is required');
-    pool = new Pool({ connectionString, max: 2, connectionTimeoutMillis: 5000, idleTimeoutMillis: 1000 });
+    pool = new Pool({ connectionString, max: 2, connectionTimeoutMillis: 5000, idleTimeoutMillis: 0 });
+    // Invocation cleanup closes sockets after registered work. A separate idle
+    // timer can close a reader during that work and produce adapter close errors.
+    const withPoolOwner = captureDiagnosticScope();
     // Handle idle socket failures without leaking database details into logs.
     const invocationOwnedPool = pool;
     pool.on('error', (error) => {
-      if (!invocationOwnedPool.ending) logDiagnostic('error', 'database_failed', { error });
+      if (!invocationOwnedPool.ending) withPoolOwner(() => logDiagnostic('error', 'database_failed', { error }));
     });
     scope.pools.set(owner, pool);
   }

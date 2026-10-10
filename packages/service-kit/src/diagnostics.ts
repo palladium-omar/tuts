@@ -10,6 +10,12 @@ export function diagnosticId(value?: unknown): string {
 export function withDiagnostics<T>(scope: Scope, work: () => T): T {
   return scopes.run({ ...scope, requestId: diagnosticId(scope.requestId) }, work);
 }
+/** Snapshot ownership before an asynchronous resource can emit in another scope. */
+export function captureDiagnosticScope(): <T>(work: () => T) => T {
+  const current = scopes.getStore();
+  const owner = current ? { ...current } : undefined;
+  return work => owner ? scopes.run(owner, work) : scopes.exit(work);
+}
 export function currentDiagnosticId(): string | undefined { return scopes.getStore()?.requestId; }
 /** Only call after signed context verification, never from a tenant header. */
 export function diagnosticBusiness(businessId: string): void {

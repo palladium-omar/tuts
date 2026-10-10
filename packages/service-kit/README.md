@@ -63,3 +63,5 @@ permit old deliveries to reapply business side effects. Producer payload replay
 beyond 30 days requires separately retained source and a new reviewed event;
 this routine does not establish financial/source/activity retention policy or a
 hosted disaster recovery guarantee. Request budget buckets expire after one day.
+
+Invocation pools retain at most two sockets until request/background cleanup; idle expiry is disabled within that bounded lifetime. Asynchronous socket diagnostics retain their original request owner.

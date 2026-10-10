@@ -10,6 +10,9 @@ Updated for the 10 October 2026 audit remediation. The [baseline audit](../revie
 4. A read performs its controller work and bounded response transport; GET/HEAD/OPTIONS do not publish the outbox. Successful mutations register publication as background work. The invocation lifetime includes that work and pool cleanup. Queue consumption waits for durable processing/publication before acknowledgment. A gateway cron ticks every domain for recovery.
 5. Exact view snapshots and GET/read-only Reporting summary results live in bounded browser memory. Returning to a screen retains authorized data while refreshing. Mutation starts and completion invalidate dependent snapshots; a generation check prevents an older in-flight read repopulating an invalidated cache.
 
+Invocation-owned PostgreSQL pools have at most two sockets and no independent idle expiry timer. Cleanup closes them after registered work finishes. This avoids connection churn during slow provider calls and adapter close/read warnings. Pool errors retain the original request owner in diagnostics; genuine socket failures remain visible.
+
+
 ## Cache contract
 
 - Identity is the API instance: account, business, role, permissions, entitlements and student scope. Student portal identities also include author/access scope.

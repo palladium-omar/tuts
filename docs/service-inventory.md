@@ -2,9 +2,9 @@
 
 Generated from controller declarations and SQL migrations by `node scripts/document-service-inventory.mjs`. This is a route and ownership inventory, not a complete OpenAPI schema or proof of runtime access. Zod schemas in each service define request validation. Read [HTTP](architecture/http.md), [security](architecture/security.md), and the service README before integration.
 
-Gateway adds `/api/{service}` to each domain path. `@Public` means the shared session-context guard is bypassed; provider/internal routes still require their own secrets or signatures. Omitted roles default to staff under the shared guard; student routes also need explicit resource checks. Class and method metadata are shown together, so consult controller code for overrides. `/health` is shared. The declared `/openapi.json` endpoint currently returns 404 in the audited Node runtime; see audit finding A-03.
+Gateway adds `/api/{service}` to each domain path. `@Public` means the shared session-context guard is bypassed; provider/internal routes still require their own secrets or signatures. Omitted roles default to staff under the shared guard; student routes also need explicit resource checks. Class and method metadata are shown together, so consult controller code for overrides. `/health` is shared. The shared `/openapi.json` route is registered before router initialization; concrete input-schema coverage and limits are documented separately.
 
-Only the owning service may read or write the tables below. Runtime-owned `service_migrations`, `service_outbox`, and `service_inbox` exist in each database and are omitted from the domain lists.
+Only the owning service may read or write the tables below. Runtime-owned `service_migrations`, `service_outbox`, `service_inbox`, and `service_request_budgets` exist in each database and are omitted from the domain lists.
 
 ## platform
 
@@ -231,9 +231,9 @@ Local port: 4007. [Service guide](../services/notifications/README.md).
 
 | Method | Service path | Declared access metadata | Controller |
 | --- | --- | --- | --- |
-| GET | `/internal/auth-mail/status` | Public | [AuthMailController.status](../services/notifications/src/auth-mail.ts#L132) |
-| POST | `/internal/auth-mail/password-reset` | Public | [AuthMailController.sendPasswordReset](../services/notifications/src/auth-mail.ts#L138) |
-| POST | `/internal/auth-mail/portal-invitation` | Public | [AuthMailController.sendPortalInvitation](../services/notifications/src/auth-mail.ts#L154) |
+| GET | `/internal/auth-mail/status` | Public | [AuthMailController.status](../services/notifications/src/auth-mail.ts#L142) |
+| POST | `/internal/auth-mail/password-reset` | Public | [AuthMailController.sendPasswordReset](../services/notifications/src/auth-mail.ts#L148) |
+| POST | `/internal/auth-mail/portal-invitation` | Public | [AuthMailController.sendPortalInvitation](../services/notifications/src/auth-mail.ts#L164) |
 | GET | `/v1/communication-connections` | Roles(owner, admin, tutor) | [CommunicationConnectionsController.list](../services/notifications/src/communications.ts#L703) |
 | POST | `/v1/communication-connections` | Roles(owner, admin, tutor); Roles(owner, admin) | [CommunicationConnectionsController.create](../services/notifications/src/communications.ts#L710) |
 | PATCH | `/v1/communication-connections/:id` | Roles(owner, admin, tutor); Roles(owner, admin) | [CommunicationConnectionsController.patch](../services/notifications/src/communications.ts#L720) |
