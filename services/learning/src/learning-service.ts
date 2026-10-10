@@ -147,12 +147,12 @@ export class LearningService {
     async listResources(ctx: RequestContext, query: unknown, portal = false) {
         const q = parseBody(resourceListSchema, query);
         return this.db.withTenant(ctx.businessId, async (tx) => {
-            const clientId = q.clientId ? await authorizedStudent(tx, ctx, q.clientId) : null, scope = scopedIds(ctx), values = [ctx.businessId, clientId, scope];
-            const where = `business_id=$1 AND ($2::uuid IS NULL OR client_id=$2) AND ($3::uuid[] IS NULL OR client_id=ANY($3::uuid[]))${portal ? " AND purpose='material'" : ''}`;
+            const clientId = q.clientId ? await authorizedStudent(tx, ctx, q.clientId) : null, scope = scopedIds(ctx), values = [ctx.businessId, clientId, scope, q.kind ?? null];
+            const where = `business_id=$1 AND ($2::uuid IS NULL OR client_id=$2) AND ($3::uuid[] IS NULL OR client_id=ANY($3::uuid[])) AND ($4::text IS NULL OR kind=$4)${portal ? " AND purpose='material'" : ''}`;
             const count = await tx.query<{
                 total: string;
             }>(`SELECT count(*) total FROM resources WHERE ${where}`, values);
-            const rows = await tx.query<ResourceRow>(`SELECT * FROM resources WHERE ${where} ORDER BY created_at DESC,id LIMIT $4 OFFSET $5`, [...values, q.limit, q.offset]);
+            const rows = await tx.query<ResourceRow>(`SELECT * FROM resources WHERE ${where} ORDER BY created_at DESC,id LIMIT $5 OFFSET $6`, [...values, q.limit, q.offset]);
             for (const row of rows.rows)
                 assertStudentAccess(ctx, row.client_id);
             return {

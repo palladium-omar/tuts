@@ -73,7 +73,9 @@ export const listSchema = z
     limit: z.coerce.number().int().min(1).max(200).default(100),
   })
   .strict();
-export const resourceListSchema = listSchema.omit({ status: true });
+export const resourceListSchema = listSchema.omit({ status: true }).extend({
+  kind: z.enum(['google_doc', 'link', 'file_metadata']).optional(),
+});
 
 export const uploadSchema = z
   .object({ clientId: uuid, title: z.string().trim().min(1).max(200) })

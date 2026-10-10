@@ -44,6 +44,17 @@
 .tracker-detail-item h3 { margin: 0 0 8px; font-size: 14px; }
 .tracker-detail-item p { margin: 8px 0; font-size: 13px; white-space: pre-wrap; }
 .tracker-detail-item .tag { margin-right: 8px; }
+.student-documents-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.student-documents-heading h3 { margin: 0; }
+.student-document-form { padding: 18px; margin: 18px 0; border: 1px solid var(--line); border-radius: 10px; }
+.student-document-form h3 { margin-top: 0; }
+.student-document-form fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+.student-document-form input { width: 100%; }
+.student-document-card { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.student-document-card > svg { color: var(--accent); flex-shrink: 0; }
+.student-document-info { flex: 1; min-width: 180px; overflow-wrap: anywhere; }
+.student-document-url { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+.student-document-open { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; padding: 8px 0; }
 .tracker-invite-student { border: 1px solid var(--line); border-radius: 8px; padding: 14px; margin: 12px 0; }
 .tracker-invite-student h3 { font-size: 14px; margin: 0 0 10px; }
 .tracker-invite-recipient { display: flex; align-items: flex-start; gap: 9px; margin: 10px 0; font-size: 13px; line-height: 1.6; }

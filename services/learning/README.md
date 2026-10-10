@@ -96,6 +96,18 @@ available on portal routes. Tenant IDs remain server-derived.
 
 ### Selected Google documents
 
+The tutor's student tracker has an **Essays & Google Docs** tab. It lists that
+student's selected Google documents and lets staff with `learning.write` save a
+named document link without first creating homework. The tab uses Learning's
+existing resource API; Clients does not own a separate essay-link field or table.
+GET `/v1/resources?clientId=<student>&kind=google_doc&limit=20&offset=0`
+filters before pagination and returns the same `{items,total,limit,offset}` shape.
+The optional `kind` filter also accepts `link` and `file_metadata`, on staff and
+portal resource lists. Tenant and student access checks still apply.
+Saved documents are material resources and appear in the existing student portal.
+Google document sharing remains external; saving a reference neither creates a
+Google document nor changes its permissions or sends an email.
+
 Staff POST `/v1/resources` accepts
 `{clientId,title,kind:'google_doc',url:'https://docs.google.com/document/d/<id>/edit'}`.
 Only exact docs.google.com HTTPS document paths without URL credentials are
