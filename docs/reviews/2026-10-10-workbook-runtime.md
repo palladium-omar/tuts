@@ -37,3 +37,16 @@ Service type builds, Clients tests, Billing parser tests, shared runtime tests,
 deployment configuration tests and service boundary checks passed. Both production
 Worker bundles passed deployment dry runs. Production rollout receipts are saved
 privately alongside the runtime verification evidence.
+
+## Production rollout
+
+Both affected services were deployed with existing variables, secrets, private
+bindings and database placement preserved. The original workbook then passed the
+actual deployed CRM multipart upload endpoint three times, each returning HTTP
+201 with 88 parsed rows and nine columns. The endpoint only parses the upload;
+this check created no contacts, staged imports or financial records. Anonymous
+access to both public upload routes remains rejected.
+
+Production versions: Clients `3ed2fa8a-995e-42f9-9fb1-952f1bbed1f9`, Billing
+`970ca610-d971-4632-8477-07e4de87b8bd`. The frontend release and other service
+versions were unaffected.
