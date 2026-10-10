@@ -116,6 +116,13 @@ Read the contracts before extending a service:
 9. [CRM columns and communications](docs/architecture/crm-communications.md)
 10. [Monthly billing and dashboard](docs/architecture/monthly-billing.md)
 11. [Password recovery and system email](docs/architecture/password-recovery.md)
+12. [Student workspace and scoped capabilities](docs/architecture/student-workspace.md)
+
+The student workspace expansion follows the [delivery tracker](docs/student-workspace-delivery.md).
+Its architecture keeps feature permissions separate from role labels so future
+enterprise provisioning can assign billing and teaching capabilities at different
+account levels without changing service ownership. Enterprise administration is
+not part of this release.
 
 These pages preserve the intended architecture and clearly scoped future requirements; they do not assert that every described capability is implemented. Check **What works today** above and each service README for current service behavior.
 
