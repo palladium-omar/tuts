@@ -2,7 +2,7 @@
 
 Tuts is a composable tutoring-business workspace. Its local preview brings together ten independently running domain services, each with its own API, migrations, and PostgreSQL database. PostgreSQL row-level security, signed gateway context, and RabbitMQ provide the service and tenant boundaries.
 
-The current product is staff and student web apps with a local preview, a container deployment configuration, and a Cloudflare runtime adapter. The hosted app is available at [tuts.palladiumscholars.com](https://tuts.palladiumscholars.com), with page visits to [tuts-palladium.pages.dev](https://tuts-palladium.pages.dev) redirecting to the custom domain. Live checks confirmed the custom hostname homepage, health endpoint, unauthenticated session endpoint, and canonical redirect. Hosted signup/sign-in and authenticated workflows remain unverified. See the [Cloudflare deployment guide](docs/cloudflare-deployment.md), [domain setup](docs/cloudflare-domain.md), and [agent tooling setup](docs/agent-setup.md). Architecture documents describe the contracts and extension workflow for this system; they include planned capabilities as well as implemented ones. The status list below is the source of truth for what is delivered today.
+The current product is staff and student web apps with a local preview, a container deployment configuration, and a Cloudflare runtime adapter. The hosted app is available at [tuts.palladiumscholars.com](https://tuts.palladiumscholars.com), with page visits to [tuts-palladium.pages.dev](https://tuts-palladium.pages.dev) redirecting to the custom domain. Live checks confirmed the custom hostname homepage, health endpoint, unauthenticated session endpoint, and canonical redirect. Authenticated workflows and provider delivery have not been exercised end to end for this release. See the [Cloudflare deployment guide](docs/cloudflare-deployment.md), [domain setup](docs/cloudflare-domain.md), and [agent tooling setup](docs/agent-setup.md). Architecture documents describe the contracts and extension workflow for this system; they include planned capabilities as well as implemented ones. The status list below is the source of truth for what is delivered today.
 
 The original local account and four owned workspaces have been restored to the hosted databases, including CRM, sessions, learning and billing records. See [data migration and recovery](docs/data-migration.md) for the backup, maintenance and integrity checks. Existing passwords were preserved; old browser sessions were not transferred.
 
@@ -125,6 +125,7 @@ Read the contracts before extending a service:
 12. [Student workspace and scoped capabilities](docs/architecture/student-workspace.md)
 
 The student workspace expansion follows the [delivery tracker](docs/student-workspace-delivery.md).
+The release is deployed on the existing Cloudflare/Neon/R2 installation.
 Its architecture keeps feature permissions separate from role labels so future
 enterprise provisioning can assign billing and teaching capabilities at different
 account levels without changing service ownership. Enterprise administration is
