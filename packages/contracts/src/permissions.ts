@@ -25,14 +25,18 @@ export function defaultPermissions(role: string): Permission[] {
       'notifications.manage'].includes(permission));
   if (role === 'student' || role === 'parent') return [
     'clients.read', 'scheduling.read', 'learning.read', 'learning.write',
-    'planning.read', 'planning.write', 'reporting.read', 'reporting.write',
-    'billing.read', 'payments.read', 'integrations.read',
+    'planning.read', 'planning.write', 'integrations.read',
+    ...(role === 'student' ? ['reporting.write' as const] : []),
   ];
   return [];
 }
 
 /** An explicit empty override denies all actions. No wildcards or role bypass. */
 export function hasPermission(subject: PermissionSubject, permission: string): boolean {
+  // Learner grants cannot expose business finances or tutor analytics, including
+  // previously provisioned explicit overrides. Activity submission stays separate.
+  if (['student', 'parent'].includes(subject.role) &&
+    (/^(billing|payments)\./.test(permission) || ['reporting.read', 'reporting.financial'].includes(permission))) return false;
   return (subject.permissions ?? defaultPermissions(subject.role)).includes(permission);
 }
 

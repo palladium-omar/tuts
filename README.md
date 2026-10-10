@@ -138,3 +138,5 @@ The [live UI review](docs/ux-review.md) records usability fixes, manually exerci
 ## Stack
 
 TypeScript, Next.js and React, ten NestJS service processes, PostgreSQL with a separate database and restricted role per service, RabbitMQ, and Docker Compose for local infrastructure. The local Compose environment shares one PostgreSQL server while keeping the service databases and credentials separate. The Cloudflare target uses private Workers, Neon PostgreSQL, Queues and R2 while retaining the same domain boundaries. Payment simulation is limited to the local development environment.
+
+Student access and the guided planning interface are documented in [learner access and planning](docs/architecture/learner-planning-ux.md). Billing and business analytics remain tutor workspace features.

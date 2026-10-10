@@ -7,8 +7,6 @@ import { createApi, date, errorMessage, type Api, type Business, type Row } from
 import { Empty, Notice } from "../../components/shared";
 import { Registration } from "../../features/registration";
 import { PortalLearning } from "./portal-learning";
-import { StudentFinance } from "../../features/student-finance";
-import { StudentReporting, reportingMonth } from "../../features/student-reporting";
 import { StudentBoards } from "../../features/student-boards";
 import { useActiveTime } from "./use-active-time";
 import "../globals.css";
@@ -52,11 +50,10 @@ export default function StudentPortal() {
 function PortalWorkspace({ platform, business }: { platform: Api; business: Business }) {
   const api = useMemo(() => createApi(business.id), [business.id]);
   const [grants, setGrants] = useState<Row[]>([]), [students, setStudents] = useState<Row[]>([]), [selected, setSelected] = useState<Row | null>(null), [studentOffset, setStudentOffset] = useState(0), [tab, setTab] = useState("homework"), [loading, setLoading] = useState(true), [error, setError] = useState(""), [revision, setRevision] = useState(0);
-  const [month, setMonth] = useState(() => reportingMonth(business));
   const available = (domain: string) => business.entitlements.includes(domain) && hasPermission(business, `${domain}.read`);
   const trackingAllowed = business.role === "student" && grants.some((grant) => grant.studentId === selected?.id && grant.relationship === "student") && business.entitlements.includes("reporting") && hasPermission(business, "reporting.write");
-  const activityError = useActiveTime(api, selected?.id, trackingAllowed);
-  const tabs = [...(available("learning") ? ["homework", "resources"] : []), ...(available("integrations") ? ["booking"] : []), ...(available("scheduling") ? ["sessions"] : []), ...(available("billing") ? ["finance"] : []), ...(available("reporting") ? ["progress", "activity"] : []), ...(available("planning") ? ["planning"] : []), "contacts"];
+  useActiveTime(api, selected?.id, trackingAllowed);
+  const tabs = [...(available("learning") ? ["homework", "resources"] : []), ...(available("integrations") ? ["booking"] : []), ...(available("scheduling") ? ["sessions"] : []), ...(available("planning") ? ["planning"] : []), "contacts"];
   useEffect(() => { if (!tabs.includes(tab)) setTab(tabs[0] ?? ""); }, [tabs.join(","), tab]);
   useEffect(() => {
     let cancelled = false; setLoading(true); setError(""); setStudents([]); setSelected(null);
@@ -77,18 +74,15 @@ function PortalWorkspace({ platform, business }: { platform: Api; business: Busi
   if (loading) return <Empty>Loading your shared student records…</Empty>;
   return <>
     <Notice error={error} />
-    {trackingAllowed && activityError && <p role="status" className="crm-helper">{activityError}</p>}
     {!selected ? <Empty><h2>No student record is shared with this account.</h2><p>Use the invitation from your tutor and accept it while signed in with the invited email.</p><button onClick={() => setRevision((n) => n + 1)}>Refresh access</button></Empty> : <>
       <div className="portal-welcome"><span className="portal-photo">{selected.photo ? <img src={selected.photo} alt="" /> : String(selected.displayName || "?")[0]}</span><div><h1>{selected.displayName}</h1><p className="muted">Your learning space with {business.name}.</p></div></div>
       <div className="portal-student-switch">{students.length > 1 && <label>Student<select aria-label="Choose shared student" value={selected.id} onChange={(e) => { const next = students.find((student) => student.id === e.target.value); if (next) { setSelected(next); const url = new URL(window.location.href); url.searchParams.set("student", next.id); window.history.replaceState(null, "", url); } }}>{students.map((student) => <option value={student.id} key={student.id}>{student.displayName}</option>)}</select></label>}<span className="tag">{grants.find((grant) => grant.studentId === selected.id)?.relationship === "guardian" ? "Guardian access" : "Student access"}</span><button onClick={() => setRevision((n) => n + 1)}>Refresh access</button></div>
       {studentCount > 50 && <div className="portal-pagination"><span>Students {studentOffset + 1}–{Math.min(studentOffset + 50, studentCount)} of {studentCount}</span><button disabled={studentOffset === 0} onClick={() => setStudentOffset((n) => Math.max(0, n - 50))}>Previous students</button><button disabled={studentOffset + 50 >= studentCount} onClick={() => setStudentOffset((n) => n + 50)}>Next students</button></div>}
-      <nav className="portal-tabs" role="tablist" aria-label="Learning sections">{tabs.map((name) => <button key={name} role="tab" aria-selected={tab === name} onClick={() => setTab(name)}>{({ homework: "Homework", resources: "Resources", booking: "Book a session", sessions: "Sessions", finance: "Invoices & payments", progress: "Progress", activity: "Activity", planning: "Planning", contacts: "Contacts" } as Record<string, string>)[name]}</button>)}</nav>
+      <nav className="portal-tabs" role="tablist" aria-label="Learning sections">{tabs.map((name) => <button key={name} role="tab" aria-selected={tab === name} onClick={() => setTab(name)}>{({ homework: "Homework", resources: "Resources", booking: "Book a session", sessions: "Sessions", planning: "Planning", contacts: "Contacts" } as Record<string, string>)[name]}</button>)}</nav>
       {tabs.includes(tab) && ["homework", "resources"].includes(tab) && <PortalLearning key={`${business.id}:${selected.id}:${tab}`} api={api} businessId={business.id} studentId={selected.id} resourcesOnly={tab === "resources"} canSubmit={hasPermission(business, "learning.write")} />}
       {tabs.includes(tab) && tab === "booking" && <PortalBooking api={api} studentId={selected.id} />}
       {tabs.includes(tab) && tab === "sessions" && <PortalSessions api={api} studentId={selected.id} />}
-      {tabs.includes(tab) && tab === "finance" && <StudentFinance api={api} business={business} studentId={selected.id} />}
-      {tabs.includes(tab) && ["progress", "activity"].includes(tab) && <StudentReporting api={api} business={business} studentId={selected.id} month={month} onMonthChange={setMonth} activityOnly={tab === "activity"} />}
-      {tabs.includes(tab) && tab === "planning" && <StudentBoards key={selected.id} api={api} business={business} studentId={selected.id} />}
+      {tabs.includes(tab) && tab === "planning" && <StudentBoards key={selected.id} api={api} business={business} studentId={selected.id} student={selected} />}
       {tab === "contacts" && <div className="portal-grid">{selected.contacts?.map((contact: Row) => <article className="portal-card" key={contact.id}><h3>{contact.displayName}</h3><span className="tag">{({ student: "Student", self: "Student", parent: "Parent", guardian: "Guardian", sponsor: "Sponsor / payer", other: "Other" } as Record<string, string>)[contact.relationship] ?? contact.relationship}</span>{contact.isPrimary && <span className="tag">Primary contact</span>}{contact.emails?.map((email: Row) => <p key={email.id}>{email.value}{email.isPrimary ? " · primary email" : ""}</p>)}{contact.phones?.map((phone: Row) => <p key={phone.id}>{phone.value}{phone.isPrimary ? " · primary phone" : ""}</p>)}</article>)}</div>}
       {!tabs.length && <Empty>Your tutor has not enabled learning or booking features in this space.</Empty>}
     </>}

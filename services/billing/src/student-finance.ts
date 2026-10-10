@@ -1,5 +1,5 @@
 import { Controller, Get, Inject, Injectable, Query, UnprocessableEntityException, type OnModuleInit } from '@nestjs/common';
-import { CurrentContext, Database, EventBus, Permissions, StudentScoped, assertStudentAccess, parseBody } from '@palladium/service-kit';
+import { CurrentContext, Database, EventBus, Permissions, Roles, StudentScoped, assertStudentAccess, parseBody } from '@palladium/service-kit';
 import type { RequestContext } from '@palladium/contracts';
 import { z } from 'zod';
 import { invoice } from './billing.js';
@@ -60,6 +60,7 @@ export class StudentFinanceService implements OnModuleInit {
 }
 
 @Controller('v1/portal/finance')
+@Roles('owner', 'admin', 'tutor')
 @StudentScoped()
 @Permissions('billing.read')
 export class StudentFinanceController {

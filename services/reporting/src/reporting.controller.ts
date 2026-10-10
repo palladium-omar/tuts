@@ -15,6 +15,7 @@ export class ReportingController {
     private readonly reconciliation: ReconcileService) {
     }
     @Post('summaries')
+    @Roles('owner', 'admin', 'tutor')
     @Permissions('reporting.read')
     summaries(
     @CurrentContext()
@@ -25,6 +26,7 @@ export class ReportingController {
         return this.reports.summaries(ctx, v.studentIds, v, v.includeFinancial);
     }
     @Get('students/:id/summary')
+    @Roles('owner', 'admin', 'tutor')
     @Permissions('reporting.read')
     async summary(
     @CurrentContext()
@@ -39,6 +41,7 @@ export class ReportingController {
         };
     }
     @Post('students/:id/reconcile')
+    @Roles('owner', 'admin', 'tutor')
     @Permissions('reporting.read', 'reporting.write')
     reconcile(
     @CurrentContext()
@@ -63,6 +66,7 @@ export class ReportingController {
         return this.reports.activity(ctx, parseBody(activityBody, body));
     }
     @Get('students/:id/activity')
+    @Roles('owner', 'admin', 'tutor')
     @Permissions('reporting.read')
     history(
     @CurrentContext()
