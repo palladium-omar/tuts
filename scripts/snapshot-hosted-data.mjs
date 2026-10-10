@@ -1,6 +1,6 @@
 // Private, lossless row archive before additive migrations. This captures the
 // current deployed migration sources and catalog definitions alongside data.
-// Temporary SELECT grants live only inside a rolled-back transaction.
+// Table owners bypass forced RLS only inside a rolled-back, isolated transaction.
 import { readFile, writeFile, mkdir, chmod } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -21,8 +21,7 @@ try {
  for (const service of serviceNames.filter(name => secrets.databaseUrls[name])) {
   phase = service;
   const target = new URL(secrets.databaseUrls[service]);
-  const url = new URL(secrets.adminDatabaseUrl);
-  url.pathname = target.pathname;
+  const url = new URL(target);
   url.searchParams.set('sslmode', 'verify-full');
   if (url.hostname.includes('-pooler')) throw new Error('direct');
   const client = new pg.Client({ connectionString: url.toString(), connectionTimeoutMillis: 15000 });
@@ -31,20 +30,25 @@ try {
   try {
    const socket = client.connection.stream;
    if (!socket.encrypted || !socket.authorized || checkServerIdentity(url.hostname, socket.getPeerCertificate())) throw new Error('tls');
-   const adminRole = (await client.query('SELECT current_user AS role,rolbypassrls FROM pg_roles WHERE rolname=current_user')).rows[0];
-   if (!adminRole.rolbypassrls) throw new Error('bypass');
+   const role = (await client.query('SELECT current_user AS role,rolbypassrls,rolsuper FROM pg_roles WHERE rolname=current_user')).rows[0];
+   if (role.rolbypassrls || role.rolsuper || role.role !== decodeURIComponent(target.username)) throw new Error('ordinary service owner required');
    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
    await client.query("SET LOCAL timezone='UTC'; SET LOCAL extra_float_digits=3; SET LOCAL lock_timeout='15s'; SET LOCAL statement_timeout='120s'");
-   await client.query(`SET LOCAL ROLE ${quote(decodeURIComponent(target.username))}`);
-   await client.query(`GRANT SELECT ON ALL TABLES IN SCHEMA public TO ${quote(adminRole.role)}`);
-   await client.query(`GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO ${quote(adminRole.role)}`);
-   await client.query('RESET ROLE');
    const serviceDir = join(directory, service); await mkdir(serviceDir, {mode:0o700});
+   phase = `${service} catalog capture`;
    const schema = await metadata(client);
    schema.sequences = (await client.query("SELECT sequencename,start_value,min_value,max_value,increment_by,cycle,cache_size,last_value::text FROM pg_sequences WHERE schemaname='public'")).rows;
    schema.roles = (await client.query('SELECT current_database() database,current_user role,version() version')).rows;
+   // Capture original RLS metadata first. ACCESS EXCLUSIVE table locks and the
+   // rollback keep temporary owner visibility isolated from other sessions.
+   phase = `${service} isolated owner snapshot`;
+   const ownership = await client.query("SELECT c.relname,pg_get_userbyid(c.relowner)=current_user owned FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind IN ('r','p')");
+   if (ownership.rows.some(row => !row.owned)) throw new Error('table ownership differs');
+   for (const table of schema.tables.map(JSON.parse)) if (table.force_rls)
+     await client.query(`ALTER TABLE public.${quote(table.name)} NO FORCE ROW LEVEL SECURITY`);
    await save(join(serviceDir, 'catalog.json'), schema);
    const tables = {};
+   phase = `${service} row capture`;
    for (const row of schema.tables.map(JSON.parse)) {
     const rows = (await client.query(`SELECT to_jsonb(t)::text AS json FROM public.${quote(row.name)} t`)).rows.map(r => r.json).sort();
     const data = rows.map(r => r+'\n').join('');

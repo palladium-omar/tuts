@@ -165,7 +165,9 @@ Use `cloudflare.mjs init` to add missing credentials, build/bundle before pausin
 then pause ingress/cron/queues with `cloudflare-maintenance.mjs pause`.
 `snapshot-hosted-data.mjs --writers-frozen` archives lossless rows, applied
 migrations and schema metadata privately before additive schema migrations.
-It uses administrator read grants only inside transactions that are rolled back.
+It captures original RLS metadata, then temporarily permits table-owner reads
+inside isolated transactions that are rolled back. Original forced RLS is restored
+before connections close; live writers must stay paused.
 This is a recovery archive, not an automatically tested rollback. Archive files
 contain personal data and stay ignored under `.cloudflare/recovery` (0600/0700).
 
