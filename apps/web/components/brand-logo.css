@@ -1,0 +1,4 @@
+.brand-logo { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; vertical-align: middle; }
+.brand-logo img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.brand-logo-commonapp { background: #143b51; border-radius: 6px; padding: 5px; box-sizing: border-box; }
+.connector-icon:has(.brand-logo) { background: #fff; width: auto; min-width: 64px; height: 58px; padding: 8px; }

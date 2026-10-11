@@ -5,13 +5,20 @@ import { DatePicker } from "../components/date-picker";
 import { zonedDateInput, zonedDateInstant } from "../lib/zoned-date";
 import { Modal, Notice } from "../components/shared";
 
-export function publicLink(value: string) { try { const url = new URL(value); return url.protocol === "https:" && !url.username && !url.password ? url.href : null; } catch { return null; } }
-export function deadlineTime(deadline: Row) { try { return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short", timeZone: deadline.timeZone }).format(new Date(deadline.dueAt)); } catch { return date(deadline.dueAt); } }
+import { publicLink, deadlineTime, deadlinePreviewTime, deadlineCaption } from "../lib/student-board-presentation";
+export { publicLink, deadlineTime, deadlinePreviewTime, deadlineCaption } from "../lib/student-board-presentation";
+
 export function DeadlineLabel({ deadline }: { deadline?: Row | null }) {
   if (!deadline) return null;
-  let when = "Date needs confirmation";
-  if (deadline.dueAt) when = deadlineTime(deadline);
-  return <div className="student-board-banner"><strong>{when}</strong><br />{deadline.timeZone} · {({ verified: "Verified in template source review", requires_confirmation: "Requires confirmation", user_set: "Personal date" } as Record<string, string>)[deadline.status] ?? "Requires confirmation"}{deadline.verifiedAt && <><br />Source reviewed {date(deadline.verifiedAt)}</>}{deadline.round && <><br />Round: {deadline.round}</>}{deadline.applicability && <p>{deadline.applicability}</p>}{deadline.sourceUrls?.map((url: string) => publicLink(url) && <a className="student-template-source" key={url} href={url} target="_blank" rel="noopener noreferrer">Official source ↗</a>)}</div>;
+  const when = deadline.dueAt ? deadlinePreviewTime(deadline) : "Date needs confirmation";
+  const round = deadline.round ? ({ ed_ea: "Early decision / Early action", regular_decision: "Regular decision", equal_consideration: "Equal consideration", october: "October deadline" } as Record<string, string>)[deadline.round] ?? String(deadline.round).replaceAll("_", " ").replace(/\b\w/g, letter => letter.toUpperCase()) : "";
+  return <div className="student-board-banner"><strong>{deadlineCaption(deadline)} · {when}</strong>
+    <details className="planning-deadline-details"><summary>Source & deadline details</summary>
+      <p>{deadline.timeZone}{deadline.status === "requires_confirmation" ? " · Confirm the date and applicability" : ""}{deadline.verifiedAt ? ` · Source reviewed ${date(deadline.verifiedAt)}` : ""}</p>
+      {round && <p>Round: {round}</p>}{deadline.applicability && <p>{deadline.applicability}</p>}
+      {deadline.sourceUrls?.map((url: string) => publicLink(url) && <a className="student-template-source" key={url} href={url} target="_blank" rel="noopener noreferrer">Official source ↗</a>)}
+    </details>
+  </div>;
 }
 
 type CardProps = { api: Api; business: Business; studentId: string; board: Row; columns: Row[]; card: Row; canWrite: boolean; onClose: () => void; onSaved: () => Promise<void> };
@@ -51,9 +58,9 @@ export function StudentBoardCard(props: CardProps) {
       {current.description && <p className="planning-task-description">{current.description}</p>}
       {current.deadline && <DeadlineLabel deadline={current.deadline} />}
       {checklist.length > 0 && <section className="planning-task-checklist-section"><div className="planning-task-section-title"><h3>Your checklist</h3><span>{completed} of {checklist.length}</span></div><progress value={completed} max={checklist.length} aria-label="Checklist progress" />{checklist.map(row => <label className={`planning-task-check${row.done ? " is-complete" : ""}`} key={row.id}><input id={`planning-check-${row.id}`} type="checkbox" checked={row.done} disabled={busy || !canWrite} onChange={event => void tick(row.id, event.target.checked)} /><span>{row.text}</span></label>)}<small role="status">{busy ? "Saving checklist…" : saved || (canWrite ? "Changes save automatically." : "View only")}</small></section>}
-      {references.length > 0 && <section><h3>Documents & resources</h3><div className="planning-task-references">{references.map((row, index) => row.kind === "learning_resource" ? <ResourcePreview key={index} api={api} business={business} allowed={learning} reference={row} /> : publicLink(row.url) && <a className="planning-task-reference" key={index} href={row.url} target="_blank" rel="noopener noreferrer"><span><small>{row.kind === "google_doc" ? "Google Docs essay" : "Reference"}</small><strong>{row.label}</strong></span><span aria-hidden="true">↗</span></a>)}</div>{references.some(row => row.kind === "google_doc") && <p className="crm-helper">Your tutor controls sharing in Google Docs. Ask them for access if the document won't open.</p>}</section>}
+      {references.length > 0 && <section><h3>Documents & resources</h3><div className="planning-task-references">{references.map((row, index) => row.kind === "learning_resource" ? <ResourcePreview key={index} api={api} business={business} allowed={learning} reference={row} /> : publicLink(row.url) && <a className="planning-task-reference" key={index} href={row.url} target="_blank" rel="noopener noreferrer"><span>{row.kind === "google_doc" && <small>Google Docs essay</small>}<strong>{row.label}</strong></span><span aria-hidden="true">↗</span></a>)}</div>{references.some(row => row.kind === "google_doc") && <p className="crm-helper">Your tutor controls sharing in Google Docs. Ask them for access if the document won't open.</p>}</section>}
       {current.learningAssignmentId && learning && <RelatedHomework api={api} id={current.learningAssignmentId} />}
-      <div className="form-actions"><button disabled={busy} onClick={onClose}>Done</button></div>
+      <div className="form-actions"><button disabled={busy} onClick={onClose}>Close task</button></div>
     </div>
   </Modal>;
 }

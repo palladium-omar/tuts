@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { date, errorMessage, gateway, type Api, type Row } from "../lib/api";
 import { Empty, Modal, Notice } from "../components/shared";
+import { BrandLogo } from "../components/brand-logo";
 import "./setup-ux.css";
 const names: Record<string, string> = {
   calendly: "Calendly",
@@ -237,13 +238,7 @@ export function Connectors({
         {providers.map((p) => (
           <section className="panel connector-card" key={p}>
             <div className={`connector-icon ${p}`}>
-              {p === "calendly" ? (
-                "C"
-              ) : p === "calcom" ? (
-                "Cal"
-              ) : (
-                <Plug size={25} />
-              )}
+              {p === "calendly" || p === "calcom" ? <BrandLogo brand={p} size={38} /> : <Plug size={25} />}
             </div>
             <h3>{names[p]}</h3>
             <p className="muted">{descriptions[p]}</p>

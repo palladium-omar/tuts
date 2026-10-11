@@ -17,6 +17,17 @@ export type Api = (
   key?: string,
   options?: { signal?: AbortSignal; fresh?: boolean },
 ) => Promise<any>;
+/** HTTP failures retain status separately from their user-facing message. */
+export class ApiError extends Error {
+  constructor(message: string, public readonly status: number, public readonly code?: string) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+export function isAuthenticationRequired(error: unknown): error is ApiError {
+  return error instanceof ApiError && error.status === 401;
+}
+
 export const gateway = (
   process.env.NEXT_PUBLIC_GATEWAY_URL ?? "http://localhost:8080"
 ).replace(/\/$/, "");
@@ -94,9 +105,12 @@ export function createApi(businessId?: string): Api {
           data.error?.message ??
           data.message ??
           `Request failed (${response.status})`;
-        throw new Error(
+        const code = data.error?.code ?? data.code;
+        throw new ApiError(
           (Array.isArray(message) ? message.join(". ") : String(message)) +
             supportReference(response),
+          response.status,
+          typeof code === "string" ? code : undefined,
         );
       }
       if (mutatesWorkspace) {

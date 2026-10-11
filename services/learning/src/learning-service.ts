@@ -1,4 +1,5 @@
 import { Inject, Injectable, ConflictException, NotFoundException, StreamableFile } from '@nestjs/common';
+import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
 import type { Response } from 'express';
 import type { PoolClient } from 'pg';
@@ -62,6 +63,24 @@ export class LearningService {
             type: 'learning.resource-created.v1', producer: 'learning', businessId: ctx.businessId, correlationId: ctx.requestId, data: {
                 resourceId: row.id, studentId: row.client_id, clientId: row.client_id, kind: row.kind, revision: row.revision, assignmentId: row.submission_assignment_id
             }
+        });
+    }
+    async overview(ctx: RequestContext, query: unknown) {
+        const input = parseBody(z.object({studentId: z.uuid()}).strict(), query);
+        return this.db.withTenant(ctx.businessId, async tx => {
+            const studentId = await authorizedStudent(tx, ctx, input.studentId);
+            const values = [ctx.businessId, studentId];
+            const counts = (await tx.query(`SELECT count(*) AS total,
+                count(*) FILTER (WHERE status IN ('assigned','needs_revision')) AS pending,
+                count(*) FILTER (WHERE status='submitted') AS submitted,
+                count(*) FILTER (WHERE status='completed') AS completed,
+                count(*) FILTER (WHERE status IN ('assigned','needs_revision') AND due_at<now()) AS overdue
+                FROM assignments WHERE business_id=$1 AND client_id=$2`, values)).rows[0];
+            const rows = (await tx.query(`SELECT id,title,status,due_at FROM assignments
+                WHERE business_id=$1 AND client_id=$2 AND status IN ('assigned','needs_revision')
+                ORDER BY due_at ASC NULLS LAST,created_at,id LIMIT 8`, values)).rows;
+            return {summary: Object.fromEntries(Object.entries(counts).map(([key,value]) => [key,Number(value)])),
+                homework: rows.map(row => ({id:row.id,title:row.title,status:row.status,dueAt:row.due_at?.toISOString()??null})),limit:8};
         });
     }
     async listAssignments(ctx: RequestContext, query: unknown, portal = false) {

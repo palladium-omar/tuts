@@ -5,7 +5,10 @@ import type {PoolClient} from 'pg';
 import {createHash,randomUUID} from 'node:crypto';
 import {z} from 'zod';
 import * as s from './schemas.js';
-import {builtInTemplates,cycleForSystemKey,templatesForCycle,type TemplateDefinition} from './templates.js';
+import {builtInTemplates,cycleForSystemKey,milestoneTemplatesForCycle,templatesForCycle,type TemplateDefinition} from './templates.js';
+import {overviewSql} from './overview.js';
+import {sameDeadline} from './deadline-comparison.js';
+import {mergeTemplateResources} from './template-resources.js';
 type Row=Record<string,any>;
 const scoped=(ctx:RequestContext)=>ctx.accessScope==='students'||['student','parent'].includes(ctx.role);
 const administrator=(ctx:RequestContext)=>!scoped(ctx)&&['owner','admin'].includes(ctx.role);
@@ -52,7 +55,7 @@ export class PlanningService {
   }catch(error){if(error instanceof NotFoundException||error instanceof ForbiddenException)throw error;throw new ServiceUnavailableException('Student validation is unavailable');}
  }
  private async seed(tx:PoolClient,ctx:RequestContext,cycle?:number) {
-  const templates=cycle&&cycle>2031?[...builtInTemplates,...templatesForCycle(cycle)]:builtInTemplates;
+  const templates=cycle&&cycle>2031?[...builtInTemplates,...milestoneTemplatesForCycle(cycle),...templatesForCycle(cycle)]:builtInTemplates;
   // One tenant-scoped insert per request, regardless of the number of releases.
   // Existing versions remain immutable and previously-created boards untouched.
   await tx.query(`INSERT INTO planning_templates(business_id,template_key,version,name,definition,system)
@@ -79,6 +82,14 @@ export class PlanningService {
    const definition:TemplateDefinition={...input,version,verifiedAt:null,cards:input.cards.map(card=>({...card,deadline:s.enteredDeadline(card.deadline)}))};
    const row=(await tx.query(`INSERT INTO planning_templates(business_id,template_key,version,name,definition,created_by) VALUES($1,$2,$3,$4,$5,$6) RETURNING *`,[ctx.businessId,input.key,version,input.name,JSON.stringify(definition),ctx.sub])).rows[0];
    await emitEvent(tx,{type:'planning.template-published.v1',producer:'planning',businessId:ctx.businessId,correlationId:ctx.requestId,data:{templateKey:input.key,version}});return {item:this.templateItem(row)};
+  });
+ }
+ async overview(ctx:RequestContext,query:z.infer<typeof s.overviewQuerySchema>) {
+  assertStudentAccess(ctx,query.studentId);
+  return this.db.withTenant(ctx.businessId,async tx=>{
+   const studentId=await this.canonical(tx,query.studentId);assertStudentAccess(ctx,studentId);
+   const result=(await tx.query(overviewSql,[studentId])).rows[0];
+   return {studentId,dueSoonDays:7,...result};
   });
  }
  async boards(ctx:RequestContext,query:z.infer<typeof s.listSchema>) {
@@ -190,28 +201,41 @@ export class PlanningService {
   const {definition}=await this.template(tx,board.template_key,version);if(definition.cycle!==board.applicability?.cycle||definition.country!==board.applicability?.country||definition.round!==board.applicability?.round||definition.program!==board.applicability?.program||definition.applicantCategory!==board.applicability?.applicantCategory||(definition.applicantCountries.length&&!definition.applicantCountries.includes(board.applicability?.applicantCountry)))throw new ConflictException('New template applicability requires a new board');
   const rows=(await tx.query('SELECT * FROM planning_cards WHERE board_id=$1 AND archived_at IS NULL',[id])).rows;
   const columns=(await tx.query('SELECT * FROM planning_columns WHERE board_id=$1 ORDER BY position,id LIMIT 30',[id])).rows;
-  const suggestions=rows.filter(row=>row.template_card_key&&definition.cards.some(card=>card.key===row.template_card_key)).map(row=>({cardId:row.id,expectedRevision:Number(row.revision),templateCardKey:row.template_card_key,currentDeadline:row.deadline,proposedDeadline:definition.cards.find(card=>card.key===row.template_card_key)!.deadline,preserveUserEdit:Boolean(row.deadline_edited)}));
+  const suggestions=rows.filter(row=>row.template_card_key&&definition.cards.some(card=>card.key===row.template_card_key)).map(row=>({cardId:row.id,expectedRevision:Number(row.revision),templateCardKey:row.template_card_key,currentDeadline:row.deadline,proposedDeadline:definition.cards.find(card=>card.key===row.template_card_key)!.deadline,preserveUserEdit:Boolean(row.deadline_edited)})).filter(suggestion=>!sameDeadline(suggestion.currentDeadline,suggestion.proposedDeadline));
   const addedCards=definition.cards.filter(card=>!rows.some(row=>row.template_card_key===card.key)).map(card=>({...card,
    destinationColumnId:(columns.find(column=>column.name===definition.columns[card.columnIndex])??columns[card.columnIndex]??columns[0])?.id??null}));
-  return {board,definition,suggestions,addedCards,rows};
+  const resourceSuggestions=rows.filter(row=>row.template_card_key&&definition.cards.some(card=>card.key===row.template_card_key)).map(row=>{
+   const proposed=definition.cards.find(card=>card.key===row.template_card_key)!;
+   return {cardId:row.id,expectedRevision:Number(row.revision),templateCardKey:row.template_card_key,currentReferences:row.resource_references??[],proposedReferences:proposed.references,currentChecklist:row.checklist??[],proposedChecklist:proposed.checklist};
+  }).filter(suggestion=>mergeTemplateResources(suggestion.currentReferences,suggestion.currentChecklist,suggestion.proposedReferences,suggestion.proposedChecklist).changed);
+  return {board,definition,suggestions,resourceSuggestions,addedCards,rows};
  }
- async reviewTemplate(ctx:RequestContext,id:string,version:number) {return this.db.withTenant(ctx.businessId,async tx=>{const {board,definition,suggestions,addedCards}=await this.review(tx,ctx,id,version);return {board:boardItem(board),templateVersion:definition.version,suggestions,addedCards,automaticApply:false};});}
+ async reviewTemplate(ctx:RequestContext,id:string,version:number) {return this.db.withTenant(ctx.businessId,async tx=>{const {board,definition,suggestions,resourceSuggestions,addedCards}=await this.review(tx,ctx,id,version);return {board:boardItem(board),templateVersion:definition.version,suggestions,resourceSuggestions,addedCards,automaticApply:false};});}
  async applyTemplate(ctx:RequestContext,id:string,input:z.infer<typeof s.templateApplySchema>) {
-  return this.db.withTenant(ctx.businessId,async tx=>{const {board,definition,suggestions,addedCards,rows}=await this.review(tx,ctx,id,input.version);this.expect(board.revision,input.expectedRevision,'Board');
+  return this.db.withTenant(ctx.businessId,async tx=>{const {board,definition,suggestions,resourceSuggestions,addedCards,rows}=await this.review(tx,ctx,id,input.version);this.expect(board.revision,input.expectedRevision,'Board');
    const selected=new Set(input.cardIds);if(selected.size!==input.cardIds.length||input.cardIds.some(id=>!suggestions.some(row=>row.cardId===id)))throw new BadRequestException('Select existing template cards');
+   const resourceIds=input.resourceCardIds??[],resourcesSelected=new Set(resourceIds);
+   if(resourcesSelected.size!==resourceIds.length||resourceIds.some(id=>!rows.some(row=>row.id===id&&definition.cards.some(card=>card.key===row.template_card_key))))throw new BadRequestException('Select existing resource template cards');
    const selectedKeys=input.addedCardKeys??[],addKeys=new Set(selectedKeys);
    if(addKeys.size!==selectedKeys.length||selectedKeys.some(key=>!definition.cards.some(card=>card.key===key)))throw new BadRequestException('Select existing template task keys');
    const additions=addedCards.filter(card=>addKeys.has(card.key));
    if(rows.length+additions.length>500)throw new ConflictException('A board supports up to 500 active cards');
    if(additions.some(card=>!card.destinationColumnId))throw new ConflictException('Add a board column before adding template tasks');
    const updated:Row[]=[];for(const suggestion of suggestions.filter(row=>selected.has(row.cardId))){if(suggestion.preserveUserEdit)continue;const row=(await tx.query('UPDATE planning_cards SET deadline=$2,revision=revision+1,updated_at=now() WHERE id=$1 RETURNING *',[suggestion.cardId,JSON.stringify(suggestion.proposedDeadline)])).rows[0];updated.push(row);}
+   for(const suggestion of resourceSuggestions.filter(row=>resourcesSelected.has(row.cardId))){
+    const merged=mergeTemplateResources(suggestion.currentReferences,suggestion.currentChecklist,suggestion.proposedReferences,suggestion.proposedChecklist);
+    if(!merged.changed)continue;
+    if(merged.references.length>30||merged.checklist.length>100)throw new ConflictException('Resource update exceeds card limits; review this card manually');
+    const row=(await tx.query('UPDATE planning_cards SET resource_references=$2,checklist=$3,revision=revision+1,updated_at=now() WHERE id=$1 RETURNING *',[suggestion.cardId,JSON.stringify(merged.references),JSON.stringify(merged.checklist)])).rows[0];
+    const prior=updated.findIndex(item=>item.id===row.id);if(prior>=0)updated[prior]=row;else updated.push(row);
+   }
    const added:Row[]=[];
    for(const card of additions){
     const position=Math.min(1e9,Math.max(-1,...[...rows,...added].filter(row=>row.column_id===card.destinationColumnId).map(row=>Number(row.position)))+1);
     added.push(await this.insertCard(tx,ctx,board,{...card,columnId:card.destinationColumnId,position,templateCardKey:card.key}));
    }
-   // Date updates are explicit; titles, checklists, resources, custom cards and
-   // user-edited dates are never replaced. Selected additions append under the
+   // Date and additive resource updates are explicit; manual content, custom cards
+   // and user-edited dates are preserved. Selected additions append under the
    // parent lock; a fresh-revision retry skips keys already present on the board.
    await tx.query('UPDATE planning_boards SET template_version=$2 WHERE id=$1',[id,definition.version]);const changed=await this.bump(tx,ctx,board);for(const card of [...updated,...added])await cardEvent(tx,ctx,changed,card);return {board:boardItem(changed),cards:[...updated,...added].map(cardItem),addedCards:added.map(cardItem),alreadyPresentCardKeys:selectedKeys.filter(key=>rows.some(row=>row.template_card_key===key)),preservedCardIds:suggestions.filter(row=>selected.has(row.cardId)&&row.preserveUserEdit).map(row=>row.cardId)};
   });

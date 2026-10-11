@@ -21,6 +21,9 @@ export class PlanningController {
  @Post('templates/:key/instantiate') @Permissions('planning.write','clients.read')
  instantiate(@CurrentContext() ctx:RequestContext,@Param('key') key:string,@Body() body:unknown,@Headers('authorization') authorization:string) {return this.service.instantiate(ctx,parseBody(s.templateKeySchema,key),parseBody(s.instantiateSchema,body),authorization);}
  @Header('Cache-Control','no-store')
+ @Get('overview') @Permissions('planning.read')
+ overview(@CurrentContext() ctx:RequestContext,@Query() query:unknown) {return this.service.overview(ctx,parseBody(s.overviewQuerySchema,query));}
+ @Header('Cache-Control','no-store')
  @Get('boards') @Permissions('planning.read')
  boards(@CurrentContext() ctx:RequestContext,@Query() query:unknown) {return this.service.boards(ctx,parseBody(s.listSchema,query));}
  @Header('Cache-Control','no-store')

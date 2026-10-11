@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
-import { GraduationCap, LogOut } from "lucide-react";
+import { GraduationCap, LogOut, RefreshCw } from "lucide-react";
 import { hasPermission } from "@palladium/contracts";
-import { clearApi, createApi, date, errorMessage, type Api, type Business, type Row } from "../../lib/api";
+import { clearApi, createApi, date, errorMessage, isAuthenticationRequired, type Api, type Business, type Row } from "../../lib/api";
 import { Empty, Notice } from "../../components/shared";
+import { BrandLogo } from "../../components/brand-logo";
 import { Registration } from "../../features/registration";
+import { PortalOverview } from "./portal-overview";
 import { PortalLearning } from "./portal-learning";
 import { StudentBoards } from "../../features/student-boards";
 import { clearHomeworkDrafts } from "../../lib/homework-draft";
@@ -34,10 +36,13 @@ export default function StudentPortal() {
         setBusinesses(allowed); const requested = new URLSearchParams(window.location.search).get("business");
         setBusiness(allowed.find((item: Business) => item.id === requested) ?? allowed.find((item: Business) => ["student", "parent"].includes(item.role)) ?? allowed[0] ?? null);
       }
-    } catch (e) { setError(errorMessage(e)); } finally { setLoading(false); }
+    } catch (e) {
+      if (isAuthenticationRequired(e)) { setSession(null); setBusinesses([]); setBusiness(null); }
+      else setError(errorMessage(e));
+    } finally { setLoading(false); }
   }
   useEffect(() => { void load(); }, [platform]);
-  function choose(selected: Business) { setBusiness(selected); const url = new URL(window.location.href); url.searchParams.set("business", selected.id); url.searchParams.delete("student"); url.searchParams.delete("board"); window.history.replaceState(null, "", url); }
+  function choose(selected: Business) { setBusiness(selected); const url = new URL(window.location.href); url.searchParams.set("business", selected.id); url.searchParams.delete("student"); url.searchParams.delete("board"); url.searchParams.delete("card"); window.history.replaceState(null, "", url); }
   async function signOut() { try { await platform("platform/auth/sign-out", "POST", {}); try { clearHomeworkDrafts(window.sessionStorage, session?.user?.id ?? ""); } catch {} setSession(null); setBusiness(null); setBusinesses([]); } catch (e) { setError(errorMessage(e)); } }
   if (loading) return <main className="loading-screen"><GraduationCap size={32} /><p>Opening your learning space…</p></main>;
   if (!session) return <><Notice error={error} /><Registration api={platform} audience="student" onSignedIn={load} /></>;
@@ -53,14 +58,14 @@ function PortalWorkspace({ platform, business, authorId }: { platform: Api; busi
   const capabilityKey = JSON.stringify([authorId,business.role,business.permissions,business.entitlements,business.accessScope,business.studentIds]);
   const api = useMemo(() => createApi(business.id), [business.id,capabilityKey]);
   useEffect(() => () => clearApi(api), [api]);
-  const [grants, setGrants] = useState<Row[]>([]), [students, setStudents] = useState<Row[]>([]), [selected, setSelected] = useState<Row | null>(null), [studentOffset, setStudentOffset] = useState(0), [tab, setTab] = useState(() => typeof window === "undefined" ? "homework" : new URLSearchParams(window.location.search).get("section") ?? "homework"), [loading, setLoading] = useState(true), [error, setError] = useState(""), [revision, setRevision] = useState(0);
+  const [grants, setGrants] = useState<Row[]>([]), [students, setStudents] = useState<Row[]>([]), [selected, setSelected] = useState<Row | null>(null), [studentOffset, setStudentOffset] = useState(0), [tab, setTab] = useState(() => typeof window === "undefined" ? "overview" : new URLSearchParams(window.location.search).get("section") ?? "overview"), [loading, setLoading] = useState(true), [error, setError] = useState(""), [revision, setRevision] = useState(0);
   const diagnosticView = useRef(tab);
   diagnosticView.current = portalDiagnosticView(tab);
   useEffect(() => installClientDiagnostics(api, () => diagnosticView.current), [api]);
   const available = (domain: string) => business.entitlements.includes(domain) && hasPermission(business, `${domain}.read`);
   const trackingAllowed = business.role === "student" && grants.some((grant) => grant.studentId === selected?.id && grant.relationship === "student") && business.entitlements.includes("reporting") && hasPermission(business, "reporting.write");
   useActiveTime(api, selected?.id, trackingAllowed);
-  const tabs = [...(available("learning") ? ["homework", "resources"] : []), ...(available("integrations") ? ["booking"] : []), ...(available("scheduling") ? ["sessions"] : []), ...(available("planning") ? ["planning"] : []), "contacts"];
+  const tabs = ["overview",...(available("learning") ? ["homework", "resources"] : []), ...(available("integrations") ? ["booking"] : []), ...(available("scheduling") ? ["sessions"] : []), ...(available("planning") ? ["planning"] : []), "contacts"];
   useEffect(() => { if (!tabs.includes(tab)) setTab(tabs[0] ?? ""); }, [tabs.join(","), tab]);
   useEffect(() => {
     let cancelled = false; setLoading(true); setError(""); setStudents([]); setSelected(null);
@@ -77,20 +82,25 @@ function PortalWorkspace({ platform, business, authorId }: { platform: Api; busi
     loadStudents().catch((e) => { if (!cancelled) setError(errorMessage(e)); }).finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [api, platform, business.id, studentOffset, revision]);
+  useEffect(() => () => clearApi(api), [api, selected?.id]);
   useEffect(() => {
     const restore = () => {
       const query = new URLSearchParams(window.location.search);
-      setTab(query.get("section") ?? "homework");
+      setTab(query.get("section") ?? "overview");
       const student = students.find(row => row.id === query.get("student"));
       if (student) setSelected(student);
     };
     window.addEventListener("popstate", restore);
     return () => window.removeEventListener("popstate", restore);
   }, [students]);
-  function chooseTab(name: string) {
+  function chooseTab(name: string, boardId?: string, cardId?: string) {
     setTab(name);
     const url = new URL(window.location.href);
     url.searchParams.set("section", name);
+    if (selected) url.searchParams.set("student", selected.id);
+    if (boardId) url.searchParams.set("board", boardId);
+    url.searchParams.delete("card");
+    if (boardId && cardId) url.searchParams.set("card", cardId);
     if (url.href !== window.location.href) window.history.pushState(null, "", url);
   }
   function tabKey(event: KeyboardEvent<HTMLButtonElement>, name: string) {
@@ -106,10 +116,11 @@ function PortalWorkspace({ platform, business, authorId }: { platform: Api; busi
     <Notice error={error} />
     {!selected ? <Empty><h2>No student record is shared with this account.</h2><p>Use the invitation from your tutor and accept it while signed in with the invited email.</p><button onClick={() => setRevision((n) => n + 1)}>Refresh access</button></Empty> : <>
       <div className="portal-welcome"><span className="portal-photo">{selected.photo ? <img src={selected.photo} alt="" /> : String(selected.displayName || "?")[0]}</span><div><h1>{selected.displayName}</h1><p className="muted">Your learning space with {business.name}.</p></div></div>
-      <div className="portal-student-switch">{students.length > 1 && <label>Student<select aria-label="Choose shared student" value={selected.id} onChange={(e) => { const next = students.find((student) => student.id === e.target.value); if (next) { setSelected(next); const url = new URL(window.location.href); url.searchParams.set("student", next.id); url.searchParams.delete("board"); window.history.replaceState(null, "", url); } }}>{students.map((student) => <option value={student.id} key={student.id}>{student.displayName}</option>)}</select></label>}<span className="tag">{grants.find((grant) => grant.studentId === selected.id)?.relationship === "guardian" ? "Guardian access" : "Student access"}</span><button onClick={() => setRevision((n) => n + 1)}>Refresh access</button></div>
+      <div className="portal-student-switch">{students.length > 1 && <label>Student<select aria-label="Choose shared student" value={selected.id} onChange={(e) => { const next = students.find((student) => student.id === e.target.value); if (next) { setSelected(next); const url = new URL(window.location.href); url.searchParams.set("student", next.id); url.searchParams.delete("board"); url.searchParams.delete("card"); window.history.replaceState(null, "", url); } }}>{students.map((student) => <option value={student.id} key={student.id}>{student.displayName}</option>)}</select></label>}<span className="tag">{grants.find((grant) => grant.studentId === selected.id)?.relationship === "guardian" ? "Guardian access" : "Student access"}</span><button className="portal-refresh-access" title="Refresh access" aria-label="Refresh access" onClick={() => setRevision((n) => n + 1)}><RefreshCw size={15} /></button></div>
       {studentCount > 50 && <div className="portal-pagination"><span>Students {studentOffset + 1}–{Math.min(studentOffset + 50, studentCount)} of {studentCount}</span><button disabled={studentOffset === 0} onClick={() => setStudentOffset((n) => Math.max(0, n - 50))}>Previous students</button><button disabled={studentOffset + 50 >= studentCount} onClick={() => setStudentOffset((n) => n + 50)}>Next students</button></div>}
-      <nav className="portal-tabs" role="tablist" aria-label="Learning sections">{tabs.map((name) => <button key={name} role="tab" id={`portal-tab-${name}`} aria-controls="portal-section" tabIndex={tab === name ? 0 : -1} aria-selected={tab === name} onKeyDown={event => tabKey(event, name)} onClick={() => chooseTab(name)}>{({ homework: "Homework", resources: "Resources", booking: "Book a session", sessions: "Sessions", planning: "Planning", contacts: "Contacts" } as Record<string, string>)[name]}</button>)}</nav>
+      <nav className="portal-tabs" role="tablist" aria-label="Learning sections">{tabs.map((name) => <button key={name} role="tab" id={`portal-tab-${name}`} aria-controls="portal-section" tabIndex={tab === name ? 0 : -1} aria-selected={tab === name} onKeyDown={event => tabKey(event, name)} onClick={() => chooseTab(name)}>{({ overview: "Overview", homework: "Homework", resources: "Resources", booking: "Book a session", sessions: "Sessions", planning: "Planning", contacts: "Contacts" } as Record<string, string>)[name]}</button>)}</nav>
       <section id="portal-section" role="tabpanel" aria-labelledby={`portal-tab-${tab}`} tabIndex={-1}>
+      {tab === "overview" && <PortalOverview key={`${business.id}:${selected.id}:${capabilityKey}`} api={api} business={business} studentId={selected.id} onNavigate={chooseTab} />}
       {tabs.includes(tab) && ["homework", "resources"].includes(tab) && <PortalLearning key={`${business.id}:${selected.id}:${tab}`} api={api} businessId={business.id} authorId={authorId} studentId={selected.id} resourcesOnly={tab === "resources"} canSubmit={hasPermission(business, "learning.write")} />}
       {tabs.includes(tab) && tab === "booking" && <PortalBooking api={api} studentId={selected.id} />}
       {tabs.includes(tab) && tab === "sessions" && <PortalSessions api={api} studentId={selected.id} />}
@@ -125,7 +136,7 @@ function safeCalUrl(value: unknown) { try { const url = new URL(String(value)); 
 function PortalBooking({ api, studentId }: { api: Api; studentId: string }) {
   const [items, setItems] = useState<Row[]>([]), [loading, setLoading] = useState(true), [error, setError] = useState("");
   useEffect(() => { let cancelled = false; setLoading(true); setItems([]); setError(""); api(`integrations/v1/portal/booking?studentId=${encodeURIComponent(studentId)}`).then((data) => { if (!cancelled) setItems(data.items ?? []); }).catch((e) => { if (!cancelled) setError(errorMessage(e)); }).finally(() => { if (!cancelled) setLoading(false); }); return () => { cancelled = true; }; }, [api, studentId]);
-  return <><Notice error={error} />{loading ? <Empty>Loading your tutor's booking options…</Empty> : !items.length && !error ? <Empty><h3>Booking isn’t available yet.</h3><p>Your tutor has not shared a booking calendar. Contact them to arrange a session.</p></Empty> : <div className="portal-grid">{items.map((item) => { const url = safeCalUrl(item.bookingUrl); if (url && item.prefill?.name) url.searchParams.set("name", item.prefill.name); if (url && item.prefill?.email) url.searchParams.set("email", item.prefill.email); return <article className="portal-card" key={item.id}><h3>{item.displayName}</h3><p>Choose a time using your tutor's Cal.com booking page.</p>{url ? <a className="button primary" href={url.href} target="_blank" rel="noopener noreferrer">Open booking calendar</a> : <p className="crm-helper">Booking link unavailable.</p>}<p className="portal-external-notice">Cal.com manages availability and booking changes. Your name and authorized contact email may be prefilled; changing those fields does not change your portal access.</p><p className="crm-helper">{item.syncAvailable ? "Bookings are synchronized after your tutor associates them with your student record." : "Your tutor may need to link your booking before it appears in your session list."}</p></article>; })}</div>}</>;
+  return <><Notice error={error} />{loading ? <Empty>Loading your tutor's booking options…</Empty> : !items.length && !error ? <Empty><h3>Booking isn’t available yet.</h3><p>Your tutor has not shared a booking calendar. Contact them to arrange a session.</p></Empty> : <div className="portal-grid">{items.map((item) => { const url = safeCalUrl(item.bookingUrl); if (url && item.prefill?.name) url.searchParams.set("name", item.prefill.name); if (url && item.prefill?.email) url.searchParams.set("email", item.prefill.email); return <article className="portal-card" key={item.id}><BrandLogo brand="calcom" size={32} /><h3>{item.displayName}</h3><p>Choose a time using your tutor's Cal.com booking page.</p>{url ? <a className="button primary" href={url.href} target="_blank" rel="noopener noreferrer">Open booking calendar</a> : <p className="crm-helper">Booking link unavailable.</p>}<p className="portal-external-notice">Cal.com manages availability and booking changes. Your name and authorized contact email may be prefilled; changing those fields does not change your portal access.</p><p className="crm-helper">{item.syncAvailable ? "Bookings are synchronized after your tutor associates them with your student record." : "Your tutor may need to link your booking before it appears in your session list."}</p></article>; })}</div>}</>;
 }
 function PortalSessions({ api, studentId }: { api: Api; studentId: string }) {
   const [items, setItems] = useState<Row[]>([]), [total, setTotal] = useState(0), [offset, setOffset] = useState(0), [loading, setLoading] = useState(true), [error, setError] = useState(""), [revision, setRevision] = useState(0);

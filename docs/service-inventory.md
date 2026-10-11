@@ -103,8 +103,9 @@ Local port: 4003. [Service guide](../services/scheduling/README.md).
 | GET | `/v1/class-ledger` | Roles(owner, admin, tutor); StudentScoped; Permissions(scheduling.read) | [ClassLedgerController.list](../services/scheduling/src/class-ledger.ts#L122) |
 | PATCH | `/v1/class-ledger/:source/:id` | Roles(owner, admin, tutor); StudentScoped; Permissions(scheduling.write) | [ClassLedgerController.annotate](../services/scheduling/src/class-ledger.ts#L175) |
 | GET | `/v1/external-sessions` | Roles(owner, admin, tutor); StudentScoped; Permissions(scheduling.read) | [ExternalSessionsController.list](../services/scheduling/src/external-sessions.ts#L228) |
-| GET | `/v1/portal/sessions` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(scheduling.read) | [PortalSessionsController.sessions](../services/scheduling/src/portal-sessions.ts#L62) |
-| GET | `/v1/portal/classes` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(scheduling.read) | [PortalSessionsController.classes](../services/scheduling/src/portal-sessions.ts#L64) |
+| GET | `/v1/portal/overview` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(scheduling.read) | [PortalSessionsController.overview](../services/scheduling/src/portal-sessions.ts#L78) |
+| GET | `/v1/portal/sessions` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(scheduling.read) | [PortalSessionsController.sessions](../services/scheduling/src/portal-sessions.ts#L80) |
+| GET | `/v1/portal/classes` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(scheduling.read) | [PortalSessionsController.classes](../services/scheduling/src/portal-sessions.ts#L82) |
 | GET | `/v1/sessions` | Roles(owner, admin, tutor); StudentScoped; Permissions(scheduling.read) | [SessionsController.list](../services/scheduling/src/sessions.ts#L275) |
 | POST | `/v1/sessions` | Roles(owner, admin, tutor); StudentScoped; Permissions(scheduling.write) | [SessionsController.create](../services/scheduling/src/sessions.ts#L290) |
 | PATCH | `/v1/sessions/:id` | Roles(owner, admin, tutor); StudentScoped; Permissions(scheduling.write) | [SessionsController.update](../services/scheduling/src/sessions.ts#L306) |
@@ -138,14 +139,15 @@ Local port: 4004. [Service guide](../services/learning/README.md).
 | POST | `/v1/resources/upload` | StudentScoped; Roles(owner, admin, tutor); Permissions(learning.write) | [ResourcesController.upload](../services/learning/src/learning.ts#L141) |
 | GET | `/v1/resources/:id/download` | StudentScoped; Roles(owner, admin, tutor); Permissions(learning.read) | [ResourcesController.download](../services/learning/src/learning.ts#L177) |
 | POST | `/v1/resources` | StudentScoped; Roles(owner, admin, tutor); Permissions(learning.write) | [ResourcesController.create](../services/learning/src/learning.ts#L190) |
-| GET | `/v1/portal/assignments` | StudentScoped; Permissions(learning.read) | [PortalLearningController.list](../services/learning/src/portal.controller.ts#L26) |
-| GET | `/v1/portal/assignments/:id` | StudentScoped; Permissions(learning.read) | [PortalLearningController.get](../services/learning/src/portal.controller.ts#L35) |
-| POST | `/v1/portal/assignments/:id/submit` | StudentScoped; Permissions(learning.write) | [PortalLearningController.submit](../services/learning/src/portal.controller.ts#L44) |
-| POST | `/v1/portal/assignments/:id/submission-upload` | StudentScoped; Permissions(learning.write) | [PortalLearningController.upload](../services/learning/src/portal.controller.ts#L55) |
-| GET | `/v1/portal/resources` | StudentScoped; Permissions(learning.read) | [PortalLearningController.resources](../services/learning/src/portal.controller.ts#L73) |
-| GET | `/v1/portal/resources/capabilities` | StudentScoped; Permissions(learning.read) | [PortalLearningController.capabilities](../services/learning/src/portal.controller.ts#L82) |
-| GET | `/v1/portal/resources/:id` | StudentScoped; Permissions(learning.read) | [PortalLearningController.resource](../services/learning/src/portal.controller.ts#L95) |
-| GET | `/v1/portal/resources/:id/download` | StudentScoped; Permissions(learning.read) | [PortalLearningController.download](../services/learning/src/portal.controller.ts#L104) |
+| GET | `/v1/portal/overview` | StudentScoped; Permissions(learning.read) | [PortalLearningController.overview](../services/learning/src/portal.controller.ts#L26) |
+| GET | `/v1/portal/assignments` | StudentScoped; Permissions(learning.read) | [PortalLearningController.list](../services/learning/src/portal.controller.ts#L31) |
+| GET | `/v1/portal/assignments/:id` | StudentScoped; Permissions(learning.read) | [PortalLearningController.get](../services/learning/src/portal.controller.ts#L40) |
+| POST | `/v1/portal/assignments/:id/submit` | StudentScoped; Permissions(learning.write) | [PortalLearningController.submit](../services/learning/src/portal.controller.ts#L49) |
+| POST | `/v1/portal/assignments/:id/submission-upload` | StudentScoped; Permissions(learning.write) | [PortalLearningController.upload](../services/learning/src/portal.controller.ts#L60) |
+| GET | `/v1/portal/resources` | StudentScoped; Permissions(learning.read) | [PortalLearningController.resources](../services/learning/src/portal.controller.ts#L78) |
+| GET | `/v1/portal/resources/capabilities` | StudentScoped; Permissions(learning.read) | [PortalLearningController.capabilities](../services/learning/src/portal.controller.ts#L87) |
+| GET | `/v1/portal/resources/:id` | StudentScoped; Permissions(learning.read) | [PortalLearningController.resource](../services/learning/src/portal.controller.ts#L100) |
+| GET | `/v1/portal/resources/:id/download` | StudentScoped; Permissions(learning.read) | [PortalLearningController.download](../services/learning/src/portal.controller.ts#L109) |
 
 ### Owned schema
 
@@ -292,22 +294,23 @@ Local port: 4009. [Service guide](../services/planning/README.md).
 | GET | `/v1/templates/:key` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.read) | [PlanningController.template](../services/planning/src/planning.controller.ts#L14) |
 | POST | `/v1/templates` | StudentScoped; Roles(owner, admin, tutor, student, parent); Roles(owner, admin, tutor); Permissions(planning.write) | [PlanningController.publish](../services/planning/src/planning.controller.ts#L17) |
 | POST | `/v1/templates/:key/instantiate` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.write, clients.read) | [PlanningController.instantiate](../services/planning/src/planning.controller.ts#L20) |
-| GET | `/v1/boards` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.read) | [PlanningController.boards](../services/planning/src/planning.controller.ts#L23) |
-| POST | `/v1/boards` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.write, clients.read) | [PlanningController.createBoard](../services/planning/src/planning.controller.ts#L26) |
-| GET | `/v1/boards/:id` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.read) | [PlanningController.board](../services/planning/src/planning.controller.ts#L29) |
-| PATCH | `/v1/boards/:id` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.write) | [PlanningController.updateBoard](../services/planning/src/planning.controller.ts#L32) |
-| DELETE | `/v1/boards/:id` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.write) | [PlanningController.deleteBoard](../services/planning/src/planning.controller.ts#L35) |
-| POST | `/v1/boards/:id/columns` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.write) | [PlanningController.createColumn](../services/planning/src/planning.controller.ts#L38) |
-| PATCH | `/v1/boards/:id/columns/:columnId` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.write) | [PlanningController.updateColumn](../services/planning/src/planning.controller.ts#L41) |
-| DELETE | `/v1/boards/:id/columns/:columnId` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.write) | [PlanningController.deleteColumn](../services/planning/src/planning.controller.ts#L44) |
-| GET | `/v1/boards/:id/cards` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.read) | [PlanningController.cards](../services/planning/src/planning.controller.ts#L47) |
-| POST | `/v1/boards/:id/cards` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.write) | [PlanningController.createCard](../services/planning/src/planning.controller.ts#L50) |
-| GET | `/v1/cards/:id` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.read) | [PlanningController.card](../services/planning/src/planning.controller.ts#L53) |
-| PATCH | `/v1/cards/:id` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.write) | [PlanningController.updateCard](../services/planning/src/planning.controller.ts#L56) |
-| POST | `/v1/cards/:id/move` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.write) | [PlanningController.move](../services/planning/src/planning.controller.ts#L59) |
-| DELETE | `/v1/cards/:id` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.write) | [PlanningController.deleteCard](../services/planning/src/planning.controller.ts#L62) |
-| GET | `/v1/boards/:id/template-review` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.read) | [PlanningController.review](../services/planning/src/planning.controller.ts#L65) |
-| POST | `/v1/boards/:id/template-apply` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.write) | [PlanningController.apply](../services/planning/src/planning.controller.ts#L68) |
+| GET | `/v1/overview` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.read) | [PlanningController.overview](../services/planning/src/planning.controller.ts#L23) |
+| GET | `/v1/boards` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.read) | [PlanningController.boards](../services/planning/src/planning.controller.ts#L26) |
+| POST | `/v1/boards` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.write, clients.read) | [PlanningController.createBoard](../services/planning/src/planning.controller.ts#L29) |
+| GET | `/v1/boards/:id` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.read) | [PlanningController.board](../services/planning/src/planning.controller.ts#L32) |
+| PATCH | `/v1/boards/:id` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.write) | [PlanningController.updateBoard](../services/planning/src/planning.controller.ts#L35) |
+| DELETE | `/v1/boards/:id` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.write) | [PlanningController.deleteBoard](../services/planning/src/planning.controller.ts#L38) |
+| POST | `/v1/boards/:id/columns` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.write) | [PlanningController.createColumn](../services/planning/src/planning.controller.ts#L41) |
+| PATCH | `/v1/boards/:id/columns/:columnId` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.write) | [PlanningController.updateColumn](../services/planning/src/planning.controller.ts#L44) |
+| DELETE | `/v1/boards/:id/columns/:columnId` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.write) | [PlanningController.deleteColumn](../services/planning/src/planning.controller.ts#L47) |
+| GET | `/v1/boards/:id/cards` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.read) | [PlanningController.cards](../services/planning/src/planning.controller.ts#L50) |
+| POST | `/v1/boards/:id/cards` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.write) | [PlanningController.createCard](../services/planning/src/planning.controller.ts#L53) |
+| GET | `/v1/cards/:id` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.read) | [PlanningController.card](../services/planning/src/planning.controller.ts#L56) |
+| PATCH | `/v1/cards/:id` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.write) | [PlanningController.updateCard](../services/planning/src/planning.controller.ts#L59) |
+| POST | `/v1/cards/:id/move` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.write) | [PlanningController.move](../services/planning/src/planning.controller.ts#L62) |
+| DELETE | `/v1/cards/:id` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.write) | [PlanningController.deleteCard](../services/planning/src/planning.controller.ts#L65) |
+| GET | `/v1/boards/:id/template-review` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.read) | [PlanningController.review](../services/planning/src/planning.controller.ts#L68) |
+| POST | `/v1/boards/:id/template-apply` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.write) | [PlanningController.apply](../services/planning/src/planning.controller.ts#L71) |
 
 ### Owned schema
 

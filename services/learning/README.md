@@ -176,3 +176,11 @@ external relationships. Valid passive documents still upload. Run
 `node scripts/test-databases.mjs` from the repository root for the local
 ordinary-role suite. Production R2 behavior and full malware scanning require
 separate evidence.
+
+## Student overview aggregate
+
+`GET /v1/portal/overview?studentId=UUID` requires `learning.read` and opts into student scope. The strict query requires a student UUID. Both requested and canonical merged student IDs must be authorized; the entire read runs in the signed business's tenant transaction with forced RLS.
+
+Response: `{summary:{total,pending,submitted,completed,overdue},homework:[{id,title,status,dueAt}],limit:8}`. Totals cover all that student's assignments independently of the eight-item list. `pending` and `homework` include `assigned` and `needs_revision`; `submitted` awaits tutor review; `completed` follows an explicit completion. `overdue` counts only pending assignments whose due timestamp is strictly earlier than the database transaction's current time. Null deadlines are not overdue. Homework sorts by due timestamp ascending (undated last), creation time and ID. Dates return ISO UTC instants; no viewer timezone changes the cutoff.
+
+The aggregate performs a count and a bounded list query after local canonical identity resolution. It does not fetch resource metadata or run one query per homework item. Unknown/no-assignment records return zero counts and an empty list. Authorization errors remain errors for the portal to present independently. See [student overview composition](../../docs/architecture/student-overview.md).

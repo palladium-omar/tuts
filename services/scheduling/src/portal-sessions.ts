@@ -1,5 +1,5 @@
 import {BadRequestException,Controller,Get,Header,Inject,Injectable,Query} from '@nestjs/common';
-import {CurrentContext,Database,Permissions,Roles,StudentScoped,parseBody} from '@palladium/service-kit';
+import {CurrentContext,Database,Permissions,Roles,StudentScoped,parseBody,assertStudentAccess} from '@palladium/service-kit';
 import type {RequestContext} from '@palladium/contracts';
 import type {PoolClient} from 'pg';
 import {z} from 'zod';
@@ -34,6 +34,22 @@ export class PortalSessionsService {
       return {...item,attendeeEmail:undefined,bookingUrl:row.booking_url??null,readOnly:true};
     }),total,limit,offset};
   }
+  async overview(ctx:RequestContext,query:unknown) {
+    const input=parseBody(z.object({studentId:z.uuid()}).strict(),query);
+    assertStudentAccess(ctx,input.studentId);
+    return this.db.withTenant(ctx.businessId,async tx=>{
+      const studentId=await requireStudentScope(tx,ctx,input.studentId);
+      const values=[ctx.businessId,studentId];
+      const counts=(await tx.query(`SELECT count(*) FILTER (WHERE status='completed') AS completed,
+        count(*) FILTER (WHERE status='scheduled' AND ends_at>now()) AS upcoming
+        FROM (${sourceUnion}) s WHERE business_id=$1 AND client_id=$2`,values)).rows[0];
+      const rows=(await tx.query(`SELECT class_id,source,title,starts_at,ends_at FROM (${sourceUnion}) s
+        WHERE business_id=$1 AND client_id=$2 AND status='scheduled' AND ends_at>now()
+        ORDER BY starts_at,source,class_id LIMIT 5`,values)).rows;
+      return {summary:{completed:Number(counts.completed),upcoming:Number(counts.upcoming)},
+        sessions:rows.map(row=>({id:row.class_id,source:row.source,title:row.title,startsAt:new Date(row.starts_at).toISOString(),endsAt:new Date(row.ends_at).toISOString()})),limit:5};
+    });
+  }
   async sessions(ctx:RequestContext,query:unknown) {
     const input=parseBody(range,query);
     return this.db.withTenant(ctx.businessId,async tx=>{
@@ -59,6 +75,8 @@ export class PortalSessionsService {
 @Controller('v1/portal')
 export class PortalSessionsController {
   constructor(@Inject(PortalSessionsService) private readonly service:PortalSessionsService) {}
+  @Get('overview') @Header('Cache-Control','no-store')
+  overview(@CurrentContext() ctx:RequestContext,@Query() query:unknown){return this.service.overview(ctx,query);}
   @Get('sessions') @Header('Cache-Control','no-store')
   sessions(@CurrentContext() ctx:RequestContext,@Query() query:unknown){return this.service.sessions(ctx,query);}
   @Get('classes') @Header('Cache-Control','no-store')

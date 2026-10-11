@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { hasPermission } from "@palladium/contracts";
 import { date, errorMessage, type Api, type Business, type Row } from "../lib/api";
+import { templateBrand } from "../lib/student-board-presentation";
+import { BrandLogo } from "../components/brand-logo";
 import { Empty, Modal, Notice } from "../components/shared";
 import { StudentBoardCard } from "./student-board-card";
 import { StudentBoardTemplates } from "./student-board-template";
@@ -17,6 +19,8 @@ export function StudentBoards({ api, business, studentId, student, persistNaviga
   const allowed = business.entitlements.includes("planning") && hasPermission(business, "planning.read"), canWrite = allowed && hasPermission(business, "planning.write"), canCreate = canWrite && hasPermission(business, "clients.read");
   const [boards, setBoards] = useState<Row[]>([]), [total, setTotal] = useState(0), [offset, setOffset] = useState(0), [boardId, setBoardId] = useState<string | null>(null), [detail, setDetail] = useState<Row | null>(null), [revision, setRevision] = useState(0);
   const [loading, setLoading] = useState(true), [error, setError] = useState(""), [message, setMessage] = useState(""), [boardEditor, setBoardEditor] = useState<Row | null>(null), [columnEditor, setColumnEditor] = useState<Row | null>(null), [cardEditor, setCardEditor] = useState<Row | null>(null), [templates, setTemplates] = useState(false), [templateReview, setTemplateReview] = useState(false);
+  const [linkedCardId, setLinkedCardId] = useState<string | null>(null);
+  const openedCardLink = useRef("");
   const scope = `${business.id}/${studentId}/${boardId ?? "list"}`;
   const activeScope = useRef(scope); activeScope.current = scope;
   const [moveView, setMoveView] = useState<{ scope: string; queue: BoardMoveQueue; state: BoardMoveState } | null>(null);
@@ -27,27 +31,39 @@ export function StudentBoards({ api, business, studentId, student, persistNaviga
   const movesPaused = !!currentMoves?.state.error;
   const structureLocked = movesPending || movesPaused || !!currentMoves?.state.saving;
   const busy = !!boardEditor || !!columnEditor || !!cardEditor || templateReview;
+  function urlCard() {
+    if (!persistNavigation || typeof window === "undefined") return null;
+    const id = new URLSearchParams(window.location.search).get("card");
+    return id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id) ? id : null;
+  }
+  function closeCard() {
+    setCardEditor(null); setLinkedCardId(null);
+    if (!persistNavigation) return;
+    const url = new URL(window.location.href); url.searchParams.delete("card");
+    if (url.href !== window.location.href) window.history.replaceState(null, "", url);
+  }
   function urlBoard() {
     if (!persistNavigation || typeof window === "undefined") return null;
     const id = new URLSearchParams(window.location.search).get("board");
     return id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id) ? id : null;
   }
   function selectBoard(id: string | null) {
-    setCardEditor(null); setColumnEditor(null); setBoardEditor(null);
+    setCardEditor(null); setLinkedCardId(null); openedCardLink.current = ""; setColumnEditor(null); setBoardEditor(null);
     activeScope.current = `${business.id}/${studentId}/${id ?? "list"}`;
     setDetail(null); setMoveView(null); setBoardId(id);
     if (!persistNavigation) return;
     const url = new URL(window.location.href);
+    url.searchParams.delete("card");
     if (id) url.searchParams.set("board", id); else url.searchParams.delete("board");
     if (url.href !== window.location.href) window.history.pushState(null, "", url);
   }
   useEffect(() => {
     if (!persistNavigation) return;
-    const restore = () => { const restored = urlBoard(); activeScope.current = `${business.id}/${studentId}/${restored ?? "list"}`; setDetail(null); setMoveView(null); setBoardId(restored); setCardEditor(null); setColumnEditor(null); setBoardEditor(null); };
+    const restore = () => { const restored = urlBoard(); activeScope.current = `${business.id}/${studentId}/${restored ?? "list"}`; setDetail(null); setMoveView(null); setBoardId(restored); setLinkedCardId(urlCard()); openedCardLink.current = ""; setRevision(value => value + 1); setCardEditor(null); setColumnEditor(null); setBoardEditor(null); };
     window.addEventListener("popstate", restore);
     return () => window.removeEventListener("popstate", restore);
   }, [persistNavigation, business.id, studentId]);
-  useEffect(() => { setBoardId(urlBoard()); setDetail(null); setOffset(0); setBoardEditor(null); setColumnEditor(null); setCardEditor(null); setTemplates(false); setTemplateReview(false); }, [studentId, business.id, persistNavigation]);
+  useEffect(() => { setBoardId(urlBoard()); setLinkedCardId(urlCard()); openedCardLink.current = ""; setDetail(null); setOffset(0); setBoardEditor(null); setColumnEditor(null); setCardEditor(null); setTemplates(false); setTemplateReview(false); }, [studentId, business.id, persistNavigation]);
   useEffect(() => {
     let cancelled = false, unsubscribe: (() => void) | undefined;
     setError(""); setLoading(true); setDetail(null); setMoveView(null);
@@ -87,6 +103,15 @@ export function StudentBoards({ api, business, studentId, student, persistNaviga
     } catch (e) { if (activeScope.current === requestedScope) setError(`${failureMessage} ${errorMessage(e)}`); }
   }
   const board = detail?.item?.id === boardId && detail?.item?.studentId === studentId ? detail.item : null, canManage = canWrite && detail?.canManageStructure === true, columns: Row[] = [...(detail?.columns ?? [])].sort((a, b) => a.position - b.position || a.id.localeCompare(b.id)), cards: Row[] = detail?.cards ?? [];
+  useEffect(() => {
+    if (!board || loading || !linkedCardId) return;
+    const identity = `${scope}/${linkedCardId}`;
+    if (openedCardLink.current === identity) return;
+    openedCardLink.current = identity;
+    const linkedCard = cards.find(card => card.id === linkedCardId);
+    if (linkedCard) setCardEditor(linkedCard);
+    else { setError("This task is no longer available on this board."); closeCard(); }
+  }, [board, loading, linkedCardId, scope]);
   async function move(card: Row, columnId: string, position: number) {
     if (!canWrite || !board || busy || !currentMoves || movesPaused) return;
     setError(""); setMessage("");
@@ -95,12 +120,12 @@ export function StudentBoards({ api, business, studentId, student, persistNaviga
   if (!allowed) return <Empty>Planning boards are not available with your current access.</Empty>;
   if (templates) return <StudentBoardTemplates api={api} studentId={studentId} student={planningStudent} canSaveProfile={hasPermission(business, "clients.write") && !["student", "parent"].includes(business.role)} onProfileSaved={setPlanningStudent} onClose={() => setTemplates(false)} onCreated={(id) => { setTemplates(false); selectBoard(id); setRevision((n) => n + 1); }} />;
   const learner = ["student", "parent"].includes(business.role);
-  return <section className="planning-space" aria-label="Student planning boards"><Notice error={error} message={message} /><div className="student-boards-actions">{boardId && <button disabled={busy} onClick={() => { selectBoard(null); setMessage(""); }}>All boards</button>}<button disabled={loading || busy || structureLocked} onClick={() => setRevision((n) => n + 1)}>Refresh</button>{movesPending && !movesPaused && <span className="planning-save-status" role="status">Saving moves in background…</span>}{canCreate && !boardId && <><button onClick={() => setBoardEditor({ sharing: "student" })}>Blank board</button><button className="primary" onClick={() => setTemplates(true)}>Create application plan</button></>}{canManage && board && <><button disabled={busy || structureLocked} onClick={() => setBoardEditor(board)}>Board settings</button>{board.templateKey && <button disabled={busy || structureLocked} onClick={() => setTemplateReview(true)}>Review template version</button>}<button disabled={busy || structureLocked} onClick={() => setColumnEditor({ position: columns.length ? Math.max(...columns.map((row) => row.position)) + 1 : 0 })}>Add column</button></>}</div>
-    {loading ? <Empty>Loading planning boards…</Empty> : !boardId ? <>{!boards.length && !error ? <Empty><h3>No planning boards yet.</h3><p>Choose an application path and we’ll organize your next steps. Or start a blank board for any goal.</p></Empty> : <div className="student-board-grid">{boards.map((row) => <article className="student-board-tile" key={row.id}><button onClick={() => selectBoard(row.id)}><h3>{row.name}</h3><p>{row.description}</p><div className="student-board-meta"><span className="tag">{row.sharing === "student" ? "Shared" : "Private"}</span>{row.templateVersion && <span className="tag">Template v{row.templateVersion}</span>}</div><small>Updated {date(row.updatedAt)}</small></button></article>)}</div>}{total > 20 && <div className="portal-pagination"><span>{total ? `${offset + 1}–${Math.min(offset + boards.length, total)} of ${total} boards` : ""}</span><button disabled={offset === 0} onClick={() => setOffset((value) => Math.max(0, value - 20))}>Previous boards</button><button disabled={offset + 20 >= total} onClick={() => setOffset((value) => value + 20)}>Next boards</button></div>}</> : board && <><h2>{board.name}</h2><p className="crm-helper">{board.description}</p><div className="student-board-meta"><span className="tag">{board.sharing === "student" ? (learner ? "Shared with your tutor" : "Shared with student") : "Private"}</span>{board.templateVersion && <span className="tag">Template version {board.templateVersion}</span>}</div><p className="crm-helper">Drag any part of a task between columns. Open a task for notes, checklists and resources.</p>{!columns.length && <Empty>This board has no columns yet.{canManage ? " Add a column to begin." : " Your tutor can add columns."}</Empty>}<StudentBoardKanban key={scope} columns={columns} cards={cards} canWrite={canWrite && !movesPaused} canManage={canManage} busy={busy} structureBusy={structureLocked} onMove={move} onEdit={setCardEditor} onAdd={(column, position) => setCardEditor({ columnId: column.id, position })} onColumn={setColumnEditor} /></>}
+  return <section className="planning-space" aria-label="Student planning boards"><Notice error={error} message={message} /><div className="student-boards-actions">{boardId && <button disabled={busy} onClick={() => { selectBoard(null); setMessage(""); }}>All boards</button>}{boardId ? <details className="planning-board-options"><summary>More board options</summary><div className="planning-board-options-actions"><button disabled={loading || busy || structureLocked} onClick={() => setRevision((n) => n + 1)}>Refresh</button>{canManage && board && <><button disabled={busy || structureLocked} onClick={() => setBoardEditor(board)}>Board settings</button>{board.templateKey && <button disabled={busy || structureLocked} onClick={() => setTemplateReview(true)}>Review template version</button>}<button disabled={busy || structureLocked} onClick={() => setColumnEditor({ position: columns.length ? Math.max(...columns.map((row) => row.position)) + 1 : 0 })}>Add column</button></>}</div></details> : <button disabled={loading || busy || structureLocked} onClick={() => setRevision((n) => n + 1)}>Refresh</button>}{movesPending && !movesPaused && <span className="planning-save-status" role="status">Saving moves in background…</span>}{canCreate && !boardId && <><button onClick={() => setBoardEditor({ sharing: "student" })}>Blank board</button><button className="primary" onClick={() => setTemplates(true)}>Create application plan</button></>}</div>
+    {loading ? <Empty>Loading planning boards…</Empty> : !boardId ? <>{!boards.length && !error ? <Empty><h3>No planning boards yet.</h3><p>Choose an application path and we’ll organize your next steps. Or start a blank board for any goal.</p></Empty> : <div className="student-board-grid">{boards.map((row) => <article className="student-board-tile" key={row.id}><button onClick={() => selectBoard(row.id)}><h3 className="planning-board-title">{row.templateKey && <BrandLogo brand={templateBrand(row.templateKey)} size={30} />}{row.name}</h3><p>{row.description}</p><div className="student-board-meta"><span className="tag">{row.sharing === "student" ? "Shared" : "Private"}</span>{row.templateVersion && <span className="tag">Template v{row.templateVersion}</span>}</div><small>Updated {date(row.updatedAt)}</small></button></article>)}</div>}{total > 20 && <div className="portal-pagination"><span>{total ? `${offset + 1}–${Math.min(offset + boards.length, total)} of ${total} boards` : ""}</span><button disabled={offset === 0} onClick={() => setOffset((value) => Math.max(0, value - 20))}>Previous boards</button><button disabled={offset + 20 >= total} onClick={() => setOffset((value) => value + 20)}>Next boards</button></div>}</> : board && <><h2 className="planning-board-title">{board.templateKey && <BrandLogo brand={templateBrand(board.templateKey)} size={36} />}{board.name}</h2><p className="crm-helper">{board.description}</p><div className="student-board-meta"><span className="tag">{board.sharing === "student" ? (learner ? "Shared with your tutor" : "Shared with student") : "Private"}</span>{board.templateVersion && <span className="tag">Template version {board.templateVersion}</span>}</div><p className="crm-helper">Drag a task between columns (hold on touch), or use its move menu. Open it for notes, checklists and resources.</p>{!columns.length && <Empty>This board has no columns yet.{canManage ? " Add a column to begin." : " Your tutor can add columns."}</Empty>}<StudentBoardKanban key={scope} columns={columns} cards={cards} canWrite={canWrite && !movesPaused} canManage={canManage} busy={busy} structureBusy={structureLocked} onMove={move} onEdit={setCardEditor} onAdd={(column, position) => setCardEditor({ columnId: column.id, position })} onColumn={setColumnEditor} /></>}
     {currentMoves?.state.error && <div className="planning-move-recovery" role="alert"><p>{currentMoves.state.error}</p><p>{currentMoves.state.recovering ? "Loading the latest saved board…" : currentMoves.state.recovered ? "The latest saved board is shown. Review it before applying your pending moves." : "Your pending moves are retained. Load the latest board before retrying."}</p><ul>{currentMoves.state.pending.map((intent, index) => <li key={index}>{cards.find(card => card.id === intent.cardId)?.title ?? "Removed task"} → {columns.find(column => column.id === intent.columnId)?.name ?? "Removed column"}</li>)}</ul><div className="student-boards-actions"><button disabled={currentMoves.state.recovering || currentMoves.state.saving} onClick={() => void currentMoves.queue.refreshFailed()}>Load latest saved board</button><button disabled={!currentMoves.state.recovered || currentMoves.state.saving || currentMoves.state.recovering} onClick={() => currentMoves.queue.retryReviewed()}>Apply my pending moves</button><button disabled={!currentMoves.state.recovered || currentMoves.state.saving || currentMoves.state.recovering} onClick={() => currentMoves.queue.discardReviewed()}>Discard pending moves</button></div></div>}
     {boardEditor && <BoardEditor api={api} studentId={studentId} board={boardEditor} onClose={() => setBoardEditor(null)} onSaved={(id) => { setBoardEditor(null); selectBoard(id); setRevision((n) => n + 1); }} />}
     {columnEditor && board && <ColumnEditor api={api} board={board} column={columnEditor} columns={columns} cards={cards} onClose={() => setColumnEditor(null)} onSaved={refreshBoard} />}
-    {cardEditor && board && <StudentBoardCard key={`${cardEditor.id ?? "new"}:${structureLocked ? "pending" : "ready"}`} api={api} business={business} studentId={studentId} board={board} columns={columns} card={cards.find(card => card.id === cardEditor.id) ?? cardEditor} canWrite={canWrite && !structureLocked} onClose={() => setCardEditor(null)} onSaved={refreshBoard} />}
+    {cardEditor && board && <StudentBoardCard key={`${cardEditor.id ?? "new"}:${structureLocked ? "pending" : "ready"}`} api={api} business={business} studentId={studentId} board={board} columns={columns} card={cards.find(card => card.id === cardEditor.id) ?? cardEditor} canWrite={canWrite && !structureLocked} onClose={closeCard} onSaved={refreshBoard} />}
     {templateReview && board && <StudentBoardTemplateReview api={api} board={board} cards={cards} columns={columns} onClose={() => setTemplateReview(false)} onSaved={refreshBoard} />}
   </section>;
 }

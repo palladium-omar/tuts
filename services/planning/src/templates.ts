@@ -1,4 +1,5 @@
 import type {Deadline} from './schemas.js';
+import {actionableTemplate} from './actionable-resources.js';
 export interface TemplateCard {
  key:string;title:string;description:string;columnIndex:number;checklist:{id:string;text:string;done:boolean}[];
  references:Record<string,unknown>[];deadline:Deadline|null;learningAssignmentId:string|null;
@@ -117,7 +118,7 @@ function commonCards(cycle:number):TemplateCard[] {
 
 /** Generate an immutable planning release for an entry year, never extrapolating
  * a source-verified calendar into a future official deadline. */
-export function templatesForCycle(cycle:number):TemplateDefinition[] {
+export function milestoneTemplatesForCycle(cycle:number):TemplateDefinition[] {
  if(!Number.isInteger(cycle)||cycle<2027||cycle>2200)throw new RangeError('Use an entry cycle from 2027 to 2200');
  const y=cycle-1;
  const cycleText=(text:string)=>text.replace(/2027–28|2026–27|2026\/27|2027/g,value=>({
@@ -143,8 +144,22 @@ export function templatesForCycle(cycle:number):TemplateDefinition[] {
   return t;
  });
 }
-// Retain the original release for detail/review and reproducible existing boards.
-export const builtInTemplates:TemplateDefinition[]=[...legacyTemplates,...[2027,2028,2029,2030,2031].flatMap(templatesForCycle)];
+// Immutable actionable release, including its original historical conversion.
+export function actionableTemplatesForCycle(cycle:number):TemplateDefinition[] {return milestoneTemplatesForCycle(cycle).map(actionableTemplate);}
+const moroccoTimeSource='https://bdj.mmsp.gov.ma/Ar/Document/10664-D%C3%A9cret-n-2-26-530du-9-moharrem-1448-25-juin-2026.aspx';
+const moroccoTzSource='https://data.iana.org/time-zones/tzdb-2026c/NEWS';
+const correctedReviewAt='2026-10-11T12:45:05.000Z';
+export function templatesForCycle(cycle:number):TemplateDefinition[] {
+ return actionableTemplatesForCycle(cycle).map(original=>{
+  if(original.key!=='campus-france-maroc-2027')return original;
+  const t=structuredClone(original);t.version=4;t.verifiedAt=correctedReviewAt;
+  t.sourceUrls=[...t.sourceUrls,moroccoTimeSource,moroccoTzSource];
+  t.cards=t.cards.map(card=>card.key==='submit'&&card.deadline?{...card,deadline:{...card.deadline,dueAt:'2026-11-15T23:59:00Z',verifiedAt:correctedReviewAt,sourceUrls:[...card.deadline.sourceUrls,moroccoTimeSource,moroccoTzSource]}}:card);
+  return t;
+ });
+}
+// Retain both earlier releases byte-for-byte for reproducible existing boards.
+export const builtInTemplates:TemplateDefinition[]=[...legacyTemplates,...[2027,2028,2029,2030,2031].flatMap(milestoneTemplatesForCycle),...[2027,2028,2029,2030,2031].flatMap(actionableTemplatesForCycle),...templatesForCycle(2027).filter(t=>t.version===4)];
 export function cycleForSystemKey(key:string):number|undefined {
  const match=/^(?:ucas-(\d{4})-(?:standard|early)|common-app-(\d{4})|bocconi-(\d{4})-(?:winter|early)-international|campus-france-maroc-(\d{4}))$/.exec(key);
  const cycle=match?Number(match.slice(1).find(Boolean)):undefined;

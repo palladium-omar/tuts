@@ -5,7 +5,7 @@ import {randomUUID} from 'node:crypto';
 import type {Database} from '@palladium/service-kit';
 import type {RequestContext} from '@palladium/contracts';
 import {PlanningService} from '../src/planning.service.js';
-import {templatesForCycle} from '../src/templates.js';
+import {templatesForCycle,milestoneTemplatesForCycle} from '../src/templates.js';
 import {templateApplySchema} from '../src/schemas.js';
 
 const ctx:RequestContext={businessId:randomUUID(),sub:'synthetic-owner',role:'owner',entitlements:['planning','clients'],requestId:randomUUID()};
@@ -25,8 +25,8 @@ test('future list seeds immutable versions in one tenant transaction and one ins
  assert.deepEqual(calls[1]!.args,[2035]);
 });
 
-function fixture(){
- const definition=templatesForCycle(2027).find(t=>t.key==='common-app-2027')!,studentId=randomUUID(),boardId=randomUUID(),stamp='2026-10-10T19:00:00Z';
+function fixture(actionable=false){
+ const definition=(actionable?templatesForCycle(2027):milestoneTemplatesForCycle(2027)).find(t=>t.key==='common-app-2027')!,studentId=randomUUID(),boardId=randomUUID(),stamp='2026-10-10T19:00:00Z';
  const board:any={id:boardId,business_id:ctx.businessId,student_id:studentId,name:'Synthetic board',sharing:'student',created_by:ctx.sub,revision:5,template_key:definition.key,template_version:1,applicability:{cycle:2027,country:'US',round:definition.round,program:definition.program,applicantCategory:definition.applicantCategory},created_at:stamp,updated_at:stamp};
  const manual={kind:'personal',dueAt:'2026-10-29T12:00:00Z',status:'user_set'};
  const columns:any[]=[{id:randomUUID(),name:'In progress',position:0},{id:randomUUID(),name:'To do',position:1}];
@@ -43,6 +43,7 @@ function fixture(){
    cards.push(c);return {rows:[{...c}]};
   }
   if(sql.startsWith('UPDATE planning_cards SET deadline=')){const c=cards.find(c=>c.id===args[0]);c.deadline=JSON.parse(args[1]);c.revision++;writes.push(c.id);return {rows:[{...c}]};}
+  if(sql.startsWith('UPDATE planning_cards SET resource_references=')){const c=cards.find(c=>c.id===args[0]);c.resource_references=JSON.parse(args[1]);c.checklist=JSON.parse(args[2]);c.revision++;writes.push(c.id);return {rows:[{...c}]};}
   if(sql.startsWith('UPDATE planning_boards SET template_version=')){board.template_version=args[1];return {rows:[]};}
   if(sql.startsWith('UPDATE planning_boards SET revision=')){board.revision++;return {rows:[{...board}]};}
   if(sql.startsWith('INSERT INTO service_outbox')){events.push(JSON.parse(args[1]));return {rows:[]};}
@@ -100,4 +101,40 @@ test('addition validation precedes changes and denies missing columns, invalid k
  await assert.rejects(f.service.applyTemplate(ctx,f.board.id,{version:2,expectedRevision:5,cardIds:[f.cards[0].id],addedCardKeys:['rd-submit']}),/500 active cards/);assert.deepEqual(f.writes,[]);
  f=fixture();await assert.rejects(f.service.applyTemplate({...ctx,role:'tutor',accessScope:'students',studentIds:[randomUUID()]},f.board.id,{version:2,expectedRevision:5,cardIds:[],addedCardKeys:['rd-submit']}),/Student access/);
  assert.equal(f.cards.length,2);assert.deepEqual(f.events,[]);
+});
+
+test('existing board resource updates are opt-in, additive and preserve dates, titles and completed steps',async()=>{
+ const f=fixture(true),c=f.cards[0];c.title='My edited title';c.checklist=[{id:randomUUID(),text:'Manual completed step',done:true}];c.resource_references=[{kind:'link',label:'My source',url:'https://example.com/Personal'}];
+ const before=structuredClone(c),review=await f.service.reviewTemplate(ctx,f.board.id,3);
+ assert.ok(review.resourceSuggestions[0].proposedReferences.length);assert.deepEqual(c,before);
+ await f.service.applyTemplate(ctx,f.board.id,{version:3,expectedRevision:5,cardIds:[]});assert.deepEqual(c,before);
+ const result=await f.service.applyTemplate(ctx,f.board.id,{version:3,expectedRevision:6,cardIds:[],resourceCardIds:[c.id]});
+ assert.equal(result.cards.length,1);assert.equal(c.title,before.title);assert.deepEqual(c.deadline,before.deadline);assert.deepEqual(c.checklist[0],before.checklist[0]);assert.deepEqual(c.resource_references[0],before.resource_references[0]);
+ const after=structuredClone(c),repeat=await f.service.applyTemplate(ctx,f.board.id,{version:3,expectedRevision:7,cardIds:[],resourceCardIds:[c.id]});assert.deepEqual(c,after);assert.equal(repeat.cards.length,0);
+ await assert.rejects(f.service.applyTemplate(ctx,f.board.id,{version:3,expectedRevision:8,cardIds:[],resourceCardIds:[randomUUID()]}),/Select existing resource/);
+});
+
+test('resource-only v2 to v3 review omits semantically unchanged deadlines despite JSONB property ordering',async()=>{
+ const f=fixture(true),old=milestoneTemplatesForCycle(2027).find(t=>t.key===f.definition.key)!;
+ f.board.template_version=2;
+ f.cards.splice(0);
+ for(const card of old.cards){
+  const deadline=card.deadline?Object.fromEntries(Object.entries(card.deadline).reverse()):null;
+  f.cards.push({id:randomUUID(),board_id:f.board.id,column_id:f.columns[0].id,position:f.cards.length,template_card_key:card.key,deadline,deadline_edited:false,revision:1,checklist:[],resource_references:[]});
+ }
+ const review=await f.service.reviewTemplate(ctx,f.board.id,3);
+ assert.deepEqual(review.suggestions,[]);assert.equal(review.resourceSuggestions.length,old.cards.length);assert.equal(review.addedCards.length,2);
+ f.cards[0].deadline={...f.cards[0].deadline,dueAt:'2027-02-01T12:00:00Z'};f.cards[0].deadline_edited=true;
+ const changed=await f.service.reviewTemplate(ctx,f.board.id,3);assert.equal(changed.suggestions.length,1);assert.equal(changed.suggestions[0].cardId,f.cards[0].id);assert.equal(changed.suggestions[0].preserveUserEdit,true);
+});
+
+test('same-version resource review includes only actual missing additions and preserves manual content',async()=>{
+ const f=fixture(true);f.board.template_version=3;
+ for(const row of f.cards){const card=f.definition.cards.find(c=>c.key===row.template_card_key)!;row.resource_references=structuredClone(card.references);row.checklist=structuredClone(card.checklist);row.deadline=structuredClone(card.deadline);}
+ assert.deepEqual((await f.service.reviewTemplate(ctx,f.board.id,3)).resourceSuggestions,[]);
+ const target=f.cards[0],missing=target.resource_references.pop();target.resource_references.push({kind:'link',label:'Manual source',url:'https://example.com/Custom'});target.checklist[0].done=true;
+ const before=structuredClone(f.cards),review=await f.service.reviewTemplate(ctx,f.board.id,3);assert.deepEqual(review.resourceSuggestions.map(c=>c.cardId),[target.id]);assert.deepEqual(f.cards,before);assert.ok(missing);
+ await f.service.applyTemplate(ctx,f.board.id,{version:3,expectedRevision:5,cardIds:[],resourceCardIds:[target.id]});assert.equal(target.checklist[0].done,true);assert.ok(target.resource_references.some((r:any)=>r.url==='https://example.com/Custom'));assert.ok(target.resource_references.some((r:any)=>r.url===missing.url));
+ assert.deepEqual((await f.service.reviewTemplate(ctx,f.board.id,3)).resourceSuggestions,[]);
+ const repeat=await f.service.applyTemplate(ctx,f.board.id,{version:3,expectedRevision:6,cardIds:[],resourceCardIds:[target.id]});assert.deepEqual(repeat.cards,[]);
 });

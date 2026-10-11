@@ -33,6 +33,7 @@ export const cardFields={title,description:description.default(''),checklist:che
 export const cardCreateSchema=z.object({...cardFields,expectedBoardRevision:revisionSchema,columnId:z.uuid(),position:positionSchema}).strict();
 export const cardUpdateSchema=z.object({expectedRevision:revisionSchema,title:title.optional(),description:description.optional(),checklist:checklistSchema.optional(),references:z.array(referenceSchema).max(30).optional(),deadline:deadlineInputSchema.nullable().optional(),learningAssignmentId:z.uuid().nullable().optional()}).strict();
 export const cardMoveSchema=z.object({expectedRevision:revisionSchema,expectedBoardRevision:revisionSchema,columnId:z.uuid(),position:positionSchema}).strict();
+export const overviewQuerySchema=z.object({studentId:z.uuid()}).strict();
 export const listSchema=z.object({studentId:z.uuid().optional(),limit:z.coerce.number().int().min(1).max(100).default(50),offset:z.coerce.number().int().min(0).max(100000).default(0)}).strict();
 export const templateQuerySchema=z.object({cycle:z.coerce.number().int().min(2027).max(2200).default(2027)}).strict();
 export const templateVersionQuery=z.object({version:z.coerce.number().int().positive().optional()}).strict();
@@ -42,6 +43,7 @@ export const instantiateSchema=z.object({studentId:z.uuid(),version:z.number().i
 export const customTemplateSchema=z.object({key:templateKeySchema,name:title,cycle:z.number().int().min(2027).max(2200),country:z.string().regex(/^[A-Z]{2}$/),applicantCountries:z.array(z.string().regex(/^[A-Z]{2}$/)).max(50).default([]),applicantCategory:z.string().min(1).max(100),program:z.string().min(1).max(100),round:z.string().min(1).max(100),applicability:z.string().max(2000),sourceUrls:z.array(linkSchema).max(10).default([]),columns:z.array(title).min(1).max(30),cards:z.array(z.object({...cardFields,key:z.string().regex(/^[a-z0-9-]{1,80}$/),columnIndex:z.number().int().nonnegative().max(29)}).strict()).max(200)}).strict().refine(v=>v.cards.every(c=>c.columnIndex<v.columns.length)&&new Set(v.cards.map(c=>c.key)).size===v.cards.length,'Use existing columns and unique card keys');
 export const templateReviewSchema=z.object({version:z.coerce.number().int().positive()}).strict();
 export const templateApplySchema=z.object({version:z.number().int().positive(),expectedRevision:revisionSchema,cardIds:z.array(z.uuid()).max(200),
+ resourceCardIds:z.array(z.uuid()).max(200).refine(ids=>new Set(ids).size===ids.length,'Resource card IDs must be unique').optional(),
  addedCardKeys:z.array(z.string().regex(/^[a-z0-9-]{1,80}$/)).max(200).refine(keys=>new Set(keys).size===keys.length,'Template task keys must be unique').optional()}).strict();
 export type Deadline=z.infer<typeof deadlineSchema>;
 export function enteredDeadline(input:z.infer<typeof deadlineInputSchema>|null):Deadline|null {

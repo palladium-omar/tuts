@@ -1,6 +1,6 @@
 # Tuts documentation
 
-Updated for the **10 October 2026** audit remediation; the release receipt records deployment and validation evidence. Historical review files describe their own release; they are not current deployment guarantees.
+Updated for the **11 October 2026** student portal improvements and the 10 October audit remediation. Release receipts record deployment and validation evidence. Historical review files describe their own release; they are not current deployment guarantees.
 
 ## Start here
 
@@ -8,6 +8,7 @@ Updated for the **10 October 2026** audit remediation; the release receipt recor
 - [API and schema inventory](service-inventory.md): generated controller routes, their access metadata, source links, and all service migrations. Regenerate rather than hand-edit.
 - [Security model](architecture/security.md): trust boundaries, authorization, credentials, uploads and threat controls.
 - [Performance model](architecture/performance.md): request paths, batching, caches, database lifecycle and measurable budgets.
+- [Student experience review](reviews/2026-10-11-student-experience.md): actual student walkthrough, fixed UX issues and remaining opportunities.
 - [Audit remediation and release receipt](reviews/2026-10-10-audit-remediation.md): completed changes and remaining operational limits.
 - [Current audit and remediation order](reviews/2026-10-10-platform-audit.md): measured evidence, vulnerabilities, limitations and open work.
 - [Operations and documentation maintenance](operations.md): checks, releases, recovery and review requirements.
@@ -19,6 +20,7 @@ Updated for the **10 October 2026** audit remediation; the release receipt recor
 | Identity, recovery and system mail | [Password recovery](architecture/password-recovery.md), [Platform](../services/platform/README.md) |
 | CRM, columns, importing, duplicate merge | [Student identity](architecture/student-workspace.md#phase-1-canonical-students-and-contacts), [Clients](../services/clients/README.md), [Communications](architecture/crm-communications.md) |
 | Groups, invitations, tutor tracker, portal | [Student workspace](architecture/student-workspace.md), [Tutor UX](architecture/tutor-workspace-ux.md), [Student UX](architecture/learner-planning-ux.md) |
+| Student overview and actionable planning | [Overview contracts and UX](architecture/student-overview.md), [Planning](../services/planning/README.md), [Learning](../services/learning/README.md), [Scheduling](../services/scheduling/README.md) |
 | Homework, private files, essays/Google Docs | [Learning](../services/learning/README.md) |
 | Calendars, attendance, student bookings | [Scheduling](../services/scheduling/README.md), [Connector protocols](architecture/connectors.md) |
 | Monthly arrears invoices, historical work/invoices, dashboard | [Monthly billing](architecture/monthly-billing.md), [History and analytics](architecture/business-history-analytics.md), [Billing](../services/billing/README.md) |

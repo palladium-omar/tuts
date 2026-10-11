@@ -4,7 +4,7 @@ import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } 
 import { CSS } from "@dnd-kit/utilities";
 import { CheckCheck, GripVertical, MoreHorizontal, Plus } from "lucide-react";
 import type { Row } from "../lib/api";
-import { deadlineTime } from "./student-board-card";
+import { deadlinePreviewTime, deadlineCaption, publicLink } from "../lib/student-board-presentation";
 import { positionBetween, keyboardTaskStep } from "../lib/kanban-order";
 
 const sorted = (cards: Row[], columnId: string) => cards.filter(card => card.columnId === columnId).sort((a, b) => a.position - b.position || a.id.localeCompare(b.id));
@@ -25,7 +25,7 @@ export function StudentBoardKanban({ columns, cards, canWrite, canManage, busy, 
     const rect = context.droppableRects.get(step.targetId);
     if (rect) return {x: rect.left + (step.targetId === step.columnId ? 12 : 0), y: rect.top + (step.targetId === step.columnId ? 53 : 1)};
   };
-  const sensors = useSensors(useSensor(MouseSensor, { activationConstraint: { distance: 5 } }), useSensor(TouchSensor, { activationConstraint: { distance: 8 } }), useSensor(KeyboardSensor, { coordinateGetter: keyboardCoordinates, scrollBehavior: "auto" }));
+  const sensors = useSensors(useSensor(MouseSensor, { activationConstraint: { distance: 5 } }), useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 8 } }), useSensor(KeyboardSensor, { coordinateGetter: keyboardCoordinates, scrollBehavior: "auto" }));
   const activeCard = cards.find(card => card.id === activeId);
   const collisions: CollisionDetection = args => {
     if (!args.pointerCoordinates && keyboardTarget.current) return [{id: keyboardTarget.current.targetId}];
@@ -92,10 +92,17 @@ function Task({ card, columns, canWrite, busy, cards, onEdit, onMove }: { card: 
     onMouseDown={event => { if (dragFromCard(event.target)) listeners?.onMouseDown?.(event); }}
     onTouchStart={event => { if (dragFromCard(event.target)) listeners?.onTouchStart?.(event); }}
     onClick={event => { if (!busy && event.target instanceof Element && !event.target.closest("button, a, input, select, textarea, summary, .planning-card-tools")) onEdit(card); }}>
-    <button className="student-board-card-open" disabled={busy} onClick={() => onEdit(card)}><TaskContent card={card} /></button>{canWrite && <div className="planning-card-tools"><button id={`planning-handle-${card.id}`} ref={setActivatorNodeRef} className="planning-drag-handle planning-icon-button" disabled={busy} {...attributes} {...listeners} aria-label={`Drag ${card.title}`}><GripVertical size={16} /></button><details className="planning-move-menu"><summary aria-label={`Move ${card.title}`}><MoreHorizontal size={16} /></summary><label>Move to<select disabled={busy} value={card.columnId} onChange={event => { event.currentTarget.closest("details")?.removeAttribute("open"); void onMove(card, event.target.value, Math.max(-1, ...cards.filter(row => row.columnId === event.target.value).map(row => row.position)) + 1); }}>{columns.map(column => <option value={column.id} key={column.id}>{column.name}</option>)}</select></label></details></div>}
+    <button className="student-board-card-open" disabled={busy} onClick={() => onEdit(card)}><TaskContent card={card} /></button><TaskResources card={card} onEdit={onEdit} />{canWrite && <div className="planning-card-tools"><button id={`planning-handle-${card.id}`} ref={setActivatorNodeRef} className="planning-drag-handle planning-icon-button" disabled={busy} {...attributes} {...listeners} aria-label={`Drag ${card.title}`}><GripVertical size={16} /></button><details className="planning-move-menu"><summary aria-label={`Move ${card.title}`}><MoreHorizontal size={16} /></summary><label>Move to<select disabled={busy} value={card.columnId} onChange={event => { event.currentTarget.closest("details")?.removeAttribute("open"); void onMove(card, event.target.value, Math.max(-1, ...cards.filter(row => row.columnId === event.target.value).map(row => row.position)) + 1).finally(() => document.getElementById(`planning-handle-${card.id}`)?.focus({ preventScroll: true })); }}>{columns.map(column => <option value={column.id} key={column.id}>{column.name}</option>)}</select></label></details></div>}
   </article>;
 }
 function TaskContent({ card }: { card: Row }) {
   const complete = card.checklist?.filter((item: Row) => item.done).length ?? 0;
-  return <><strong>{card.title}</strong>{card.deadline && <span className={`planning-deadline-pill${card.deadline.dueAt ? "" : " needs-date"}`}>{card.deadline.dueAt ? `${deadlineTime(card.deadline)}${card.deadline.status === "requires_confirmation" ? " · Confirm date" : ""}` : "Date to confirm"}</span>}{card.checklist?.length > 0 && <small className="planning-task-checklist"><CheckCheck size={13} /> {complete} / {card.checklist.length}</small>}</>;
+  return <><strong>{card.title}</strong>{card.deadline && <span className={`planning-deadline-pill${card.deadline.dueAt ? "" : " needs-date"}`}>{card.deadline.dueAt ? `${deadlineCaption(card.deadline)} · ${deadlinePreviewTime(card.deadline)}` : `${deadlineCaption(card.deadline)} · date unknown`}</span>}{card.checklist?.length > 0 && <small className="planning-task-checklist"><CheckCheck size={13} /> {complete} / {card.checklist.length}</small>}</>;
+}
+
+function TaskResources({ card, onEdit }: { card: Row; onEdit: (card: Row) => void }) {
+  const references: Row[] = card.references ?? [];
+  const primary = references.find(row => row.url && publicLink(row.url));
+  if (!references.length) return null;
+  return <div className="planning-card-resources" data-no-drag>{primary && <a href={primary.url} target="_blank" rel="noopener noreferrer" title={primary.label}>{primary.label} <span aria-hidden="true">↗</span></a>}<button type="button" onClick={() => onEdit(card)} aria-label={`View ${references.length} resource${references.length === 1 ? "" : "s"} for ${card.title}`}>{references.length} resource{references.length === 1 ? "" : "s"}</button></div>;
 }

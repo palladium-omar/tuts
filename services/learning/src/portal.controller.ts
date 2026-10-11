@@ -23,6 +23,11 @@ export class PortalLearningController {
     @Inject(LearningService)
     private readonly learning: LearningService) {
     }
+    @Get('overview')
+    @Permissions('learning.read')
+    overview(@CurrentContext() ctx: RequestContext, @Query() query: unknown) {
+        return this.learning.overview(ctx, query);
+    }
     @Get('assignments')
     @Permissions('learning.read')
     async list(

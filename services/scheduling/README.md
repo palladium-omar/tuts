@@ -102,3 +102,11 @@ Builds/typechecks validate source compilation only. No tests, live bookings,
 provider registrations or external messages were run during this implementation.
 
 Revision precedence: an observed polling timestamp cannot replace a provider `updatedAt` revision. Provider snapshots replace observed/legacy state, then only strictly newer provider revisions apply. Scoped tutors can associate an unmatched external booking only if they own its connected account and have the target student grant; business-wide staff may perform the documented review association. Attendee email never grants student authorization.
+
+## Student overview aggregate
+
+`GET /v1/portal/overview?studentId=UUID` requires `scheduling.read`, admits authorized staff/student/parent contexts and opts into student scope. The strict query requires a UUID. Requested and canonical merged student identities must both be authorized. Source queries run in the signed business's tenant transaction and preserve forced RLS, including external attendance annotations.
+
+Response: `{summary:{completed,upcoming},sessions:[{id,source,title,startsAt,endsAt}],limit:5}`. Counts cover matching internal sessions and linked external sessions independently of the five-item list. `completed` counts explicit effective completion. Provider completion/elapsed time alone does not create attendance completion. `upcoming` and the list include only effective `scheduled` sessions whose end is strictly after the database transaction's current time, including a session already in progress. Cancelled and no-show sessions are excluded. External appointments without an authorized linked student are excluded.
+
+Sessions sort by start time, source and class ID, and return ISO UTC timestamps; frontend timezone formatting does not affect the cutoff. One aggregate count and one bounded list query follow local canonical identity resolution. Overview is a read of the current source union: it does not backfill the ledger, emit reconciliation events or make one request per session. Empty results have genuine zero counts. See [student overview composition](../../docs/architecture/student-overview.md).
