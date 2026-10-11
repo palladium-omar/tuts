@@ -9,6 +9,7 @@ Updated for the **11 October 2026** student portal improvements and the 10 Octob
 - [Security model](architecture/security.md): trust boundaries, authorization, credentials, uploads and threat controls.
 - [Performance model](architecture/performance.md): request paths, batching, caches, database lifecycle and measurable budgets.
 - [Student experience review](reviews/2026-10-11-student-experience.md): actual student walkthrough, fixed UX issues and remaining opportunities.
+- [Reminder and applicant release review](reviews/2026-10-11-reminders-and-applicants.md): actual provider checks, country rules, test totals and deployment receipts.
 - [Audit remediation and release receipt](reviews/2026-10-10-audit-remediation.md): completed changes and remaining operational limits.
 - [Current audit and remediation order](reviews/2026-10-10-platform-audit.md): measured evidence, vulnerabilities, limitations and open work.
 - [Student reminders and applicant rules](architecture/student-reminders-and-applicant-rules.md): reminder ownership, guided applicant facts, personalized template APIs and researched country limits.
