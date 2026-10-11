@@ -1,5 +1,16 @@
 # Payments service
 
+## Receipt recovery contract
+
+`GET /v1/reconciliation/transactions?limit=100&offset=0` returns only confirmed
+transaction identity, invoice/account references, exact amount/currency,
+confirmation timestamp and simulation flag. The shared contract caps pages at
+200. Staff business scope requires `payments.read` and `reporting.financial`.
+Provider credentials and raw responses are never returned. Billing consumes
+this private API to recover or enrich its own canonical receipt projection;
+Payments continues to own provider authentication and confirmation. See the
+[financial reconciliation contract](../../docs/architecture/financial-reconciliation.md).
+
 > Current cross-service context: [system](../../docs/architecture/system.md), [API/schema inventory](../../docs/service-inventory.md), [security/performance audit](../../docs/reviews/2026-10-10-platform-audit.md). Service descriptions below define APIs and local behavior; provider/configuration readiness is separate.
 
 Independent NestJS process (4006), dedicated PostgreSQL database, `payments` entitlement. Gateway prefix `/api/payments`; service routes use `/v1`. It supports the existing local sandbox simulator and an existing business Stripe account in **test mode only**. PayPal and bank adapters remain unavailable.

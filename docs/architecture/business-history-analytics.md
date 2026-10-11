@@ -3,8 +3,9 @@
 ## Ownership and boundaries
 
 Billing owns imported work, invoice history, original source files and monetary
-aggregates. CRM owns student identity; importing work does not create contacts or
-merge similar names. Reporting composes authorized aggregate endpoints. The web
+aggregates. CRM owns student identity; the reviewed Students import step can
+create name-only students or link existing profiles. It never automatically
+merges similar names. Reporting composes authorized aggregate endpoints. The web
 shell displays a Dashboard with Overview, Work tracker, Monthly invoices and
 Monthly billing tabs. The existing arrears draft workflow remains in Monthly
 billing; the work/monthly views default to the current business-local month.
@@ -49,12 +50,22 @@ There is no fabricated OCR extraction.
 
 Work rows retain date, name, service, fractional hours, hourly rate, total,
 status and notes. Default source status mapping is Paid → paid, Sent → pending,
-Pending → unsent, shown for confirmation. Each record retains source row and raw
+Pending → pending, shown for confirmation. Each record retains source row and raw
 columns. `PATCH work-log/:id` can correct fields, class classification and status.
-`PATCH invoice-history/:id` updates imported invoice status/payment dates only.
+`PATCH invoice-history/:id` updates unresolved imported invoice status/payment
+dates only. Reviewed invoices retain their source snapshot; use explicit credits,
+refund records and settlement allocations through reconciliation.
 Imported paid assertions are labelled historical declarations, not processor
 verified payments. Native invoices/payments remain authoritative and immutable
 through the history editor. Importing never sends invoices or charges clients.
+
+Imported invoice rows are financial evidence pending reconciliation review. They
+do not contribute additional invoice or revenue totals just because an upload
+was committed. Review chooses an existing obligation or explicitly additional
+invoice, identifies its beneficiaries/payer and the portions of work covered.
+Matching receipts replaces overlapping historical paid declarations rather than
+adding both. The [financial reconciliation contract](financial-reconciliation.md)
+replaces the earlier whole-currency invoice/fallback selection.
 
 ## Manual review of historical student identity
 
@@ -112,15 +123,18 @@ partial work identity status, and Reporting preserves these coverage values.
   students:{tracked,activeThisMonth,activePreviousMonth,lostFromPreviousMonth},
   engagement:{totalHours,monthHours,averageCommitmentHours,averageClassFrequency,
   churnRate},currencies:[{currency,totalRecordedRevenueMinor,
-  historicalPaidMinor,verifiedCollectedMinor,pendingMinor,unsentMinor,
+  historicalPaidMinor,verifiedCollectedMinor,pendingMinor,unsentMinor,invoicedMinor,
+  outstandingMinor,unresolvedInvoices,unallocatedReceipts,staleCoverage,
   expectedThisMonthMinor}],trend:[{month,hours,activeStudents,classes}],coverage}}`.
   Average commitment is recorded hours per observed active student this month;
   class frequency is confirmed classes per active class student in this month.
   Churn is the share active last month with no activity this month, labelled
   inactivity and provisional for the current incomplete month. Unknown data is
-  null, not zero. Financial measures exclude simulated payments. Recorded revenue
-  combines imported invoice paid declarations and verified native allocations;
-  paid work rows are shown separately and never added again. Expected current
+  null, not zero. Financial measures exclude simulated payments. Recorded paid
+  combines uncovered paid work and distinct accepted invoice settlements.
+  Receipt allocations replace overlapping historical declarations instead of
+  adding a second contribution. Imported invoices remain unresolved until review.
+  Verified receipts are distinct, including receipts not yet allocated. Expected current
   month work is recorded work value, not a forecast. Native scheduled-class
   rate estimates are separate and may overlap imported work.
 

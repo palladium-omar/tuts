@@ -1,6 +1,9 @@
 .work-history {
   min-width: 0;
 }
+.reconciliation-import-offer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; margin: 10px 0; border: 1px solid var(--line); border-radius: 10px; background: var(--tint); }
+.reconciliation-import-offer span { font-size: 13px; }
+@media (max-width: 640px) { .reconciliation-import-offer { align-items: stretch; flex-direction: column; } }
 .work-history .panel-title {
   align-items: flex-start;
   gap: 16px;

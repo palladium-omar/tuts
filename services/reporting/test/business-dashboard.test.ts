@@ -87,6 +87,22 @@ test('default month and time zone come from business-local Billing analytics wit
   assert.equal(requests.length, 2);
 });
 
+test('reconciled financial measures and evidence gaps pass through without selecting a different source', async () => {
+  const value = analytics();
+  value.currencies = [{...currency('EUR'),totalRecordedRevenueMinor:50000,historicalPaidMinor:0,verifiedCollectedMinor:50000,
+    pendingMinor:0,unsentMinor:0,ledgerPaidMinor:50000,invoicedMinor:50000,outstandingMinor:0,
+    unresolvedInvoices:2,unallocatedReceipts:1,staleCoverage:0} as ReturnType<typeof currency>];
+  const result = await composeBusinessDashboard(context, {}, authorization,
+    async (service,path)=>service==='billing'?json({item:value}):successful(service,path));
+  const measures=result.item.analytics!.currencies[0]!;
+  assert.equal(measures.totalRecordedRevenueMinor,50000);
+  assert.equal(measures.invoicedMinor,50000);
+  assert.equal(measures.verifiedCollectedMinor,50000);
+  assert.equal(measures.outstandingMinor,0);
+  assert.equal(measures.unresolvedInvoices,2);
+  assert.equal(measures.unallocatedReceipts,1);
+});
+
 test('unreviewed work coverage preserves Billing hours, declared ledger amounts and timezone', async () => {
   const value = analytics();
   const unreviewed = {

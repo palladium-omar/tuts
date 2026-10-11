@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import { ReconciliationController, ReconciliationService } from "./reconciliation.js";
 import { StudentFinanceController, StudentFinanceService } from "./student-finance.js";
 import { StudentWorkHistoryService } from './student-work-history.js';
 import { StudentWorkHistoryController } from './student-work-history.controller.js';
@@ -13,7 +14,7 @@ import { HistoryImportsController, WorkLogController, InvoiceHistoryController, 
 export const appOptions = {
   name: "billing",
   port: 4005,
-  controllers: [BillingController, MonthlyController, StudentFinanceController, StudentWorkHistoryController, HistoryImportsController, HistoryStudentsController, WorkLogController, InvoiceHistoryController, BusinessAnalyticsController],
-  providers: [BillingService, MonthlyService, StudentFinanceService, StudentWorkHistoryService, HistoryService, HistoryAnalyticsService, HistoryIdentityService, HistoryStudentsService],
+  controllers: [ReconciliationController, BillingController, MonthlyController, StudentFinanceController, StudentWorkHistoryController, HistoryImportsController, HistoryStudentsController, WorkLogController, InvoiceHistoryController, BusinessAnalyticsController],
+  providers: [ReconciliationService, BillingService, MonthlyService, StudentFinanceService, StudentWorkHistoryService, HistoryService, HistoryAnalyticsService, HistoryIdentityService, HistoryStudentsService],
   entitlement: "billing",
 };

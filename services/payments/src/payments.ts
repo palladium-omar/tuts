@@ -386,6 +386,9 @@ export class PaymentsService implements OnModuleInit {
               currency: attempt.currency,
               provider: "sandbox",
               simulated: true,
+              connectionId: attempt.connection_id,
+              providerReference: attempt.provider_reference,
+              confirmedAt: changed.rows[0].confirmed_at.toISOString(),
             },
           });
           return checkout(changed.rows[0]);

@@ -10,6 +10,12 @@ canonical identity verification, per-student work history and Dashboard
 composition. Its [repair review](../reviews/2026-10-11-import-data-feeds.md)
 separates implemented contracts from local and hosted verification.
 
+The [financial reconciliation contract](financial-reconciliation.md) defines
+Billing's canonical invoice/source/coverage/receipt relationships and the fixed
+dashboard measures. Payments exposes a scoped confirmed-transaction read through
+Billing's private `PAYMENTS` binding (Node `PAYMENTS_URL`). Original financial
+sources and issued snapshots are retained; this ledger never initiates charges.
+
 ## Repository layout
 
 ```

@@ -168,10 +168,10 @@ Local port: 4005. [Service guide](../services/billing/README.md).
 
 | Method | Service path | Declared access metadata | Controller |
 | --- | --- | --- | --- |
-| GET | `/v1/invoices` | Roles(owner, admin, tutor) | [BillingController.list](../services/billing/src/billing.ts#L258) |
-| GET | `/v1/invoices/:id` | Roles(owner, admin, tutor) | [BillingController.get](../services/billing/src/billing.ts#L261) |
-| POST | `/v1/invoices` | Roles(owner, admin, tutor) | [BillingController.create](../services/billing/src/billing.ts#L267) |
-| POST | `/v1/invoices/:id/issue` | Roles(owner, admin, tutor) | [BillingController.issue](../services/billing/src/billing.ts#L310) |
+| GET | `/v1/invoices` | Roles(owner, admin, tutor) | [BillingController.list](../services/billing/src/billing.ts#L263) |
+| GET | `/v1/invoices/:id` | Roles(owner, admin, tutor) | [BillingController.get](../services/billing/src/billing.ts#L266) |
+| POST | `/v1/invoices` | Roles(owner, admin, tutor) | [BillingController.create](../services/billing/src/billing.ts#L272) |
+| POST | `/v1/invoices/:id/issue` | Roles(owner, admin, tutor) | [BillingController.issue](../services/billing/src/billing.ts#L315) |
 | GET | `/v1/history-imports/:id/students` | Roles(owner, admin, tutor); Permissions(billing.read, reporting.financial, clients.read) | [HistoryStudentsController.students](../services/billing/src/history-students.controller.ts#L11) |
 | POST | `/v1/history-imports/:id/students` | Roles(owner, admin, tutor); Permissions(billing.read, reporting.financial, clients.read); Permissions(billing.read, billing.write, reporting.financial, clients.read, clients.write) | [HistoryStudentsController.review](../services/billing/src/history-students.controller.ts#L13) |
 | POST | `/v1/history-imports/preview` | Roles(owner, admin, tutor); Permissions(billing.read, reporting.financial); Permissions(billing.read, reporting.financial, billing.write) | [HistoryImportsController.preview](../services/billing/src/history.controller.ts#L16) |
@@ -195,7 +195,16 @@ Local port: 4005. [Service guide](../services/billing/README.md).
 | GET | `/v1/monthly/preview` | Roles(owner, admin, tutor) | [MonthlyController.preview](../services/billing/src/monthly.ts#L749) |
 | POST | `/v1/monthly/generate` | Roles(owner, admin, tutor); Roles(owner, admin) | [MonthlyController.generate](../services/billing/src/monthly.ts#L758) |
 | GET | `/v1/dashboard` | Roles(owner, admin, tutor) | [MonthlyController.dashboard](../services/billing/src/monthly.ts#L768) |
-| GET | `/v1/portal/finance` | Roles(owner, admin, tutor); StudentScoped; Permissions(billing.read) | [StudentFinanceController.get](../services/billing/src/student-finance.ts#L68) |
+| GET | `/v1/reconciliation/invoices` | Roles(owner, admin, tutor); Permissions(billing.read, reporting.financial) | [ReconciliationController.list](../services/billing/src/reconciliation.ts#L142) |
+| GET | `/v1/reconciliation/invoices/:id` | Roles(owner, admin, tutor); Permissions(billing.read, reporting.financial) | [ReconciliationController.detail](../services/billing/src/reconciliation.ts#L143) |
+| POST | `/v1/reconciliation/preview` | Roles(owner, admin, tutor); Permissions(billing.read, reporting.financial); Permissions(billing.read, reporting.financial, billing.write) | [ReconciliationController.preview](../services/billing/src/reconciliation.ts#L144) |
+| POST | `/v1/reconciliation/publish` | Roles(owner, admin, tutor); Permissions(billing.read, reporting.financial); Permissions(billing.read, reporting.financial, billing.write) | [ReconciliationController.publish](../services/billing/src/reconciliation.ts#L145) |
+| GET | `/v1/reconciliation/receipts` | Roles(owner, admin, tutor); Permissions(billing.read, reporting.financial) | [ReconciliationController.receipts](../services/billing/src/reconciliation.ts#L146) |
+| POST | `/v1/reconciliation/receipts/sync` | Roles(owner, admin, tutor); Permissions(billing.read, reporting.financial); Permissions(billing.read, reporting.financial, billing.write, payments.read) | [ReconciliationController.sync](../services/billing/src/reconciliation.ts#L147) |
+| POST | `/v1/reconciliation/receipts` | Roles(owner, admin, tutor); Permissions(billing.read, reporting.financial); Permissions(billing.read, reporting.financial, billing.write) | [ReconciliationController.historicalReceipt](../services/billing/src/reconciliation.ts#L148) |
+| POST | `/v1/reconciliation/allocations` | Roles(owner, admin, tutor); Permissions(billing.read, reporting.financial); Permissions(billing.read, reporting.financial, billing.write) | [ReconciliationController.allocate](../services/billing/src/reconciliation.ts#L149) |
+| POST | `/v1/reconciliation/adjustments` | Roles(owner, admin, tutor); Permissions(billing.read, reporting.financial); Permissions(billing.read, reporting.financial, billing.write) | [ReconciliationController.adjust](../services/billing/src/reconciliation.ts#L150) |
+| GET | `/v1/portal/finance` | Roles(owner, admin, tutor); StudentScoped; Permissions(billing.read, reporting.financial) | [StudentFinanceController.get](../services/billing/src/student-finance.ts#L88) |
 | GET | `/v1/students/:id/work-history` | Roles(owner, admin, tutor); StudentScoped; Permissions(billing.read, reporting.financial, clients.read) | [StudentWorkHistoryController.history](../services/billing/src/student-work-history.controller.ts#L12) |
 
 ### Owned schema
@@ -211,6 +220,7 @@ Local port: 4005. [Service guide](../services/billing/README.md).
 | [007_business_history.sql](../services/billing/migrations/007_business_history.sql) | `billing_history_sources`, `billing_work_log`, `billing_invoice_history` |
 | [008_history_identity.sql](../services/billing/migrations/008_history_identity.sql) | `billing_work_identities` |
 | [009_work_import_students.sql](../services/billing/migrations/009_work_import_students.sql) | `billing_work_import_student_reviews` |
+| [010_financial_reconciliation.sql](../services/billing/migrations/010_financial_reconciliation.sql) | `reconciliation_invoices`, `reconciliation_source_aliases`, `reconciliation_beneficiaries`, `reconciliation_work_coverage`, `reconciliation_receipts`, `reconciliation_receipt_aliases`, `reconciliation_allocations`, `reconciliation_adjustments`, `reconciliation_audit` |
 
 ## payments
 
@@ -218,16 +228,17 @@ Local port: 4006. [Service guide](../services/payments/README.md).
 
 | Method | Service path | Declared access metadata | Controller |
 | --- | --- | --- | --- |
-| GET | `/v1/providers` | Roles(owner, admin, tutor) | [PaymentsController.providers](../services/payments/src/payments.ts#L405) |
-| GET | `/v1/connections` | Roles(owner, admin, tutor) | [PaymentsController.connections](../services/payments/src/payments.ts#L409) |
-| POST | `/v1/connections` | Roles(owner, admin, tutor); Roles(owner, admin) | [PaymentsController.createConnection](../services/payments/src/payments.ts#L416) |
-| POST | `/v1/connections/:id/verify` | Roles(owner, admin, tutor); Roles(owner, admin) | [PaymentsController.verify](../services/payments/src/payments.ts#L454) |
-| DELETE | `/v1/connections/:id` | Roles(owner, admin, tutor); Roles(owner, admin) | [PaymentsController.disable](../services/payments/src/payments.ts#L464) |
-| POST | `/v1/checkouts/:id/refresh` | Roles(owner, admin, tutor); Roles(owner, admin) | [PaymentsController.refresh](../services/payments/src/payments.ts#L474) |
-| GET | `/v1/checkouts` | Roles(owner, admin, tutor) | [PaymentsController.list](../services/payments/src/payments.ts#L484) |
-| GET | `/v1/checkouts/:id` | Roles(owner, admin, tutor) | [PaymentsController.get](../services/payments/src/payments.ts#L491) |
-| POST | `/v1/checkouts` | Roles(owner, admin, tutor); Roles(owner, admin) | [PaymentsController.create](../services/payments/src/payments.ts#L500) |
-| POST | `/v1/checkouts/:id/sandbox-confirm` | Roles(owner, admin, tutor) | [PaymentsController.confirm](../services/payments/src/payments.ts#L527) |
+| GET | `/v1/providers` | Roles(owner, admin, tutor) | [PaymentsController.providers](../services/payments/src/payments.ts#L408) |
+| GET | `/v1/connections` | Roles(owner, admin, tutor) | [PaymentsController.connections](../services/payments/src/payments.ts#L412) |
+| POST | `/v1/connections` | Roles(owner, admin, tutor); Roles(owner, admin) | [PaymentsController.createConnection](../services/payments/src/payments.ts#L419) |
+| POST | `/v1/connections/:id/verify` | Roles(owner, admin, tutor); Roles(owner, admin) | [PaymentsController.verify](../services/payments/src/payments.ts#L457) |
+| DELETE | `/v1/connections/:id` | Roles(owner, admin, tutor); Roles(owner, admin) | [PaymentsController.disable](../services/payments/src/payments.ts#L467) |
+| POST | `/v1/checkouts/:id/refresh` | Roles(owner, admin, tutor); Roles(owner, admin) | [PaymentsController.refresh](../services/payments/src/payments.ts#L477) |
+| GET | `/v1/checkouts` | Roles(owner, admin, tutor) | [PaymentsController.list](../services/payments/src/payments.ts#L487) |
+| GET | `/v1/checkouts/:id` | Roles(owner, admin, tutor) | [PaymentsController.get](../services/payments/src/payments.ts#L494) |
+| POST | `/v1/checkouts` | Roles(owner, admin, tutor); Roles(owner, admin) | [PaymentsController.create](../services/payments/src/payments.ts#L503) |
+| POST | `/v1/checkouts/:id/sandbox-confirm` | Roles(owner, admin, tutor) | [PaymentsController.confirm](../services/payments/src/payments.ts#L530) |
+| GET | `/v1/reconciliation/transactions` | Roles(owner, admin, tutor); Permissions(payments.read, reporting.financial) | [ReconciliationTransactionsController.list](../services/payments/src/reconciliation-transactions.ts#L43) |
 
 ### Owned schema
 
@@ -349,7 +360,7 @@ Local port: 4010. [Service guide](../services/reporting/README.md).
 | POST | `/v1/attribution/report` | StudentScoped; Roles(owner, admin, tutor); Permissions(reporting.read) | [AttributionController.report](../services/reporting/src/attribution.ts#L439) |
 | POST | `/v1/attribution/export.csv` | StudentScoped; Roles(owner, admin, tutor); Permissions(reporting.read) | [AttributionController.csv](../services/reporting/src/attribution.ts#L449) |
 | GET | `/v1/public/links/:businessId/:token` | Public | [AttributionRedirectController.redirect](../services/reporting/src/attribution.ts#L472) |
-| GET | `/v1/business-dashboard` | Roles(owner, admin, tutor); Permissions(reporting.read) | [BusinessDashboardController.dashboard](../services/reporting/src/business-dashboard.ts#L164) |
+| GET | `/v1/business-dashboard` | Roles(owner, admin, tutor); Permissions(reporting.read) | [BusinessDashboardController.dashboard](../services/reporting/src/business-dashboard.ts#L166) |
 | POST | `/v1/summaries` | StudentScoped; Roles(owner, admin, tutor); Permissions(reporting.read) | [ReportingController.summaries](../services/reporting/src/reporting.controller.ts#L17) |
 | GET | `/v1/students/:id/summary` | StudentScoped; Roles(owner, admin, tutor); Permissions(reporting.read) | [ReportingController.summary](../services/reporting/src/reporting.controller.ts#L28) |
 | POST | `/v1/students/:id/reconcile` | StudentScoped; Roles(owner, admin, tutor); Permissions(reporting.read, reporting.write) | [ReportingController.reconcile](../services/reporting/src/reporting.controller.ts#L43) |

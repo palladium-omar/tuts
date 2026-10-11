@@ -1,0 +1,67 @@
+.reconciliation { display: grid; gap: 16px; color: var(--text); }
+.reconciliation-tabs, .reconciliation-toolbar, .reconciliation-states, .reconciliation-actions, .reconciliation-review-heading, .reconciliation-payment-heading { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.reconciliation-tabs { border-bottom: 1px solid var(--line); padding-bottom: 10px; }
+.reconciliation-tabs button, .reconciliation-states button { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; background: var(--surface); }
+.reconciliation-tabs button[aria-selected="true"], .reconciliation-states button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
+.reconciliation-toolbar { justify-content: space-between; }
+.reconciliation-toolbar > label { display: flex; align-items: center; gap: 8px; min-width: min(100%, 220px); padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; }
+.reconciliation-toolbar input { border: 0; outline: 0; min-width: 0; background: transparent; }
+.reconciliation-list, .reconciliation-receipts { display: grid; gap: 9px; }
+.reconciliation-list article, .reconciliation-receipts article { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 14px; padding: 14px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface); }
+.reconciliation-list article > div, .reconciliation-receipts article > div { display: grid; gap: 5px; min-width: 0; }
+.reconciliation-list article > div span, .reconciliation-receipts article span, .reconciliation-receipts article small { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.reconciliation-row-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+.reconciliation-row-actions button, .reconciliation-secondary { padding: 7px 10px; }
+.reconciliation-pagination { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; color: var(--muted); font-size: 12px; }
+.reconciliation-pagination span { margin-right: auto; }
+.reconciliation-count { color: var(--muted); }
+.reconciliation-review-heading { justify-content: space-between; }
+.reconciliation-review-heading > button { display: inline-flex; align-items: center; }
+.reconciliation-source { display: grid; grid-template-columns: 1fr auto; gap: 5px 12px; padding: 13px; border-radius: 10px; background: var(--tint); }
+.reconciliation-source small { grid-column: 1 / -1; color: var(--muted); }
+.reconciliation-step { display: grid; gap: 12px; }
+.reconciliation-step h3, .reconciliation-step p, .reconciliation-payment-heading h3, .reconciliation-payment-heading p { margin: 0; }
+.reconciliation-step > p, .reconciliation-note { color: var(--muted); font-size: 13px; line-height: 1.55; }
+.reconciliation-choice { display: flex !important; flex-direction: row !important; align-items: center; gap: 9px; padding: 12px; border: 1px solid var(--line); border-radius: 9px; }
+.reconciliation-choice input, .reconciliation-candidates input, .reconciliation-work-row > input[type="checkbox"] { width: auto; }
+.reconciliation-step label:not(.reconciliation-choice):not(.reconciliation-work-row) { display: grid; gap: 6px; }
+.reconciliation-step input:not([type="checkbox"]):not([type="radio"]), .reconciliation-step select, .reconciliation-inline-form input { width: 100%; min-width: 0; border: 1px solid var(--line); border-radius: 8px; padding: 9px; background: var(--surface); color: var(--text); }
+.reconciliation-candidates { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 7px; max-height: 200px; overflow: auto; }
+.reconciliation-candidates label { display: flex !important; grid-template-columns: auto 1fr; flex-direction: row !important; align-items: center; gap: 8px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; }
+.reconciliation-work { display: grid; gap: 8px; }
+.reconciliation-work-filter { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: end; gap: 10px; }
+.reconciliation-work-filter label { display: grid; gap: 6px; }
+.reconciliation-work-filter button { white-space: nowrap; }
+.reconciliation-work-summary { padding: 9px 11px; border-radius: 8px; background: var(--tint); }
+.reconciliation-month-picker { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.reconciliation-month-picker label { display: grid; gap: 6px; }
+.reconciliation-review-summary { display: grid; gap: 7px; padding: 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
+.reconciliation-review-summary h4, .reconciliation-review-summary p { margin: 0; }
+.reconciliation-review-summary h4 { font-size: 14px; }
+.reconciliation-affected { display: grid; gap: 6px; padding: 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--tint); font-size: 13px; line-height: 1.5; }
+.reconciliation-affected ul, .reconciliation-affected p { margin: 0; }
+.reconciliation-affected ul { padding-left: 20px; }
+.reconciliation-work-row { display: grid !important; grid-template-columns: auto minmax(0,1fr) minmax(90px,140px); align-items: center; gap: 10px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; }
+.reconciliation-work-row span { display: grid; gap: 4px; min-width: 0; }
+.reconciliation-work-row small, .reconciliation-empty-work { color: var(--muted); font-size: 12px; }
+.reconciliation-confirm { display: flex; align-items: flex-start; gap: 9px; padding: 12px; background: var(--tint); border-radius: 9px; font-size: 13px; line-height: 1.5; }
+.reconciliation-confirm svg { flex: 0 0 auto; color: var(--accent); }
+.reconciliation-actions { justify-content: flex-end; padding-top: 6px; }
+.reconciliation-actions button, .reconciliation-payment-heading button { display: inline-flex; align-items: center; gap: 6px; }
+.reconciliation-payment-heading { justify-content: space-between; }
+.reconciliation-payment-heading > div { display: grid; gap: 5px; }
+.reconciliation-inline-form { display: grid; gap: 10px; padding: 14px; border: 1px solid var(--line); border-radius: 10px; }
+.reconciliation-inline-form > label { display: grid; grid-template-columns: minmax(85px, 130px) minmax(0,1fr); align-items: center; gap: 10px; }
+.reconciliation-preview { display: grid; gap: 14px; }
+.reconciliation-preview section { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.reconciliation-preview h4 { margin: 0; padding: 10px 12px; background: var(--tint); }
+.reconciliation-before-after { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0; }
+.reconciliation-before-after > * { padding: 9px 12px; border-top: 1px solid var(--line); }
+.reconciliation-before-after > :nth-child(3n + 1) { color: var(--muted); }
+.reconciliation-preview pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 10px; border-radius: 8px; background: var(--tint); font: inherit; font-size: 12px; }
+.reconciliation-preview-row { display: contents; }
+.reconciliation-preview-row > span { padding: 9px 12px; border-top: 1px solid var(--line); }
+.reconciliation-preview-row > span:first-child { color: var(--muted); }
+.reconciliation-inline-form form { display: grid; gap: 10px; }
+.reconciliation-inline-form form > label { display: grid; gap: 6px; }
+@media (max-width: 620px) { .reconciliation-list article, .reconciliation-receipts article { grid-template-columns: 1fr; align-items: stretch; } .reconciliation-work-row { grid-template-columns: auto minmax(0,1fr); } .reconciliation-work-row > input:not([type="checkbox"]) { grid-column: 2; } .reconciliation-work-filter, .reconciliation-month-picker { grid-template-columns: 1fr; } .reconciliation-source { grid-template-columns: 1fr; } .reconciliation-inline-form > label { grid-template-columns: 1fr; } }

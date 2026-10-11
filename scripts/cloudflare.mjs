@@ -8,7 +8,8 @@ import pg from 'pg';
 
 export const root = fileURLToPath(new URL('../', import.meta.url));
 export const serviceNames = ['platform', 'clients', 'scheduling', 'learning', 'billing', 'payments', 'notifications', 'integrations', 'planning', 'reporting'];
-export const deployOrder = ['platform', 'clients', 'scheduling', 'learning', 'payments', 'integrations', 'billing', 'planning', 'notifications', 'reporting', 'gateway'];
+// Reporting accepts both old and new aggregate contracts before Billing produces them.
+export const deployOrder = ['platform', 'clients', 'scheduling', 'learning', 'payments', 'integrations', 'reporting', 'billing', 'planning', 'notifications', 'gateway'];
 const directory = join(root, '.cloudflare');
 const deploymentPath = join(directory, 'deployment.json');
 const secretsPath = join(directory, 'secrets.json');
@@ -134,7 +135,7 @@ export function createConfigs(configInput, subscriptions, projectRoot = root, ma
       queues: { ...(producers.length ? { producers } : {}), ...(consumes ? { consumers: [{ queue: queueName(config, name), max_batch_size: 5, max_batch_timeout: 5, max_retries: 5, dead_letter_queue: queueName(config, name, true) }] } : {}) },
       r2_buckets: [{ binding: 'EVENT_PAYLOADS', bucket_name: `${config.prefix}-event-payloads` }, ...(name === 'learning' ? [{ binding: 'UPLOADS', bucket_name: `${config.prefix}-uploads` }] : [])],
       ...(name === 'reporting' ? { services: ['scheduling', 'learning', 'billing', 'clients'].map(service => ({ binding: service.toUpperCase(), service: `${config.prefix}-${service}` })) } : {}),
-      ...(name === 'billing' ? { services: ['scheduling', 'clients'].map(service => ({ binding: service.toUpperCase(), service: `${config.prefix}-${service}` })) } : {}),
+      ...(name === 'billing' ? { services: ['scheduling', 'clients', 'payments'].map(service => ({ binding: service.toUpperCase(), service: `${config.prefix}-${service}` })) } : {}),
       ...(['integrations', 'planning'].includes(name) ? { services: [{ binding: 'CLIENTS', service: `${config.prefix}-clients` }] } : {}),
       ...(name === 'notifications' ? { services: ['clients', 'platform', 'learning', 'planning'].map(service => ({ binding: service.toUpperCase(), service: `${config.prefix}-${service}` })) } : {}),
       ...(name === 'platform' ? { services: [{ binding: 'NOTIFICATIONS', service: `${config.prefix}-notifications` }, { binding: 'CLIENTS', service: `${config.prefix}-clients` }] } : {}),

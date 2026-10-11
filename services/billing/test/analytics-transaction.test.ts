@@ -40,13 +40,13 @@ test('production Database analytics keeps unlinked hours and money, exact ranges
     assert.equal(ledger.ledgerTotalMinor, 7500); assert.equal(ledger.ledgerPaidMinor, 6000);
     assert.equal(ledger.ledgerPendingMinor, 500); assert.equal(ledger.ledgerUnsentMinor, 1000);
     assert.equal(ledger.ledgerMonthMinor, 6500); assert.equal(ledger.expectedThisMonthMinor, 6500);
-    assert.equal(ledger.totalRecordedRevenueMinor, null); assert.equal(ledger.verifiedCollectedMinor, null);
+    assert.equal(ledger.totalRecordedRevenueMinor, 6000); assert.equal(ledger.verifiedCollectedMinor, 0);
     const absentMonth = await analytics.analytics(ctx, { month: '2026-10' });
     assert.equal(absentMonth.engagement.monthHours, 0); assert.equal(absentMonth.currencies[0]!.ledgerMonthMinor, 0);
     const isolated = await analytics.analytics(other, { month: '2026-09' });
     assert.deepEqual(isolated.currencies, []); assert.equal(isolated.engagement.totalHours, null);
     await db.withTenant(ctx.businessId, tx => tx.query('UPDATE billing_work_log SET amount_minor=$1', [Number.MAX_SAFE_INTEGER]));
-    await assert.rejects(analytics.analytics(ctx, { month: '2026-09' }), /supported exact monetary range/);
+    await assert.rejects(analytics.analytics(ctx, { month: '2026-09' }), /supported exact monetary range|reconciliation_numeric_range/);
   } finally {
     await db.withTenant(ctx.businessId, async tx => {
       await tx.query('DELETE FROM billing_work_log'); await tx.query('DELETE FROM billing_history_sources');

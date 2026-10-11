@@ -6,6 +6,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { idempotent, requestHash } from './idempotency.js';
 import { identityView } from './history-identity.js';
+import { ensureReconciliation, reconciliationNeedsProjection, lockReconciliation } from './reconciliation-engine.js';
 import { monthSchema } from './monthly.js';
 import { historyHours, historyOptionsSchema, historyStatus, parseHistoryDate, parseHistoryFile, workAmount, type HistoryPreview, type HistoryValues, type RawSheet } from './history-parser.js';
 
@@ -29,7 +30,7 @@ export function safeHistoryMinor(value:unknown):number {
 }
 export const dayView=(value:unknown):string=>value instanceof Date?`${value.getFullYear()}-${String(value.getMonth()+1).padStart(2,'0')}-${String(value.getDate()).padStart(2,'0')}`:String(value).slice(0,10);
 export function historyRecord(row:Record<string,any>,kind:'work'|'invoices') {
-  return {id:row.id,origin:'imported',importId:row.import_id??null,sourceRow:row.source_row??null,date:dayView(kind==='work'?row.work_date:row.invoice_date),studentName:row.student_name,serviceType:row.service_type,invoiceNumber:row.invoice_number??null,amountMinor:safeHistoryMinor(row.amount_minor),currency:row.currency,status:row.status,paidDate:row.paid_date?dayView(row.paid_date):null,notes:row.notes,revision:row.revision,rawColumns:row.raw_columns,paymentEvidence:row.status==='paid'?'historical_declaration':'none',createdAt:row.created_at,updatedAt:row.updated_at,...(kind==='work'?{hours:Number(row.hours),rateMinor:safeHistoryMinor(row.rate_minor),countAsClasses:row.count_as_classes,identity:identityView(row,row.revision)}:{})};
+  return {id:row.id,origin:'imported',importId:row.import_id??null,sourceRow:row.source_row??null,date:dayView(kind==='work'?row.work_date:row.invoice_date),studentName:row.student_name,serviceType:row.service_type,invoiceNumber:row.invoice_number??null,amountMinor:safeHistoryMinor(row.amount_minor),currency:row.currency,status:row.status,paidDate:row.paid_date?dayView(row.paid_date):null,notes:row.notes,revision:row.revision,rawColumns:row.raw_columns,paymentEvidence:row.status==='paid'?'historical_declaration':'none',createdAt:row.created_at,updatedAt:row.updated_at,...(kind==='work'?{hours:Number(row.hours),rateMinor:safeHistoryMinor(row.rate_minor),countAsClasses:row.count_as_classes,identity:identityView(row,row.revision)}:{reconciliationState:'unresolved',canonicalInvoiceId:null})};
 }
 export const sourceRecord=(row:Record<string,any>)=>({id:row.id,fileName:row.file_name,kind:row.kind,status:row.committed_at?'committed':'staged',contentType:row.content_type,sizeBytes:Number(row.size_bytes),createdAt:row.created_at,committedAt:row.committed_at??null,summary:row.preview?.summary??null,sheetName:row.preview?.sheetName??null,downloadPath:`/billing/v1/history-imports/${row.id}/download`});
 function filters(input:z.infer<typeof historyQuerySchema>|z.infer<typeof summaryQuerySchema>,dateField:string,nameField:string,alias='') {
@@ -40,15 +41,6 @@ function filters(input:z.infer<typeof historyQuerySchema>|z.infer<typeof summary
   return {values,where:clauses.length?`WHERE ${clauses.join(' AND ')}`:''};
 }
 function paidDateValid(status:string,paidDate:unknown){if(status!=='paid'&&paidDate)throw new BadRequestException('Paid date requires a historical paid declaration');}
-async function existingInvoiceNumbers(tx:PoolClient,numbers:string[]) {
-  if(!numbers.length)return new Set<string>();
-  const normalized=[...new Set(numbers.map(number=>number.trim().toLowerCase()))];
-  const collision=await tx.query(`SELECT lower(btrim(invoice_number)) number FROM billing_invoice_history WHERE lower(btrim(invoice_number))=ANY($1::text[]) UNION ALL SELECT id::text number FROM invoices WHERE id::text=ANY($1::text[])`,[normalized]);
-  return new Set<string>(collision.rows.map(row=>row.number));
-}
-async function checkInvoiceNumber(tx:PoolClient,number:string|undefined|null) {
-  if(number&&(await existingInvoiceNumbers(tx,[number])).size)throw new ConflictException('invoice_number_already_recorded_review_duplicate');
-}
 @Injectable()
 export class HistoryService {
   constructor(@Inject(Database) private readonly db:Database) {}
@@ -64,17 +56,6 @@ export class HistoryService {
       const existing=await tx.query('SELECT id,token,preview FROM billing_history_sources WHERE business_id=$1 AND content_hash=$2 AND options_hash=$3',[ctx.businessId,contentHash,optionsHash]);
       if(existing.rows[0])return {...existing.rows[0].preview,token:existing.rows[0].token,importId:existing.rows[0].id};
       const preview=parsed.preview;
-      if(preview.kind==='invoices') {
-        const seen=new Set<string>();
-        const existingNumbers=await existingInvoiceNumbers(tx,preview.rows.flatMap(row=>row.values.invoiceNumber?[row.values.invoiceNumber]:[]));
-        for(const row of preview.rows)if(row.values.invoiceNumber){
-          const key=row.values.invoiceNumber.toLowerCase().trim();
-          if(seen.has(key))row.errors.push('Duplicate invoice number in this file');
-          if(existingNumbers.has(key))row.errors.push('Invoice number is already recorded; review the duplicate');
-          seen.add(key);
-        }
-        preview.summary.valid=preview.rows.filter(r=>!r.errors.length).length;preview.summary.invalid=preview.rows.filter(r=>r.errors.length).length;
-      }
       const id=randomUUID(),token=randomUUID();
       await tx.query(`INSERT INTO billing_history_sources(business_id,id,token,content_hash,options_hash,file_name,content_type,file_bytes,options,raw_source,preview,kind,staged_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11::jsonb,$12,$13)`,[ctx.businessId,id,token,contentHash,optionsHash,preview.fileName,parsed.contentType,file.buffer,JSON.stringify(options),JSON.stringify(parsed.rawSource),JSON.stringify(preview),preview.kind,ctx.sub]);
       await emitEvent(tx,{type:'billing.history-staged.v1',producer:'billing',businessId:ctx.businessId,correlationId:ctx.requestId,data:{importId:id,kind:preview.kind,valid:preview.summary.valid,invalid:preview.summary.invalid}});
@@ -103,7 +84,6 @@ export class HistoryService {
         SELECT $1,id,import_id,source_row,date,student_name,service_type,hours,rate_minor,amount_minor,currency,status,paid_date,invoice_number,notes,count_as_classes,raw_columns
         FROM jsonb_to_recordset($2::jsonb) AS data(id uuid,import_id uuid,source_row integer,date date,student_name text,service_type text,hours numeric,rate_minor bigint,amount_minor bigint,currency text,status text,paid_date date,invoice_number text,notes text,count_as_classes boolean,raw_columns jsonb)`,[ctx.businessId,JSON.stringify(records)]);
       else if(preview.kind==='invoices'){
-        if((await existingInvoiceNumbers(tx,records.flatMap(row=>row.invoice_number?[row.invoice_number]:[]))).size)throw new ConflictException('invoice_number_already_recorded_review_duplicate');
         await tx.query(`INSERT INTO billing_invoice_history(business_id,id,import_id,source_row,invoice_date,student_name,service_type,invoice_number,amount_minor,currency,status,paid_date,notes,raw_columns)
           SELECT $1,id,import_id,source_row,date,student_name,service_type,invoice_number,amount_minor,currency,status,paid_date,notes,raw_columns
           FROM jsonb_to_recordset($2::jsonb) AS data(id uuid,import_id uuid,source_row integer,date date,student_name text,service_type text,invoice_number text,amount_minor bigint,currency text,status text,paid_date date,notes text,raw_columns jsonb)`,[ctx.businessId,JSON.stringify(records)]);
@@ -163,6 +143,7 @@ export class HistoryService {
   async invoiceHistory(ctx:RequestContext,query:unknown) {
     assertHistoryAccess(ctx);const input=parseBody(historyQuerySchema,query);
     return this.db.withTenant(ctx.businessId,async tx=>{
+      if(await reconciliationNeedsProjection(tx,ctx.businessId))await ensureReconciliation(tx,ctx.businessId);
       const tz=(await tx.query('SELECT time_zone FROM billing_settings LIMIT 1')).rows[0]?.time_zone??'UTC';
       // Native invoices remain unchanged: union only supplies a read projection.
       const cte=`WITH history AS (
@@ -171,8 +152,8 @@ export class HistoryService {
       )`;
       const filter=filters(input,'date','student_name');const shifted=filter.where.replace(/\$(\d+)/g,(_,n)=>`$${Number(n)+1}`),values=[tz,...filter.values];
       const count=await tx.query(`${cte} SELECT count(*) total FROM history ${shifted}`,values);
-      const result=await tx.query(`${cte} SELECT * FROM history ${shifted} ORDER BY date DESC,id LIMIT $${values.length+1} OFFSET $${values.length+2}`,[...values,input.limit,input.offset]);
-      return {items:result.rows.map(row=>({...historyRecord({...row,invoice_date:row.date},'invoices'),origin:row.origin,clientId:row.client_id,paymentEvidence:row.payment_evidence,paidMinor:safeHistoryMinor(row.paid_minor),simulatedMinor:safeHistoryMinor(row.simulated_minor),editable:row.origin==='imported'})),total:Number(count.rows[0].total),limit:input.limit,offset:input.offset};
+      const result=await tx.query(`${cte} SELECT h.*,a.invoice_id canonical_invoice_id,a.source_revision accepted_source_revision FROM history h LEFT JOIN reconciliation_source_aliases a ON a.business_id=$${values.length+3} AND a.kind=h.origin AND a.source_id=h.id ${shifted} ORDER BY date DESC,h.id LIMIT $${values.length+1} OFFSET $${values.length+2}`,[...values,input.limit,input.offset,ctx.businessId]);
+      return {items:result.rows.map(row=>({...historyRecord({...row,invoice_date:row.date},'invoices'),origin:row.origin,clientId:row.client_id,paymentEvidence:row.payment_evidence,paidMinor:safeHistoryMinor(row.paid_minor),simulatedMinor:safeHistoryMinor(row.simulated_minor),reconciliationState:row.canonical_invoice_id?'accepted':'unresolved',canonicalInvoiceId:row.canonical_invoice_id??null,sourceRevision:row.revision,stale:row.accepted_source_revision!==null&&row.accepted_source_revision!==undefined&&Number(row.accepted_source_revision)!==row.revision,editable:row.origin==='imported'&&!row.canonical_invoice_id})),total:Number(count.rows[0].total),limit:input.limit,offset:input.offset};
     });
   }
   async manualInvoice(ctx:RequestContext,body:unknown,key:unknown) {
@@ -180,7 +161,6 @@ export class HistoryService {
     return this.db.withTenant(ctx.businessId,tx=>idempotent(tx,ctx.businessId,'history.invoice.create',key,input,async()=>{
       await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[`history:${ctx.businessId}`]);
       if(input.importId){const source=await tx.query('SELECT id FROM billing_history_sources WHERE business_id=$1 AND id=$2',[ctx.businessId,input.importId]);if(!source.rows[0])throw new NotFoundException('history_source_not_found');}
-      await checkInvoiceNumber(tx,input.invoiceNumber);
       const inserted=await tx.query(`INSERT INTO billing_invoice_history(business_id,id,import_id,invoice_date,student_name,service_type,invoice_number,amount_minor,currency,status,paid_date,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,[ctx.businessId,randomUUID(),input.importId??null,input.date,input.studentName,input.serviceType,input.invoiceNumber??null,input.amountMinor,input.currency,input.status,input.paidDate??null,input.notes]);
       await emitEvent(tx,{type:'billing.invoice-history-recorded.v1',producer:'billing',businessId:ctx.businessId,correlationId:ctx.requestId,data:{id:inserted.rows[0].id,importId:input.importId??null}});return historyRecord(inserted.rows[0],'invoices');
     }));
@@ -188,7 +168,11 @@ export class HistoryService {
   async editInvoice(ctx:RequestContext,id:string,body:unknown) {
     assertHistoryAccess(ctx,true);parseBody(uuid,id);const patch=parseBody(invoicePatchSchema,body);
     return this.db.withTenant(ctx.businessId,async tx=>{
+      await lockReconciliation(tx,ctx.businessId);
       const selected=await tx.query('SELECT * FROM billing_invoice_history WHERE business_id=$1 AND id=$2 FOR UPDATE',[ctx.businessId,id]);const row=selected.rows[0];if(!row)throw new NotFoundException('Imported invoice not found; native invoices are immutable through history');
+      // Serialize source edits with acceptance so immutable published evidence cannot change.
+      const accepted=await tx.query("SELECT invoice_id FROM reconciliation_source_aliases WHERE business_id=$1 AND kind='imported' AND source_id=$2",[ctx.businessId,id]);
+      if(accepted.rows[0])throw new ConflictException('Accepted invoice evidence is immutable; record an explicit adjustment');
       if(patch.revision!==undefined&&patch.revision!==row.revision)throw new ConflictException('invoice_history_revision_conflict');
       const status=patch.status??row.status,paidDate=patch.paidDate===undefined?(status==='paid'?row.paid_date:null):patch.paidDate;paidDateValid(status,paidDate);
       const updated=await tx.query('UPDATE billing_invoice_history SET status=$3,paid_date=$4,revision=revision+1,updated_at=now() WHERE business_id=$1 AND id=$2 RETURNING *',[ctx.businessId,id,status,paidDate]);

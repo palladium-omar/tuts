@@ -33,6 +33,7 @@ import {
 import { sellerEventSchema } from "./seller.js";
 import type { PoolClient } from "pg";
 import { idempotent } from "./idempotency.js";
+import { ensureReconciliation, lockReconciliation } from './reconciliation-engine.js';
 const idSchema = z.string().uuid();
 export function invoice(row: Record<string, any>) {
   return {
@@ -54,6 +55,7 @@ export function invoice(row: Record<string, any>) {
   };
 }
 export async function emitInvoiceSnapshot(tx: PoolClient, businessId: string, row: Record<string, any>, correlationId?: string) {
+  await ensureReconciliation(tx, businessId);
   const studentId = row.client_id ? (await tx.query('SELECT billing_student_root($1) id', [row.client_id])).rows[0].id : null;
   await emitEvent(tx, {type:'billing.invoice-updated.v1',producer:'billing',businessId,correlationId,data:{
     invoiceId:row.id,studentId,clientId:studentId,status:row.status,amountMinor:Number(row.total_minor),
@@ -88,6 +90,7 @@ export class BillingService implements OnModuleInit {
       },
     );
     this.bus.subscribe("payments.payment-confirmed.v1", async (event, tx) => {
+      await lockReconciliation(tx, event.businessId);
       if (event.producer !== "payments")
         throw new Error("payment_producer_invalid");
       const payment = parseBody(paymentSchema, event.data);
@@ -196,6 +199,7 @@ export class BillingService implements OnModuleInit {
             projected.rows[0]?.seller ?? null,
           ],
         );
+        await ensureReconciliation(tx, ctx.businessId);
         return invoice(rows[0]);
       }),
     );
@@ -210,6 +214,7 @@ export class BillingService implements OnModuleInit {
         key,
         { invoiceId: id },
         async () => {
+          await lockReconciliation(tx, ctx.businessId);
           const { rows } = await tx.query(
             "SELECT * FROM invoices WHERE business_id=$1 AND id=$2 FOR UPDATE",
             [ctx.businessId, id],

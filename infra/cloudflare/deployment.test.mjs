@@ -29,7 +29,7 @@ test('all ten domains remain private with minimal bindings and no credentials in
     assert.equal(config.r2_buckets.some(bucket => bucket.binding === 'UPLOADS'), name === 'learning');
     assert.equal(config.r2_buckets.length, name === 'learning' ? 2 : 1);
   }
-  assert.deepEqual(configs.billing.services, [{ binding: 'SCHEDULING', service: 'tuts-scheduling' }, { binding: 'CLIENTS', service: 'tuts-clients' }]);
+  assert.deepEqual(configs.billing.services, [{ binding: 'SCHEDULING', service: 'tuts-scheduling' }, { binding: 'CLIENTS', service: 'tuts-clients' }, { binding: 'PAYMENTS', service: 'tuts-payments' }]);
   assert.deepEqual(configs.notifications.services, ['clients','platform','learning','planning'].map(service => ({ binding: service.toUpperCase(), service: `tuts-${service}` })));
   for (const name of serviceNames.filter(name => !['billing', 'notifications','platform','reporting','integrations','planning'].includes(name))) assert.equal(configs[name].services, undefined);
   assert.equal(configs.gateway.workers_dev, true);
@@ -84,6 +84,8 @@ test('database URLs select isolated SQL roles/databases and require TLS', () => 
 });
 test('service binding targets deploy before callers and public gateway deploys last', () => {
   assert.ok(deployOrder.indexOf('scheduling') < deployOrder.indexOf('billing'));
+  assert.ok(deployOrder.indexOf('payments') < deployOrder.indexOf('billing'));
+  assert.ok(deployOrder.indexOf('reporting') < deployOrder.indexOf('billing'));
   assert.ok(deployOrder.indexOf('clients') < deployOrder.indexOf('notifications'));
   for (const name of ['platform','learning','planning']) assert.ok(deployOrder.indexOf(name) < deployOrder.indexOf('notifications'));
   assert.equal(deployOrder.at(-1), 'gateway');

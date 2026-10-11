@@ -16,6 +16,26 @@ Invoice creation and issue require `Idempotency-Key` (1–200 printable ASCII ch
 
 Money uses integer minor units, exact BigInt calculation, and a safe-integer total ceiling. Zero-total invoices are unsupported. Currency is an uppercase three-letter code; no decimal-place conversion occurs. `clientId` is a reference supplied by staff and is not validated against a different service's database. Invoice edits, cancellation, refund, taxes, discounts, pagination beyond the latest 200, and automatic session billing are not implemented.
 
+## Historical financial reconciliation
+
+[The financial reconciliation contract](../../docs/architecture/financial-reconciliation.md)
+defines the canonical invoice, source aliases, beneficiaries, covered work,
+confirmed/historical receipts, allocations and adjustment ledger. Imported
+invoice evidence is quarantined until a staff review; corresponding work and
+invoice settlements do not count twice. `/v1/reconciliation` offers paged lists,
+preview/publish, recovery from Payments' private confirmed-transactions API,
+split allocations, historical bank records and bookkeeping credits/refunds.
+These records do not execute provider charges or refunds.
+
+Billing verifies CRM identities through its private Clients binding before the
+publication transaction, and receives Payments via signed events or its bounded
+private read contract. No external service accesses Billing tables. Writes
+require `billing.write` plus `billing.read` and `reporting.financial`; all interfaces
+remain tenant scoped. Tutor `/v1/portal/finance` uses canonical beneficiaries,
+including reviewed imported and shared family invoices. Student/parent contexts
+are denied financial access. Dashboard aggregates use fixed measures described
+in the contract, with test payments excluded.
+
 `payments.payment-confirmed.v1` allocations run in the runtime inbox transaction, independently of current billing entitlement. A payment ID has one immutable allocation per business. Currency mismatch, draft/unknown invoice, payment identity mismatch, and overpayment roll back and enter the broker retry/dead-letter path. The invoice is settled only when allocations exactly match its total. Unknown references are never acknowledged as settled; retry/replay after fixing the reference is required. Forced RLS applies to every service table.
 
 `pnpm --filter @palladium/billing test` runs invariant tests. The repository integration test exercises persisted service behavior, tenant and role restrictions, event delivery and retry behavior. Production must monitor dead letters and service outbox backlog.

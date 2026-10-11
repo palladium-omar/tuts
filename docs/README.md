@@ -1,6 +1,6 @@
 # Tuts documentation
 
-Updated for the **11 October 2026** student portal improvements, import/data-feed repair and the 10 October audit remediation. Release receipts record deployment and validation evidence. Historical review files describe their own release; they are not current deployment guarantees.
+Updated for the **11 October 2026** financial reconciliation, student portal improvements, import/data-feed repair and the 10 October audit remediation. Release receipts record deployment and validation evidence. Historical review files describe their own release; they are not current deployment guarantees.
 
 ## Start here
 
@@ -9,6 +9,8 @@ Updated for the **11 October 2026** student portal improvements, import/data-fee
 - [Security model](architecture/security.md): trust boundaries, authorization, credentials, uploads and threat controls.
 - [Performance model](architecture/performance.md): request paths, batching, caches, database lifecycle and measurable budgets.
 - [Business data-feed map](architecture/business-data-feeds.md): full service diagram, imported student identities, live dashboard aggregates, tracker reads and cache invalidation.
+- [Financial reconciliation](architecture/financial-reconciliation.md): canonical invoices, reviewed work coverage, settlement evidence, payment matching, fixed dashboard measures and duplicate protection.
+- [Financial reconciliation release review](reviews/2026-10-11-financial-reconciliation.md): invoice and receipt walkthrough, duplicate protection, preserved source records and hosted checks.
 - [Import and data-feed repair review](reviews/2026-10-11-import-data-feeds.md): verified causes, source preservation, local browser evidence and hosted repair checks.
 - [Student experience review](reviews/2026-10-11-student-experience.md): actual student walkthrough, fixed UX issues and remaining opportunities.
 - [Reminder and applicant release review](reviews/2026-10-11-reminders-and-applicants.md): actual provider checks, country rules, test totals and deployment receipts.

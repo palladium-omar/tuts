@@ -21,7 +21,10 @@ RabbitMQ topic exchange: `palladium.events`. Each consuming service has its own 
     "amountMinor": 12000,
     "currency": "USD",
     "provider": "sandbox",
-    "simulated": true
+    "simulated": true,
+    "connectionId": "uuid",
+    "providerReference": "provider transaction reference",
+    "confirmedAt": "2026-10-03T12:00:00.000Z"
   }
 }
 ```
@@ -35,6 +38,15 @@ Every business mutation and its outgoing events commit in one local PostgreSQL t
 Consumers insert `(consumer, event_id)` into an inbox in the same transaction as applying their state change. An existing key is acknowledged without reapplying it. On rollback the inbox write also rolls back. Provider webhook IDs are separately deduplicated by provider connection. A queue acknowledgement happens only after commit. Repeated failures enter the service's dead-letter queue; operators can replay the original event ID after fixing the cause.
 
 Financial status transitions must be monotonic or explicitly reconciled. A stale provider notification cannot change a confirmed payment back to pending. An unknown invoice/payment reference is retained for investigation/retry, never silently treated as settled.
+
+Payment confirmation adds optional `connectionId`, `providerReference` and
+`confirmedAt` for canonical receipt reconciliation. Older deliveries retain their
+native allocation identity; the bounded Payments confirmed-transaction read can
+enrich them later. Receipt aliases keyed by payment ID and provider/account/ref
+must resolve to one receipt. Simulated confirmations never become verified money.
+Billing emits `billing.reconciliation-updated.v1` audit notifications on review,
+receipt recovery, allocation and adjustment publication; Dashboard reads live aggregate state, so it needs no new
+projection consumer. This event does not issue invoices or initiate payment.
 
 ## Selected event catalogue
 

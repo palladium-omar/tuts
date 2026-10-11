@@ -1,4 +1,6 @@
 import { z } from "zod";
+export { confirmedReceiptSchema, confirmedReceiptsResponseSchema, reconciliationDecisionSchema } from './reconciliation.js';
+export type { ConfirmedReceipt, ReconciliationDecision } from './reconciliation.js';
 export { permissionNames, defaultPermissions, hasPermission, canAccessStudent, canReadFinancial } from './permissions.js';
 export type { Permission, PermissionSubject } from './permissions.js';
 export const serviceNames = [

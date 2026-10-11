@@ -190,6 +190,14 @@ System invitation/recovery email requires a real sender; deployment does not
 enable outbound delivery, charges or enterprise administration. Current delivery
 evidence is in [the delivery tracker](student-workspace-delivery.md).
 
+Financial reconciliation adds a private Payments binding to Billing, alongside
+its existing Clients/Scheduling bindings. Migration `010_financial_reconciliation.sql`
+adds Billing-owned canonical invoice/receipt relations and tenant RLS. It removes
+the old imported-invoice-number uniqueness rule so duplicate documents can be
+preserved for review; original files and raw rows are retained. Native projection
+initialization uses the existing ordinary service role. No new Cloudflare product,
+payment collection capability or public service endpoint is enabled by this release.
+
 ## Historical audit baseline — 10 October 2026
 
 All ten private domain Workers were inspected and have targeted placement; the audit baseline had no Hyperdrive bindings. The remediation deployed a distinct pool per service with query caching disabled; all ten bindings are verified in the release receipt. At that baseline Platform and Notifications both had AUTH_MAIL_ENABLED=false; outbound campaigns and sandbox payments are false. Live PostgreSQL metadata verified ordinary roles and forced RLS on all 76 domain tables carrying business_id, with the two documented internal directories exempt. See the [audit](reviews/2026-10-10-platform-audit.md) for tests, measurements and limits. Earlier deployment counts above describe the initial installation, not today's resource inventory.

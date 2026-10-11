@@ -116,6 +116,7 @@ const launches = [...names, "gateway", "web"].map((name, index) => {
     env.SCHEDULING_URL =
       configuration.SCHEDULING_URL || "http://127.0.0.1:4003";
     env.CLIENTS_URL = configuration.CLIENTS_URL || "http://127.0.0.1:4002";
+    env.PAYMENTS_URL = configuration.PAYMENTS_URL || "http://127.0.0.1:4006";
   }
   if (name === "planning") env.CLIENTS_URL = configuration.CLIENTS_URL || "http://127.0.0.1:4002";
   if (name === "reporting") Object.assign(env, { PUBLIC_APP_URL: configuration.PUBLIC_APP_URL || "http://localhost:3000", PUBLIC_REPORTING_BASE_URL: `${configuration.PUBLIC_GATEWAY_URL || "http://localhost:8080"}/api/reporting` });

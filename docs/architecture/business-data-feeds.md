@@ -131,13 +131,18 @@ The [Billing README](../../services/billing/README.md#students-from-committed-wo
 | Students with work activity / commitment / inactivity | Fresh, reviewed canonical work identities; uses completed native classes only if no work history exists | Show missing coverage and a review action; never count labels as unique people |
 | Class frequency | Explicitly classified imported class rows or completed native classes | Do not infer classes from essay/review work |
 | Work unsent / pending / paid | Source work declarations, all history | Separate from invoice balances and verified collections |
-| Invoice balances | Native invoice outstanding/draft amounts plus imported invoice declarations | Do not add work statuses again; records can overlap |
-| Verified collections | Non-simulated native payment allocations | Workbook `paid` is not provider verification |
-| Historical paid invoices | Imported invoice paid declarations | Separate provenance from collections |
+| Invoice balances | Canonical accepted obligations, less credits and supported settlement claims | Imported documents require review; source aliases describe one obligation |
+| Verified collections | Distinct nonsimulated provider receipts less recorded refunds | Allocated or unallocated; workbook `paid` is historical evidence |
+| Recorded paid | Paid uncovered work plus the maximum overlapping settlement claim per canonical invoice | Paid work, paid invoice aliases and receipt allocations never add the same amount twice |
+| Pending / unsent | Uncovered work plus canonical issued / draft balances | Reviewed amount-bearing coverage removes overlapping work contributions |
 | Native class estimate | Rated scheduled/completed classes in selected month | Separate from logged work value because they can overlap |
 | Trend | Monthly work hours; most recent 12 months displayed | Hours available; student counts require reviewed coverage |
 
 Keep currencies separate. Use integer minor units and exact safe-range checks. Work dates are calendar dates; native timestamps use Billing timezone for month boundaries. CRM total is all-time; active work and work value use the selected month. Unsent/pending/paid balances are all-time and labeled accordingly. A current month with no rows is a valid zero if the source is available; source failure is unavailable, not zero.
+
+The [financial reconciliation contract](financial-reconciliation.md) supersedes
+the earlier invoice-or-work fallback. It owns source aliases, beneficiary/payer
+links, work coverage, receipt allocation and consistent settlement calculations.
 
 ## Performance, security and observability
 

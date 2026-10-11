@@ -15,6 +15,7 @@ import { currencyScale, decimalMinor } from "../lib/history-money";
 import "./work-history.css";
 import { HistoryImport } from "./history-import";
 import { WorkImportStudents } from './work-import-students';
+import { Reconciliation } from "./reconciliation";
 
 const currentMonth = (business: Business) => {
   const timeZone =
@@ -63,7 +64,9 @@ export function WorkHistory({
     [studentReviewBusy, setStudentReviewBusy] = useState(false),
     [manual, setManual] = useState(false),
     [summary, setSummary] = useState<Row | null>(null),
-    [summaryLoading, setSummaryLoading] = useState(false);
+    [summaryLoading, setSummaryLoading] = useState(false),
+    [reconciling, setReconciling] = useState(false),
+    [reconcileOffer, setReconcileOffer] = useState(false);
   useEffect(() => { setReviewingIdentity(null); setReviewingImport(null); }, [business.id]);
   const canRead =
       canReadFinancial(business) && business.entitlements.includes("billing"),
@@ -187,9 +190,11 @@ export function WorkHistory({
               Add past invoice
             </button>
           )}
+          {mode === "invoices" && canWrite && <button onClick={() => { setReconciling(true); setReconcileOffer(false); }}>Reconcile invoices &amp; payments</button>}
         </div>
       </div>
       <Notice error={error || list.error} message={notice} />
+      {reconcileOffer && mode === "invoices" && canWrite && <div className="reconciliation-import-offer" role="status"><span>Your invoice history was imported. Review each invoice before it changes financial totals.</span><button onClick={() => { setReconciling(true); setReconcileOffer(false); }}>Reconcile invoices &amp; payments</button></div>}
       <div className="work-tabs" role="tablist" aria-label="History views">
         {mode === "work" && (
           <button
@@ -510,6 +515,7 @@ export function WorkHistory({
             onFileConsumed?.();
             setRevision((n) => n + 1);
             setNotice(message);
+            if (mode === "invoices") setReconcileOffer(true);
           }}
         />
       )}
@@ -658,9 +664,11 @@ export function WorkHistory({
             setManual(false);
             setRevision((n) => n + 1);
             setNotice("Historical invoice saved.");
+            setReconcileOffer(true);
           }}
         />
       )}
+      {reconciling && <Reconciliation api={api} business={business} onClose={() => setReconciling(false)} onChanged={() => setRevision(value => value + 1)} />}
     </section>
   );
 }

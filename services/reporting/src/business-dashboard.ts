@@ -21,6 +21,8 @@ const currencySchema = z.object({
   ledgerTotalMinor: nullableCount.optional(), ledgerPaidMinor: nullableCount.optional(),
   ledgerPendingMinor: nullableCount.optional(), ledgerUnsentMinor: nullableCount.optional(),
   ledgerMonthMinor: nullableCount.optional(), nativeExpectedMinor: nullableCount.optional(),
+  invoicedMinor: nullableCount.optional(), outstandingMinor: nullableCount.optional(),
+  unresolvedInvoices: nullableCount.optional(), unallocatedReceipts: nullableCount.optional(), staleCoverage: nullableCount.optional(),
 });
 const analyticsResponse = z.object({ item: z.object({
   month: monthSchema,
@@ -39,7 +41,7 @@ const analyticsResponse = z.object({ item: z.object({
     workRows: nullableCount, importedInvoices: nullableCount, nativeInvoices: nullableCount,
     confirmedClasses: nullableCount, sourceFiles: nullableCount,
     studentIdentity: z.enum(['unlinked_source_names_and_native_student_ids','reviewed_work_rows_and_native_student_ids','partial_reviewed_work_identities']),
-    payments: z.literal('verified_allocations_excluding_simulated'),
+    payments: z.enum(['verified_allocations_excluding_simulated','distinct_verified_receipts_excluding_simulated']),
     churn: z.literal('inactivity'), provisional: z.boolean(),
     notes: z.array(z.string().max(300)).max(20),
   }),

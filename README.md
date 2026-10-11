@@ -135,6 +135,7 @@ Read the contracts before extending a service:
 14. [Student reminders and country-aware applicant rules](docs/architecture/student-reminders-and-applicant-rules.md)
 15. [Annual application-source review register](docs/annual-review.md)
 16. [Business data feeds and imported student identities](docs/architecture/business-data-feeds.md)
+17. [Invoice, work and payment reconciliation](docs/architecture/financial-reconciliation.md)
 
 The student workspace expansion follows the [delivery tracker](docs/student-workspace-delivery.md).
 The release is deployed on the existing Cloudflare/Neon/R2 installation.

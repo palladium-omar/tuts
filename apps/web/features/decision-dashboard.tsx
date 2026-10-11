@@ -4,6 +4,7 @@ import {canReadFinancial} from "@palladium/contracts";
 import { Empty, Notice } from "../components/shared";
 import { errorMessage, money, onApiInvalidation, type Api, type Business, type Row } from "../lib/api";
 import { BusinessDashboard } from "./business-dashboard";
+import { Reconciliation } from "./reconciliation";
 import "./decision-dashboard.css";
 
 const sourceLabels: Record<string, string> = { clients: "Student counts", "clients.total": "Student total", "clients.active": "Active student count", "clients.leads": "Lead count", "clients.inactive": "Inactive student count", billing: "Work and financial history" };
@@ -35,13 +36,14 @@ export function DecisionDashboard({ api, business, onInvoices, onTracker, workTr
 }) {
   const [tab, setTab] = useState<Tab>(initialTab), [month, setMonth] = useState(""), [revision, setRevision] = useState(0);
   const [snapshot, setSnapshot] = useState<{ api: Api; businessId: string; item: Row } | null>(null);
+  const [reconciliationOpen, setReconciliationOpen] = useState(false);
   const [loading, setLoading] = useState(false), [error, setError] = useState("");
   const sequence = useRef(0), tabId = useId();
   const data = snapshot?.api === api && snapshot.businessId === business.id ? snapshot.item : null;
   const profileTimeZone = business.settings?.timezone;
   const displayedMonth = month || data?.month || currentMonth(profileTimeZone || "UTC");
   useEffect(() => { setTab(initialTab); }, [initialTab]);
-  useEffect(() => { setMonth(""); setSnapshot(null); setError(""); }, [api, business.id]);
+  useEffect(() => { setMonth(""); setSnapshot(null); setError(""); setReconciliationOpen(false); }, [api, business.id]);
   useEffect(() => onApiInvalidation(api, (matches, reason) => {
     if (reason) {setSnapshot(null); return;}
     if (matches('reporting/v1/business-dashboard')) setRevision(value => value + 1);
@@ -67,7 +69,7 @@ export function DecisionDashboard({ api, business, onInvoices, onTracker, workTr
   const unavailable: Row[] = (data?.sources ?? []).filter((source: Row) => source.status !== "complete");
   const financialAccess = canReadFinancial(business) && business.entitlements.includes("billing");
   const visibleTabs = financialAccess ? tabs : tabs.filter(item => item.id === "overview");
-  useEffect(() => { if (!financialAccess) setTab("overview"); }, [financialAccess]);
+  useEffect(() => { if (!financialAccess) { setTab("overview"); setReconciliationOpen(false); } }, [financialAccess]);
   function chooseTab(next: Tab) { setTab(next); }
   return <section className="decision-dashboard" aria-label="Business dashboard">
     <header className="decision-header">
@@ -104,12 +106,13 @@ export function DecisionDashboard({ api, business, onInvoices, onTracker, workTr
           <Metric title="Active in recorded work" value={number(analytics?.students?.activeThisMonth)} detail="Students with observed activity in the selected month." icon={<ChartNoAxesCombined size={18} />} />
         </div>
         {analytics?.coverage?.studentIdentity === 'partial_reviewed_work_identities' && <div className="decision-identity-notice"><div><strong>Your work is saved. Match the students to complete the analytics.</strong><p>Hours and amounts are available below. Link imported names to CRM profiles to calculate student activity, commitment and inactivity.</p></div><button onClick={() => chooseTab('work')}>Match imported students <ArrowUpRight size={14} /></button></div>}
-        <div className="decision-section-title"><div><h3>Money & recorded work</h3><p>Each currency is shown separately. Test payments are excluded.</p></div><button onClick={() => chooseTab("invoices")}>Review invoices <ArrowUpRight size={14} /></button></div>
+        <div className="decision-section-title"><div><h3>Money & recorded work</h3><p>Each currency is shown separately. Work, invoices and confirmed payments remain separate.</p></div>{financialAccess && <button onClick={() => setReconciliationOpen(true)}>Reconcile invoices &amp; payments <ArrowUpRight size={14} /></button>}</div>
+        {financialAccess && currencies.some(currency => Number(currency.unresolvedInvoices || 0) + Number(currency.unallocatedReceipts || 0) + Number(currency.staleCoverage || 0) > 0) && <div className="decision-identity-notice"><div><strong>{currencies.reduce((sum, currency) => sum + (Number(currency.unresolvedInvoices) || 0) + (Number(currency.unallocatedReceipts) || 0) + (Number(currency.staleCoverage) || 0), 0)} invoice or payment records need review.</strong><p>Unreviewed invoices stay out of invoiced totals. Confirmed payments count as received even before matching.</p></div><button onClick={() => setReconciliationOpen(true)}>Review records <ArrowUpRight size={14} /></button></div>}
         {currencies.length ? <div className="decision-money-grid">{currencies.map(currency => <article className="decision-card decision-money-card" key={currency.currency}>
           <div className="decision-card-label"><span className="eyebrow">{currency.currency}</span><Wallet size={18} /></div>
-          <div className="decision-money-primary"><div><span>{currency.pendingMinor == null ? 'Work marked pending · all history' : 'Pending invoice balances'}</span><strong>{amount(currency.pendingMinor ?? currency.ledgerPendingMinor, currency.currency)}</strong></div><div><span>Recorded work value this month</span><strong>{amount(currency.expectedThisMonthMinor, currency.currency)}</strong></div></div>
-          <dl className="decision-money-details"><div><dt>{currency.totalRecordedRevenueMinor == null ? 'Work marked paid · all history' : 'Total recorded revenue · all history'}</dt><dd>{amount(currency.totalRecordedRevenueMinor ?? currency.ledgerPaidMinor, currency.currency)}</dd></div><div><dt>{currency.unsentMinor == null ? 'Work marked unsent · all history' : 'Unsent invoice balances'}</dt><dd>{amount(currency.unsentMinor ?? currency.ledgerUnsentMinor, currency.currency)}</dd></div>{currency.verifiedCollectedMinor != null && <div><dt>Verified collections · all history</dt><dd>{amount(currency.verifiedCollectedMinor, currency.currency)}</dd></div>}{currency.historicalPaidMinor != null && <div><dt>Historical paid invoices</dt><dd>{amount(currency.historicalPaidMinor, currency.currency)}</dd></div>}{currency.nativeExpectedMinor != null && <div><dt>Class estimate · this month</dt><dd>{amount(currency.nativeExpectedMinor, currency.currency)}</dd></div>}{currency.pendingMinor != null && currency.ledgerPendingMinor != null && <div><dt>Work marked pending · all history</dt><dd>{amount(currency.ledgerPendingMinor, currency.currency)}</dd></div>}{currency.unsentMinor != null && currency.ledgerUnsentMinor != null && <div><dt>Work marked unsent · all history</dt><dd>{amount(currency.ledgerUnsentMinor, currency.currency)}</dd></div>}{currency.totalRecordedRevenueMinor != null && currency.ledgerPaidMinor != null && <div><dt>Work marked paid · all history</dt><dd>{amount(currency.ledgerPaidMinor, currency.currency)}</dd></div>}</dl>
-          <p className="decision-definition">Month work value covers logged work only. Class estimates cover rated, scheduled and completed classes; cancelled classes are excluded. These amounts are shown separately because their records may overlap. Historical paid declarations are imported invoice assertions; verified collections come from recorded native payments. Work statuses are tracked separately.</p>
+          <div className="decision-money-primary"><div><span>Invoiced · all history</span><strong>{amount(currency.invoicedMinor, currency.currency)}</strong></div><div><span>Verified received · all history</span><strong>{amount(currency.verifiedCollectedMinor, currency.currency)}</strong></div></div>
+          <dl className="decision-money-details"><div><dt>Outstanding invoice balances</dt><dd>{amount(currency.outstandingMinor, currency.currency)}</dd></div><div><dt>Recorded paid · all history</dt><dd>{amount(currency.totalRecordedRevenueMinor, currency.currency)}</dd></div><div><dt>Recorded work value this month</dt><dd>{amount(currency.expectedThisMonthMinor, currency.currency)}</dd></div>{currency.pendingMinor != null && <div><dt>Pending work and invoice balances</dt><dd>{amount(currency.pendingMinor, currency.currency)}</dd></div>}{currency.unsentMinor != null && <div><dt>Unsent work and draft invoices</dt><dd>{amount(currency.unsentMinor, currency.currency)}</dd></div>}{currency.nativeExpectedMinor != null && <div><dt>Class estimate · this month</dt><dd>{amount(currency.nativeExpectedMinor, currency.currency)}</dd></div>}{currency.historicalPaidMinor != null && <div><dt>Historical paid declarations · all history</dt><dd>{amount(currency.historicalPaidMinor, currency.currency)}</dd></div>}</dl>
+          <p className="decision-definition">Invoiced reflects accepted invoices after credits. Verified received reflects confirmed, non-test payments after refunds. Outstanding is the remaining balance on accepted invoices. Recorded paid includes accepted settlement evidence and paid work not covered by an invoice. Work value remains separately available. Historical paid declarations describe past records and are not proof of a new payment.</p>
         </article>)}</div> : <div className="decision-card decision-empty"><Wallet size={22} /><h3>{analytics ? "No financial records to show" : "Financial overview unavailable"}</h3><p>{analytics ? "Import work or invoice history to start building a picture of your business." : "Financial access or a source response is unavailable. Student figures can still appear above."}</p>{financialAccess && <button onClick={() => chooseTab("work")}>Open work tracker <ArrowUpRight size={14} /></button>}</div>}
         <div className="decision-engagement-grid">
           <article className="decision-card"><div className="decision-section-title"><div><h3>Student engagement</h3><p>{monthLabel(viewMonth)}</p></div></div><dl className="decision-engagement"><div><dt>Average recorded commitment</dt><dd>{number(analytics?.engagement?.averageCommitmentHours, " h")}</dd></div><div><dt>Average class frequency</dt><dd>{number(analytics?.engagement?.averageClassFrequency)}</dd></div><div><dt>Previous month student inactivity{provisional && <span className="decision-provisional">Provisional</span>}</dt><dd>{typeof analytics?.engagement?.churnRate === "number" ? number(analytics.engagement.churnRate * 100, "%") : "—"}</dd></div></dl><p className="decision-definition">Commitment is recorded hours per active work student this month. Frequency is confirmed classes per active class student. Inactivity is the share active last month with no recorded activity this month{isCurrentMonth ? "; this month is still in progress" : ""}. Missing data is shown as —.</p></article>
@@ -119,6 +122,7 @@ export function DecisionDashboard({ api, business, onInvoices, onTracker, workTr
         {unavailable.length > 0 && <details className="decision-source-note"><summary>Some figures are unavailable ({unavailable.length} sources)</summary><ul>{unavailable.map((source, index) => <li key={`${source.name}-${index}`}><strong>{sourceLabels[source.name] || "Dashboard source"}</strong>: {source.reason || "This source is unavailable."}</li>)}</ul></details>}
       </>}
     </div>
+    {reconciliationOpen && financialAccess && <Reconciliation api={api} business={business} onClose={() => setReconciliationOpen(false)} onChanged={() => setRevision(value => value + 1)} />}
   </section>;
 }
 function Metric({ title, value, detail, icon }: { title: string; value: string; detail: string; icon: ReactNode }) {

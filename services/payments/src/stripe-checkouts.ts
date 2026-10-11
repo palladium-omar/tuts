@@ -539,6 +539,9 @@ export class StripeCheckoutsService {
         currency: attempt.currency,
         provider: "stripe",
         simulated: true,
+        connectionId: attempt.connection_id,
+        providerReference: attempt.provider_reference,
+        confirmedAt: changed.confirmed_at.toISOString(),
       },
     });
     return changed;
