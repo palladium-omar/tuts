@@ -129,8 +129,14 @@ test('duplicate ticks lease once; revoked access suppresses; provider ambiguity 
   const oldNow=Object.getOwnPropertyDescriptor(performance,'now');let simulatedNow=1000;
   Object.defineProperty(performance,'now',{value:()=>simulatedNow,configurable:true});
   worker.recipient=async()=>{simulatedNow+=12_000;return 'synthetic@example.invalid';};
-  try{await worker.processTenant(businessId,23_000);assert.equal((await state(deferred)).email_status,'pending');assert.equal(sends,sendsBeforeBudget);}finally{if(oldNow)Object.defineProperty(performance,'now',oldNow);else delete (performance as unknown as Record<string,unknown>).now;worker.recipient=async()=> 'synthetic@example.invalid';}
-  await db.withTenant(businessId,tx=>tx.query("UPDATE student_reminders SET state='cancelled',email_status='suppressed',email_reason='cancelled' WHERE id=$1",[deferred]));
+  try{
+   await worker.processTenant(businessId,23_000);assert.equal((await state(deferred)).email_status,'pending');assert.equal(sends,sendsBeforeBudget);
+   // Two seconds spent before tenant processing must still leave a usable
+   // lease margin; a 21s reserve under the 22s tick would starve this case.
+   simulatedNow=3000;worker.recipient=async()=> 'synthetic@example.invalid';mail.sendStudentReminder=async()=>{sends++;return 'synthetic_budget_accepted';};
+   await worker.processTenant(businessId,23_000);assert.equal((await state(deferred)).email_status,'accepted');assert.equal(sends,sendsBeforeBudget+1);
+  }finally{if(oldNow)Object.defineProperty(performance,'now',oldNow);else delete (performance as unknown as Record<string,unknown>).now;worker.recipient=async()=> 'synthetic@example.invalid';}
+  await db.withTenant(businessId,tx=>tx.query("UPDATE student_reminders SET state='cancelled' WHERE id=$1",[deferred]));
   const card=await insert(),boardId=randomUUID(),cardId=randomUUID();await db.withTenant(businessId,tx=>tx.query("UPDATE student_reminders SET target_kind='planning',assignment_id=NULL,board_id=$2,card_id=$3 WHERE id=$1",[card,boardId,cardId]));
   const cardEvent={...event,type:'planning.card-updated.v1',producer:'planning',data:{studentId,boardId,cardId,archived:false,sharing:'student',completed:false,revision:2}};
   await db.withTenant(businessId,tx=>suppressReminders(cardEvent,tx));assert.equal((await state(card)).state,'scheduled');cardEvent.data.completed=true;await db.withTenant(businessId,tx=>suppressReminders(cardEvent,tx));assert.equal((await state(card)).state,'cancelled');

@@ -25,7 +25,7 @@ export async function resolveReminderRecipient(input:{businessId:string;userId:s
  const secret=process.env.AUTH_MAIL_INTERNAL_SECRET??'';
  if(!/^[A-Za-z0-9+/_=-]{32,512}$/.test(secret))throw new ServiceUnavailableException('Reminder access validation is unavailable');
  try {
-  const response=await serviceFetch('platform','/internal/reminder-recipient',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Mail-Secret':secret},body:JSON.stringify(input),signal:AbortSignal.timeout(8000)});
+  const response=await serviceFetch('platform','/internal/reminder-recipient',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Mail-Secret':secret},body:JSON.stringify(input),signal:AbortSignal.timeout(input.operation==='delivery'?5000:8000)});
   if(response.status===403||response.status===404)throw new ForbiddenException('Reminder access is unavailable');
   if(!response.ok)throw new ServiceUnavailableException('Reminder access validation is unavailable');
   return z.object({item:z.object({recipientEmail:z.email().max(254)})}).parse(await response.json()).item.recipientEmail;

@@ -1,7 +1,7 @@
 /** A private gateway tick expires after 30 seconds. Reserve eight seconds for
  * application startup, outbox publication and invocation/socket cleanup. */
 export const notificationWorkBudgetMs=22_000;
-export const reminderLeaseBudgetMs=21_000; // identity <=8s, mail <=12s, SQL margin
+export const reminderLeaseBudgetMs=18_000; // identity <=5s, mail <=12s, SQL margin
 export const campaignLeaseBudgetMs=17_000; // Cloudflare provider <=15s, SQL margin
 export function notificationDeadline(budgetMs=notificationWorkBudgetMs){return performance.now()+budgetMs;}
 export function budgetRemaining(deadline:number){return deadline-performance.now();}
