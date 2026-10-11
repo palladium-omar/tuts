@@ -4,7 +4,13 @@ Tuts is a composable tutoring-business workspace. Its local preview brings toget
 
 The hosted app runs at [tuts.palladiumscholars.com](https://tuts.palladiumscholars.com) on Cloudflare Pages/Workers, Neon PostgreSQL, Queues and private R2. Production has ten private domain Workers plus a gateway. Local development uses independent Node processes, PostgreSQL roles/databases and RabbitMQ. The container target remains an alternative.
 
-**Documentation reviewed 10 October 2026:** start at the [documentation index](docs/README.md), [current system architecture](docs/architecture/system.md), [181-route API/schema inventory](docs/service-inventory.md), and [audit remediation receipt](docs/reviews/2026-10-10-audit-remediation.md). The [original audit](docs/reviews/2026-10-10-platform-audit.md) records baseline evidence; the remediation receipt records subsequent changes and remaining limits. Historical review files describe their own releases.
+**Documentation updated 11 October 2026:** start at the [documentation index](docs/README.md), [current system architecture](docs/architecture/system.md), [193-route API/schema inventory](docs/service-inventory.md), and [audit remediation receipt](docs/reviews/2026-10-10-audit-remediation.md). The [original audit](docs/reviews/2026-10-10-platform-audit.md) records baseline evidence; the remediation receipt records subsequent changes and remaining limits. Historical review files describe their own releases.
+
+The 11 October [import data-feed repair review](docs/reviews/2026-10-11-import-data-feeds.md)
+and [business data-feed map](docs/architecture/business-data-feeds.md) document
+reviewed student creation/linking, existing-source repair, aggregate transaction
+isolation and staff student work history. The repair review separates local
+browser checks from deployed service checks and the completed existing-import repair.
 
 The original audit inspected deployment `2a44213`; consult the remediation receipt for the current release. Account/data migration is documented in [the migration procedure](docs/data-migration.md); existing password hashes were preserved, browser sessions were not. Current ten-service encrypted backup and isolated restore are documented in [recovery](scripts/RECOVERY.md). The audit does not establish every hosted account/provider workflow.
 
@@ -128,6 +134,7 @@ Read the contracts before extending a service:
 13. [Student overview and actionable planning](docs/architecture/student-overview.md)
 14. [Student reminders and country-aware applicant rules](docs/architecture/student-reminders-and-applicant-rules.md)
 15. [Annual application-source review register](docs/annual-review.md)
+16. [Business data feeds and imported student identities](docs/architecture/business-data-feeds.md)
 
 The student workspace expansion follows the [delivery tracker](docs/student-workspace-delivery.md).
 The release is deployed on the existing Cloudflare/Neon/R2 installation.

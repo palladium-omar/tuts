@@ -290,3 +290,62 @@ custom fields remain staff-private until an explicit sharing policy exists.
 Staff create/PATCH accepts a strict nullable `planningProfile` for students. Education facts remain `currentGrade,academicYear,graduationYear,entryCycle`; approved `applicantFacts` adds residence, citizenships, qualification, entry level, application route, USA course procedure (`campusFranceProcedure`: `hdap|dap|other|unknown`) and selected aid/testing requirements. Exact enums, confirmation semantics and the personalized Planning API are documented in [student reminders and applicant rules](../../docs/architecture/student-reminders-and-applicant-rules.md#applicant-api-contract). Country choices use ISO codes; no name, email, CRM address or tutor/business location supplies eligibility.
 
 The portal whitelist exposes only approved education keys and validated nested applicant facts. Legacy staff-only `applicantCountry` and `templateKey` remain excluded. Private metadata, diagnosis/documents and unknown schema keys are rejected; there is no health-document field in applicant facts. Whole-profile updates validate grade/year consistency and preserve approved facts in the education UI. The guided plan can prefill these approved values, review/change them for its own board, and let authorized staff explicitly save confirmed facts. Planning independently persists the confirmed board applicability snapshot and derives tasks server-side.
+
+## Reviewed work-import students
+
+`GET /v1/clients/:id/identity` is the compact verification contract for Billing.
+It returns exactly `{item:{id,kind}}`, resolving a merge alias to its canonical ID.
+It requires a signed Clients entitlement, `clients.read` and owner/admin/tutor role.
+Student-scoped tutors may use it only when both the requested ID and the resolved
+canonical ID are granted. Student/parent roles remain forbidden. The response
+excludes photos, names, addresses and private CRM properties, keeping verification
+small even when a profile has a large photo. The full client GET keeps its existing
+business-access restrictions.
+
+Billing owns saved work rows and their associations. Clients owns candidate lookup,
+explicit profile creation and durable reviewed import identities. The signed HTTP
+routes below require a staff role, business access scope and the Clients entitlement.
+Preview requires `clients.read`; resolution requires `clients.read` and
+`clients.write`. Billing independently enforces financial permissions before
+orchestrating this workflow. Student and parent portals cannot use these routes.
+
+| Method | Path | Request / response |
+| --- | --- | --- |
+| POST | `/v1/clients/work-import/preview` | `{importId,groups:[{key,name}]}` → `{item:{groups:[{key,name,candidates:[{id,displayName,email}],resolvedStudentId,resolvedAction,ambiguous}]}}` |
+| POST | `/v1/clients/work-import/resolve` | `{importId,decisions:[{key,name,action:'create'\|'link',studentId?}]}` → `{item:{groups:[{key,studentId,created}]}}` |
+
+Each request accepts 1–100 groups with unique lowercase 64-character hexadecimal
+keys and source names of 1–200 characters. Billing computes the key from a reviewed
+set of owned work-row IDs; it is not a globally unique person identity. Candidate
+lookup uses exact NFKC, collapsed-whitespace, lowercase name normalization and
+canonical student profiles. It displays at most 20 candidates per name and marks
+multiple matches ambiguous, including matches beyond that display limit. Name
+matches are suggestions requiring a deliberate link decision. A deliberate create
+decision may create a distinct student even when candidates share that name.
+
+Create accepts no email, phone, status or consent fields. It preserves the existing
+CRM display-name limit of 160 characters, so longer source labels can be reviewed
+and linked but need a suitable CRM display name before profile creation. New
+students have `source:'work-import'`, status `lead`, null addresses and false
+communication opt-ins. This workflow does not send invitations or infer activity.
+
+Migration `008_work_import_identities.sql` creates a forced tenant-RLS mapping
+keyed by `(business_id,import_id,group_key)`. Resolution takes the tenant contact
+mutation lock and commits the mapping and its
+`clients.work-import-resolved.v1` audit event atomically with any new profile.
+Event data includes import ID, group key, student ID and action, without contact
+details. Normalized source name, action and requested student ID determine the
+saved input digest. Retrying returns the original identity and creation provenance
+(`created:true` for an original create decision) without creating another profile.
+Changed names or decisions return 409; whitespace/case/NFKC-equivalent names replay.
+Merged IDs resolve to the canonical student, and an equivalent canonical link ID
+may replay after a merge. Preview also returns canonical saved resolutions.
+Its `resolvedAction` is `create`, `link` or null, allowing a reopened review to
+retry the saved action after Clients committed and Billing linking failed.
+
+Mappings retain their original student reference and cannot be silently removed
+by profile deletion. `DELETE /v1/clients/:id` returns 409 with an explanation for
+a mapped student before making deletion or group changes. Use the existing status
+`inactive` to retain an unused profile and its reviewed history. Profiles without
+protected references keep the existing deletion behavior. Billing can retry after
+Clients commits and Billing linking fails, without reimporting or recounting work.

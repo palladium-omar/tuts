@@ -9,6 +9,7 @@ import { StudentReporting } from "./student-reporting";
 import { StudentDocuments } from "./student-documents";
 import { tutorHomeworkOrder } from "../lib/tutor-workspace";
 import { StudentEducationProfile } from "./student-education-profile";
+import { StudentWorkHistory } from './student-work-history';
 
 export function StudentAvatar({ student }: { student: Row }) {
   return <span className="tracker-avatar">{student.photo ? <img src={student.photo} alt="" /> : String(student.displayName || "?").split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase()}</span>;
@@ -19,7 +20,8 @@ export function StudentTrackerDetail({ api, business, student: initial, fields, 
   const photoInput = useRef<HTMLInputElement>(null);
   const canWrite = hasPermission(business, "clients.write"), canInvite = hasPermission(business, "platform.invites.manage");
   const available = (domain: string) => business.entitlements.includes(domain) && hasPermission(business, `${domain}.read`);
-  const tabs = [...(available("reporting") ? ["summary"] : []), "contacts", ...(available("learning") ? ["documents", "learning"] : []), ...(available("scheduling") ? ["sessions"] : []), ...(available("billing") && canReadFinancial(business) ? ["payments"] : []), ...(available("reporting") ? ["activity"] : [])];
+  const financialAccess = available("billing") && canReadFinancial(business);
+  const tabs = [...(available("reporting") ? ["summary"] : []), "contacts", ...(available("learning") ? ["documents", "learning"] : []), ...(available("scheduling") ? ["sessions"] : []), ...(financialAccess && available("clients") ? ["work"] : []), ...(financialAccess ? ["payments"] : []), ...(available("reporting") ? ["activity"] : [])];
   const accessKey = tabs.join(",");
   useEffect(() => { setTab(tabs.includes(initialTab) ? initialTab : tabs[0]); }, [initialTab, accessKey]);
   function changeTab(next: string) { setTab(next); onTabChange?.(next); }
@@ -54,11 +56,13 @@ export function StudentTrackerDetail({ api, business, student: initial, fields, 
     <div className="tracker-detail-tabs" role="tablist" aria-label="Student workspace sections">{tabs.map((name) => <button key={name} role="tab" id={`tracker-tab-${student.id}-${name}`} aria-controls={`tracker-panel-${student.id}`} tabIndex={tab === name ? 0 : -1} aria-selected={tab === name} disabled={busy} onClick={() => changeTab(name)} onKeyDown={event => {
       const at = tabs.indexOf(name), next = event.key === "ArrowRight" ? tabs[(at + 1) % tabs.length] : event.key === "ArrowLeft" ? tabs[(at - 1 + tabs.length) % tabs.length] : event.key === "Home" ? tabs[0] : event.key === "End" ? tabs[tabs.length - 1] : null;
       if (next) { event.preventDefault(); changeTab(next); document.getElementById(`tracker-tab-${student.id}-${next}`)?.focus(); }
-    }}>{({ summary: "Summary", contacts: "Contacts", documents: "Essays & Google Docs", learning: "Learning", sessions: "Sessions", payments: "Payments", activity: "Activity" } as Record<string, string>)[name]}</button>)}</div>
+    }}>{({ summary: "Summary", contacts: "Contacts", documents: "Essays & Google Docs", learning: "Learning", sessions: "Sessions", work: "Recorded work", payments: "Payments", activity: "Activity" } as Record<string, string>)[name]}</button>)}</div>
     <div role="tabpanel" id={`tracker-panel-${student.id}`} aria-labelledby={`tracker-tab-${student.id}-${tab}`}>
     {tab === "contacts" && <><StudentContacts api={api} student={student} canWrite={canWrite} onBusyChange={setBusy} onChanged={refreshStudent} />{canInvite && <div className="form-actions"><button disabled={busy} onClick={() => onInvite(student)}>Review portal invitations</button></div>}</>}
     {tabs.includes(tab) && ["summary", "activity"].includes(tab) && <StudentReporting api={api} business={business} studentId={student.id} month={month} onMonthChange={onMonthChange} activityOnly={tab === "activity"} />}
+    {tab === 'summary' && tabs.includes('work') && <div className="tracker-actions"><button onClick={() => changeTab('work')}>View imported hours & work status ↗</button></div>}
     {tabs.includes(tab) && tab === "payments" && <StudentFinance api={api} business={business} studentId={student.id} />}
+    {tabs.includes(tab) && tab === 'work' && <StudentWorkHistory api={api} business={business} studentId={student.id} month={month} onMonthChange={onMonthChange} />}
     {tabs.includes(tab) && tab === "documents" && <StudentDocuments key={`${business.id}:${student.id}`} api={api} business={business} studentId={student.id} onBusyChange={setBusy} />}
     {tabs.includes(tab) && ["learning", "sessions"].includes(tab) && <><div className="tracker-actions"><button disabled={loading} onClick={() => setRevision((n) => n + 1)}>Refresh</button></div>{loading ? <Empty>Loading {tab}…</Empty> : <>
       {!rows.length && !error && <Empty>{tab === "learning" ? "No assignments returned for this student." : "No recorded sessions returned for this student."}</Empty>}

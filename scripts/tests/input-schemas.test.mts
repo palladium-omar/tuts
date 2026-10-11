@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import {inputCatalog,reviewedInputs} from '../document-input-schemas.mts';
 test('reviewed catalog stays deterministic and derives bounded strict request shapes from validators',async()=>{
  const first=await inputCatalog(),second=await inputCatalog();assert.deepEqual(first,second);
- assert.equal(first.inputs.length,3);
+ assert.equal(first.inputs.length,reviewedInputs.length);
+ assert.ok(first.scope.startsWith(`${reviewedInputs.length} reviewed request validators`));
  for(const input of first.inputs){assert.match(input.sourceSha256,/^[a-f\d]{64}$/);assert.ok(input.sourceLine>0);assert.equal(input.jsonSchema.additionalProperties,false);}
  const reporting=first.inputs.find(input=>input.symbol==='summaryBatch')!;
  assert.equal(reporting.jsonSchema.properties.studentIds.minItems,1);assert.equal(reporting.jsonSchema.properties.studentIds.maxItems,100);
@@ -11,6 +12,16 @@ test('reviewed catalog stays deterministic and derives bounded strict request sh
  assert.equal(diagnostics.jsonSchema.properties.events.maxItems,10);
  assert.equal(diagnostics.jsonSchema.properties.events.items.additionalProperties,false);
  assert.ok(first.scope.includes('not complete'));
+ const preview=first.inputs.find(input=>input.symbol==='workImportPreviewSchema')!;
+ assert.equal(preview.jsonSchema.properties.groups.minItems,1);assert.equal(preview.jsonSchema.properties.groups.maxItems,100);
+ assert.equal(preview.jsonSchema.properties.groups.items.additionalProperties,false);
+ const resolve=first.inputs.find(input=>input.symbol==='workImportResolveSchema')!;
+ assert.equal(resolve.jsonSchema.properties.decisions.maxItems,100);
+ assert.equal(resolve.jsonSchema.properties.decisions.items.additionalProperties,false);
+ const importStudents=first.inputs.find(input=>input.symbol==='importStudentsSchema')!;
+ assert.equal(importStudents.jsonSchema.properties.groups.maxItems,100);
+ assert.equal(importStudents.jsonSchema.properties.groups.items.properties.rows.maxItems,1000);
+ assert.ok(importStudents.serverRules.some(rule=>rule.includes('at most 1000 work rows in total')));
 });
 test('documented requests are accepted by actual validators; custom refinements remain enforced',()=>{
  for(const input of reviewedInputs)assert.ok(input.schema.safeParse(input.example).success);
@@ -20,4 +31,12 @@ test('documented requests are accepted by actual validators; custom refinements 
  assert.equal(identity.schema.safeParse({...identity.example,status:'ambiguous'}).success,false);
  const diagnostics=reviewedInputs.find(input=>input.symbol==='clientDiagnosticsSchema')!;
  assert.equal(diagnostics.schema.safeParse({events:[{kind:'Error',source:'window',view:'other',message:'private'}]}).success,false);
+ const preview=reviewedInputs.find(input=>input.symbol==='workImportPreviewSchema')!;
+ assert.equal(preview.schema.safeParse({...preview.example,groups:[preview.example.groups[0],preview.example.groups[0]]}).success,false);
+ const resolve=reviewedInputs.find(input=>input.symbol==='workImportResolveSchema')!;
+ assert.equal(resolve.schema.safeParse({...resolve.example,decisions:[{...resolve.example.decisions[0],action:'link'}]}).success,false);
+ const imported=reviewedInputs.find(input=>input.symbol==='importStudentsSchema')!;
+ const group=imported.example.groups[0];
+ assert.equal(imported.schema.safeParse({groups:[{...group,rows:[group.rows[0],group.rows[0]]}]}).success,false);
+ assert.equal(imported.schema.safeParse({groups:[{...group,action:'link'}]}).success,false);
 });

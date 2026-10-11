@@ -19,6 +19,9 @@ import {
   parseBody,
   Roles,
   Permissions,
+  StudentScoped,
+  assertPermission,
+  assertStudentAccess,
 } from "@palladium/service-kit";
 import type { RequestContext } from "@palladium/contracts";
 import {
@@ -116,6 +119,24 @@ export class ClientsController {
     }));
   }
 
+  @Get(":id/identity")
+  @Roles("owner", "admin", "tutor")
+  @StudentScoped()
+  @Permissions("clients.read")
+  @ApiOperation({ summary: "Verify an accessible canonical client identity without contact details" })
+  async identity(@CurrentContext() ctx: RequestContext, @Param("id") value: string) {
+    if (!['owner', 'admin', 'tutor'].includes(ctx.role)) throw new ForbiddenException('Role cannot perform this operation');
+    if (!ctx.entitlements.includes('clients')) throw new ForbiddenException('Clients is not enabled for this business');
+    assertPermission(ctx, 'clients.read');
+    const id = parseBody(clientIdSchema, value);
+    assertStudentAccess(ctx, id);
+    return this.db.withTenant(ctx.businessId, async tx => {
+      const client = await requireClient(tx, id);
+      assertStudentAccess(ctx, client.id);
+      return { item: { id: client.id, kind: client.kind } };
+    });
+  }
+
   @Patch(":id")
   @Permissions("clients.write")
   @ApiOperation({ summary: "Update a client; student/payer kind is immutable" })
@@ -155,6 +176,8 @@ export class ClientsController {
       if(client.portal_protected_at) throw new ConflictException("Portal protected students cannot be deleted");
       const aliases=await tx.query("SELECT 1 FROM clients WHERE merged_into=$1 LIMIT 1",[id]);
       if(aliases.rowCount) throw new ConflictException("A merge survivor must be retained");
+      const workImports=await tx.query("SELECT 1 FROM client_work_import_identities WHERE student_id=$1 LIMIT 1",[id]);
+      if(workImports.rowCount) throw new ConflictException("Students linked to reviewed work imports must be retained. Set the student status to inactive instead.");
       const groups=await tx.query<{group_id:string}>("SELECT group_id FROM student_group_members WHERE student_id=$1 ORDER BY group_id",[id]);
       for(const group of groups.rows) await emitGroupMembers(tx,ctx,group.group_id,[id],"removed");
       await tx.query("DELETE FROM clients WHERE id=$1", [id]);

@@ -1,24 +1,24 @@
 import { Inject, Injectable, UnprocessableEntityException } from '@nestjs/common';
-import { Database, parseBody } from '@palladium/service-kit';
+import { Database, logDiagnostic, parseBody } from '@palladium/service-kit';
 import type { RequestContext } from '@palladium/contracts';
 import { z } from 'zod';
 import { assertHistoryAccess, safeHistoryMinor } from './history.js';
 import { localDate, monthSchema, previousMonth } from './monthly.js';
 
 const querySchema=z.object({month:monthSchema.optional()}).strict();
-const number=(value:unknown)=>{const n=Number(value);if(!Number.isFinite(n)||n<0)throw new UnprocessableEntityException('Aggregate exceeds the supported numeric range');return n;};
+const number=(value:unknown)=>{const n=Number(value);if(!Number.isFinite(n)||n<0||n>Number.MAX_SAFE_INTEGER)throw new UnprocessableEntityException('Aggregate exceeds the supported numeric range');return n;};
 @Injectable()
 export class HistoryAnalyticsService {
   constructor(@Inject(Database) private readonly db:Database){}
   async analytics(ctx:RequestContext,query:unknown) {
     assertHistoryAccess(ctx);const input=parseBody(querySchema,query);
-    return this.db.withTenant(ctx.businessId,async tx=>{
+    const started=Date.now();
+    const result=await this.db.withTenant(ctx.businessId,async tx=>{
       // Keep counts, activity and money on one stable snapshot during imports/payments.
-      await tx.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
       const timeZone=(await tx.query('SELECT time_zone FROM billing_settings LIMIT 1')).rows[0]?.time_zone??'UTC';
       const asOf=new Date(),currentMonth=localDate(asOf,timeZone).month,month=input.month??currentMonth,previous=previousMonth(month);
       const counts=(await tx.query(`SELECT (SELECT count(*) FROM billing_work_log) work_rows,(SELECT count(*) FROM billing_invoice_history) imported_invoices,(SELECT count(*) FROM invoices) native_invoices,(SELECT count(*) FROM billing_classes WHERE status='completed' AND NOT reconciliation_missing) confirmed_classes,(SELECT count(*) FROM billing_history_sources) source_files`)).rows[0];
-      const workRows=Number(counts.work_rows),nativeClasses=Number(counts.confirmed_classes),useWork=workRows>0,hasActivity=useWork||nativeClasses>0;
+      const workRows=safeHistoryMinor(counts.work_rows),nativeClasses=safeHistoryMinor(counts.confirmed_classes),useWork=workRows>0,hasActivity=useWork||nativeClasses>0;
       // Unlinked names and native student IDs cannot safely be merged. Use one observed
       // activity source for hour/student measures instead of adding overlapping ledgers.
       const activity=useWork?`SELECT CASE WHEN i.status='linked' AND i.work_revision=w.revision THEN billing_student_root(i.student_id)::text END student,w.work_date date,w.hours,w.count_as_classes is_class FROM billing_work_log w LEFT JOIN billing_work_identities i ON i.business_id=w.business_id AND i.work_id=w.id`:`SELECT billing_student_root(client_id)::text student,(starts_at AT TIME ZONE $3)::date date,extract(epoch FROM (ends_at-starts_at))/3600 hours,true is_class FROM billing_classes WHERE status='completed' AND NOT reconciliation_missing`;
@@ -41,8 +41,8 @@ export class HistoryAnalyticsService {
         const historicalPaidMinor=hasInvoices?safeHistoryMinor(row.historical_paid??0):null,verifiedCollectedMinor=hasInvoices?safeHistoryMinor(row.native_paid??0):null;
         return {currency:row.currency,totalRecordedRevenueMinor:hasInvoices?sum(row.historical_paid,row.native_paid):null,historicalPaidMinor,verifiedCollectedMinor,pendingMinor:hasInvoices?sum(row.historical_pending,row.native_pending):null,unsentMinor:hasInvoices?sum(row.historical_unsent,row.native_unsent):null,expectedThisMonthMinor:hasLedger?safeHistoryMinor(row.ledger_month):null,ledgerTotalMinor:hasLedger?safeHistoryMinor(row.ledger_total):null,ledgerPaidMinor:hasLedger?safeHistoryMinor(row.ledger_paid):null,ledgerPendingMinor:hasLedger?safeHistoryMinor(row.ledger_pending):null,ledgerUnsentMinor:hasLedger?safeHistoryMinor(row.ledger_unsent):null,ledgerMonthMinor:hasLedger?safeHistoryMinor(row.ledger_month):null,nativeExpectedMinor:row.native_expected===null?null:safeHistoryMinor(row.native_expected)};
       });
-      const hasIdentity=hasActivity&&Number(summary.missing_identity)===0;
-      const active=Number(summary.active),previousActive=Number(summary.previous),classStudents=Number(summary.class_students);
+      const hasIdentity=hasActivity&&safeHistoryMinor(summary.missing_identity)===0;
+      const active=safeHistoryMinor(summary.active),previousActive=safeHistoryMinor(summary.previous),classStudents=safeHistoryMinor(summary.class_students);
       const notes=[
         'Recorded revenue is real native payment allocations plus imported invoice paid declarations; work ledger amounts are separate.',
         'Paid work and invoice declarations are historical assertions, not processor-verified payments.',
@@ -54,7 +54,9 @@ export class HistoryAnalyticsService {
       ];
       if(!hasIdentity&&hasActivity)notes.push(useWork?'Student metrics are unknown while imported work rows have unreviewed, ambiguous or stale canonical associations.':'Student metrics are unknown while completed classes lack a linked native student ID.');
       if(useWork&&!classStudents)notes.push('Work rows are not classified as classes by default; class frequency is unknown until reviewed.');
-      return {month,timeZone,asOf:asOf.toISOString(),students:{tracked:hasIdentity?Number(summary.tracked):null,activeThisMonth:hasIdentity?active:null,activePreviousMonth:hasIdentity?previousActive:null,lostFromPreviousMonth:hasIdentity?Number(summary.lost):null},engagement:{totalHours:hasActivity?number(summary.total_hours):null,monthHours:hasActivity?number(summary.month_hours):null,averageCommitmentHours:hasIdentity&&active?number(summary.month_hours)/active:null,averageClassFrequency:hasIdentity&&classStudents?Number(summary.classes)/classStudents:null,churnRate:hasIdentity&&previousActive?Number(summary.lost)/previousActive:null},currencies:currencyItems,trend:trend.map(row=>({month:row.month,hours:number(row.hours),activeStudents:row.active_students===null?null:Number(row.active_students),classes:useWork&&Number(row.classes)===0?null:Number(row.classes)})),coverage:{workRows,importedInvoices:Number(counts.imported_invoices),nativeInvoices:Number(counts.native_invoices),confirmedClasses:nativeClasses,sourceFiles:Number(counts.source_files),studentIdentity:useWork?(hasIdentity?'reviewed_work_rows_and_native_student_ids':'partial_reviewed_work_identities'):'unlinked_source_names_and_native_student_ids',payments:'verified_allocations_excluding_simulated',churn:'inactivity',provisional:month>=currentMonth,notes}};
-    });
+      return {month,timeZone,asOf:asOf.toISOString(),students:{tracked:hasIdentity?safeHistoryMinor(summary.tracked):null,activeThisMonth:hasIdentity?active:null,activePreviousMonth:hasIdentity?previousActive:null,lostFromPreviousMonth:hasIdentity?safeHistoryMinor(summary.lost):null},engagement:{totalHours:hasActivity?number(summary.total_hours):null,monthHours:hasActivity?number(summary.month_hours):null,averageCommitmentHours:hasIdentity&&active?number(summary.month_hours)/active:null,averageClassFrequency:hasIdentity&&classStudents?safeHistoryMinor(summary.classes)/classStudents:null,churnRate:hasIdentity&&previousActive?safeHistoryMinor(summary.lost)/previousActive:null},currencies:currencyItems,trend:trend.map(row=>({month:row.month,hours:number(row.hours),activeStudents:row.active_students===null?null:safeHistoryMinor(row.active_students),classes:useWork&&safeHistoryMinor(row.classes)===0?null:safeHistoryMinor(row.classes)})),coverage:{workRows,importedInvoices:safeHistoryMinor(counts.imported_invoices),nativeInvoices:safeHistoryMinor(counts.native_invoices),confirmedClasses:nativeClasses,sourceFiles:safeHistoryMinor(counts.source_files),studentIdentity:useWork?(hasIdentity?'reviewed_work_rows_and_native_student_ids':'partial_reviewed_work_identities'):'unlinked_source_names_and_native_student_ids',payments:'verified_allocations_excluding_simulated',churn:'inactivity',provisional:month>=currentMonth,notes}};
+    }, { isolation: 'repeatable read' });
+    logDiagnostic('info','target_completed',{target:'billing',view:'dashboard',status:200,durationMs:Date.now()-started});
+    return result;
   }
 }

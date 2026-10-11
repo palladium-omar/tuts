@@ -21,14 +21,31 @@ test('identity review rejects ungranted, malformed and unavailable student verif
  service.fetchStudent=async()=>new Response(JSON.stringify({item:{id:student,kind:'payer'}}));await assert.rejects(service.review(ctx,id,input(student),'Bearer synthetic'));
  service.fetchStudent=async()=>{throw new Error('secret upstream URL/token');};await assert.rejects(service.review(ctx,id,input(student),'Bearer synthetic'),error=>error instanceof Error&&error.message==='Student verification unavailable');assert.equal(writes,0);
 });
+test('manual identity verification cancels rejected response bodies without changing its client error',async()=>{
+ let writes=0,cancellations=0;const service=new HistoryIdentityService({withTenant:async()=>{writes++;throw new Error('must not write');}} as unknown as Database);
+ const response=new Response(new ReadableStream({start(){},cancel(){cancellations++;}}),{status:404});
+ service.fetchStudent=async()=>response;
+ await assert.rejects(service.review(ctx,randomUUID(),input(randomUUID()),'Bearer synthetic'),/accessible canonical CRM student/);
+ assert.equal(cancellations,1);assert.equal(response.body!.locked,false);assert.equal(writes,0);
+});
+test('manual identity verification deadline cancels a stalled body and releases the reader',async()=>{
+ let writes=0,cancellations=0,signal:AbortSignal|null|undefined;const service=new HistoryIdentityService({withTenant:async()=>{writes++;throw new Error('must not write');}} as unknown as Database);
+ const response=new Response(new ReadableStream({start(){},cancel(){cancellations++;}}));
+ service.fetchStudent=async(_service,_path,init)=>{signal=init?.signal;return response;};
+ const started=Date.now();
+ await assert.rejects(service.review(ctx,randomUUID(),input(randomUUID()),'Bearer synthetic'),/Student verification unavailable/);
+ await new Promise<void>(settled=>setImmediate(settled));
+ assert.ok(Date.now()-started<8000,'The five-second deadline must include body consumption');
+ assert.equal(signal?.aborted,true);assert.equal(cancellations,1);assert.equal(response.body!.locked,false);assert.equal(writes,0);
+});
 test('reviewed work rows distinguish identical names, unite spelling variants, preserve sources, isolate tenants and stale revisions', {skip:!process.env.BILLING_TEST_DATABASE_URL},async()=>{
  const pool=new Pool({connectionString:process.env.BILLING_TEST_DATABASE_URL}),tx=await pool.connect();const a=randomUUID(),b=randomUUID();
  try{
   await tx.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
-  const captured=new Proxy(tx,{get(target,key){if(key==='query')return (sql:string,...args:any[])=>sql==='SET TRANSACTION ISOLATION LEVEL REPEATABLE READ'?Promise.resolve({rows:[]}):(target.query as any).call(target,sql,...args);const value=Reflect.get(target,key);return typeof value==='function'?value.bind(target):value;}});
-  async function tenant<T>(id:string,work:(conn:PoolClient)=>Promise<T>){await tx.query('SAVEPOINT identity_fixture');try{await tx.query("SELECT set_config('app.business_id',$1,true)",[id]);const result=await work(captured);await tx.query('RELEASE SAVEPOINT identity_fixture');return result;}catch(error){await tx.query('ROLLBACK TO SAVEPOINT identity_fixture');await tx.query('RELEASE SAVEPOINT identity_fixture');throw error;}}
+
+  async function tenant<T>(id:string,work:(conn:PoolClient)=>Promise<T>){await tx.query('SAVEPOINT identity_fixture');try{await tx.query("SELECT set_config('app.business_id',$1,true)",[id]);const result=await work(tx);await tx.query('RELEASE SAVEPOINT identity_fixture');return result;}catch(error){await tx.query('ROLLBACK TO SAVEPOINT identity_fixture');await tx.query('RELEASE SAVEPOINT identity_fixture');throw error;}}
   const db={withTenant:tenant} as unknown as Database,history=new HistoryService(db),identities=new HistoryIdentityService(db),analytics=new HistoryAnalyticsService(db);
-  identities.fetchStudent=async(_service,path,options)=>{assert.equal(new Headers(options?.headers).get('authorization'),'Bearer synthetic');const id=path.split('/').at(-1)!;assert.ok([a,b].includes(id));return new Response(JSON.stringify({item:{id,kind:'student',displayName:'Same Name',email:'not-stored@example.test'}}));};
+  identities.fetchStudent=async(_service,path,options)=>{assert.equal(new Headers(options?.headers).get('authorization'),'Bearer synthetic');assert.ok(path.endsWith('/identity'));const id=path.split('/').at(-2)!;assert.ok([a,b].includes(id));return new Response(JSON.stringify({item:{id,kind:'student',displayName:'Same Name',email:'not-stored@example.test'}}));};
   const bytes=Buffer.from('Date,Student Name,Hours Worked,Hourly Rate,Invoice Status\n2026-08-01,Same Name,1,40,Paid\n2026-09-01,Same Name,1,40,Paid\n2026-09-02,Spelling Variant,1,40,Paid');
   const preview=await history.preview(ctx,{originalname:'synthetic.csv',buffer:bytes},{kind:'work',currency:'EUR',countAsClasses:true});await history.commit(ctx,{token:preview.token},'fixture');
   const rows=(await history.workLog(ctx,{limit:200})).items,older=rows.find(row=>row.date==='2026-08-01')!,same=rows.find(row=>row.date==='2026-09-01')!,variant=rows.find(row=>row.date==='2026-09-02')!;

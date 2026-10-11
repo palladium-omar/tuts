@@ -87,6 +87,26 @@ test('default month and time zone come from business-local Billing analytics wit
   assert.equal(requests.length, 2);
 });
 
+test('unreviewed work coverage preserves Billing hours, declared ledger amounts and timezone', async () => {
+  const value = analytics();
+  const unreviewed = {
+    ...value,
+    students: { tracked: null, activeThisMonth: null, activePreviousMonth: null, lostFromPreviousMonth: null },
+    engagement: { totalHours: 2.75, monthHours: 1.75, averageCommitmentHours: null, averageClassFrequency: null, churnRate: null },
+    currencies: [{ currency: 'EUR', totalRecordedRevenueMinor: null, historicalPaidMinor: null, verifiedCollectedMinor: null, pendingMinor: null, unsentMinor: null, expectedThisMonthMinor: 6500, ledgerTotalMinor: 7500, ledgerPaidMinor: 6000, ledgerPendingMinor: 500, ledgerUnsentMinor: 1000, ledgerMonthMinor: 6500, nativeExpectedMinor: null }],
+    trend: [{ month: '2026-09', hours: 1.75, activeStudents: null, classes: null }],
+    coverage: { ...value.coverage, studentIdentity: 'partial_reviewed_work_identities', notes: ['Student metrics are unknown while imported work rows have unreviewed, ambiguous or stale canonical associations.'] },
+  };
+  const fetchSource: FetchSource = async (service, path) => service === 'billing' ? json({ item: unreviewed }) : successful(service, path);
+  const result = await composeBusinessDashboard(context, { month: '2026-10' }, authorization, fetchSource);
+  assert.equal(result.item.sources.at(-1)?.status, 'complete');
+  assert.equal(result.item.timeZone, 'Africa/Casablanca');
+  assert.deepEqual(result.item.analytics?.engagement, unreviewed.engagement);
+  assert.deepEqual(result.item.analytics?.currencies, unreviewed.currencies);
+  assert.equal(result.item.analytics?.students.tracked, null);
+  assert.equal(result.item.students.total, 4);
+});
+
 test('financial permission or Billing entitlement absence prevents every financial request', async () => {
   for (const restricted of [
     { ...context, permissions: ['reporting.read', 'clients.read', 'billing.read'] },

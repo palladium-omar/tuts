@@ -14,6 +14,7 @@ import { useListOffset, useListQuery } from "../lib/use-list-query";
 import { currencyScale, decimalMinor } from "../lib/history-money";
 import "./work-history.css";
 import { HistoryImport } from "./history-import";
+import { WorkImportStudents } from './work-import-students';
 
 const currentMonth = (business: Business) => {
   const timeZone =
@@ -58,10 +59,12 @@ export function WorkHistory({
     [busy, setBusy] = useState(false),
     [editing, setEditing] = useState<Row | null>(null),
     [reviewingIdentity, setReviewingIdentity] = useState<Row | null>(null),
+    [reviewingImport, setReviewingImport] = useState<Row | null>(null),
+    [studentReviewBusy, setStudentReviewBusy] = useState(false),
     [manual, setManual] = useState(false),
     [summary, setSummary] = useState<Row | null>(null),
     [summaryLoading, setSummaryLoading] = useState(false);
-  useEffect(() => { setReviewingIdentity(null); }, [business.id]);
+  useEffect(() => { setReviewingIdentity(null); setReviewingImport(null); }, [business.id]);
   const canRead =
       canReadFinancial(business) && business.entitlements.includes("billing"),
     canWrite = canRead && hasPermission(business, "billing.write");
@@ -177,6 +180,7 @@ export function WorkHistory({
               Import {mode === "work" ? "workbook" : "history"}
             </button>
           )}
+          {mode === 'work' && canWrite && business.entitlements.includes('clients') && hasPermission(business, 'clients.write') && hasPermission(business, 'clients.read') && <button onClick={() => setView('sources')}>Match imported students</button>}
           {mode === "invoices" && canWrite && (
             <button onClick={() => setManual(true)}>
               <Plus size={16} />
@@ -377,6 +381,7 @@ export function WorkHistory({
                           {row.committedAt ? "Imported" : "Awaiting review"}
                         </td>
                         <td>
+                          {row.kind === 'work' && row.committedAt && canWrite && business.entitlements.includes('clients') && hasPermission(business, 'clients.read') && hasPermission(business, 'clients.write') && <button onClick={() => setReviewingImport(row)}>Match students</button>}
                           <button onClick={() => void original(row)}>
                             <Download size={15} />
                             Download original
@@ -510,6 +515,7 @@ export function WorkHistory({
       )}
       {reviewingIdentity && <WorkIdentityReview api={api} business={business} row={reviewingIdentity}
         onClose={() => setReviewingIdentity(null)} onSaved={() => {setReviewingIdentity(null);setRevision(n => n + 1);setNotice('Work row identity review saved.');}}/>}
+      {reviewingImport && <Modal title="Match imported students" closable={!studentReviewBusy} onClose={() => {setReviewingImport(null);setRevision(n => n + 1);}}><WorkImportStudents api={api} importId={reviewingImport.id} onBusyChange={setStudentReviewBusy} onClose={() => setReviewingImport(null)} onComplete={message => {setReviewingImport(null);setRevision(n => n + 1);setNotice(message);}} /></Modal>}
       {editing && (
         <Modal
           title={

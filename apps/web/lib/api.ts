@@ -48,10 +48,13 @@ export function onApiInvalidation(api: Api, invalidate: (matches: (path: string)
   const subscribers = invalidators.get(api) ?? new Set();
   subscribers.add(invalidate);
   invalidators.set(api, subscribers);
+  return () => { subscribers.delete(invalidate); };
 }
 // Reporting composes these domains; unrelated domain lists retain their snapshots.
 export function affectedRead(mutation: string, read: string) {
   const domain = mutation.split("/")[0];
+  // Billing's reviewed work import can create canonical Clients profiles.
+  if (/^billing\/v1\/history-imports\/[^/]+\/students$/.test(mutation) && read.startsWith('clients/')) return true;
   return domain === "platform" || read.split("/")[0] === domain ||
     (["clients", "scheduling", "learning", "billing", "payments", "reporting"].includes(domain!) && read.startsWith("reporting/"));
 }

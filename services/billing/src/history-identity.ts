@@ -16,18 +16,21 @@ export class HistoryIdentityService {
  fetchStudent:typeof serviceFetch=serviceFetch;
  private async verifiedStudent(id:string,authorization:unknown){
   if(typeof authorization!=='string'||!/^Bearer \S+$/.test(authorization))throw new BadRequestException('Verified authorization required');
-  let timer:ReturnType<typeof setTimeout>|undefined;
+  const controller=new AbortController();
+  let reader:ReadableStreamDefaultReader<Uint8Array>|undefined,timer:ReturnType<typeof setTimeout>|undefined;
   try{
    const lookup=async()=>{
-    const response=await this.fetchStudent('clients',`/v1/clients/${id}`,{headers:{authorization},signal:AbortSignal.timeout(5000)});
-    if(!response.ok)throw new BadRequestException('Select an accessible canonical CRM student');
-    const reader=response.body?.getReader();if(!reader)throw new ServiceUnavailableException('Student verification unavailable');
+    const response=await this.fetchStudent('clients',`/v1/clients/${id}/identity`,{headers:{authorization},signal:controller.signal});
+    if(controller.signal.aborted){await response.body?.cancel();throw new ServiceUnavailableException('Student verification unavailable');}
+    if(!response.ok){await response.body?.cancel();throw new BadRequestException('Select an accessible canonical CRM student');}
+    if(!response.body)throw new ServiceUnavailableException('Student verification unavailable');reader=response.body.getReader();
     const chunks:Uint8Array[]=[];let size=0;
-    try{while(true){const {value,done}=await reader.read();if(done)break;size+=value.length;if(size>65536)throw new ServiceUnavailableException('Student verification response exceeds limit');chunks.push(value);}}finally{await reader.cancel().catch(()=>{});}
+    try{while(true){const {value,done}=await reader.read();if(done)break;size+=value.length;if(size>65536)throw new ServiceUnavailableException('Student verification response exceeds limit');chunks.push(value);}}finally{await reader.cancel().catch(()=>{});reader.releaseLock();}
+    if(controller.signal.aborted)throw new ServiceUnavailableException('Student verification unavailable');
     let parsed:unknown;try{parsed=JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{throw new ServiceUnavailableException('Student verification unavailable');}
     const result=studentResponse.safeParse(parsed);if(!result.success)throw new BadRequestException('Select an accessible canonical CRM student');return result.data.item.id;
    };
-   return await Promise.race([lookup(),new Promise<never>((_resolve,reject)=>{timer=setTimeout(()=>reject(new ServiceUnavailableException('Student verification unavailable')),5000);})]);
+   return await Promise.race([lookup(),new Promise<never>((_resolve,reject)=>{timer=setTimeout(()=>{controller.abort();void reader?.cancel().catch(()=>{});reject(new ServiceUnavailableException('Student verification unavailable'));},5000);})]);
   }catch(error){if(error instanceof BadRequestException||error instanceof ServiceUnavailableException)throw error;throw new ServiceUnavailableException('Student verification unavailable');}finally{if(timer)clearTimeout(timer);}
  }
  async review(ctx:RequestContext,id:string,body:unknown,authorization:unknown){

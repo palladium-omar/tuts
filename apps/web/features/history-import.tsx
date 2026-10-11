@@ -7,6 +7,8 @@ import {
   Upload,
 } from "lucide-react";
 import { Modal, Notice } from "../components/shared";
+import { hasPermission } from '@palladium/contracts';
+import { WorkImportStudents } from './work-import-students';
 import {
   errorMessage,
   money,
@@ -47,7 +49,9 @@ export function HistoryImport({
     [options, setOptions] = useState<Row>(() =>
       freshImportOptions(defaultKind),
     ),
-    [step, setStep] = useState<"file" | "currency" | "review">("file"),
+    [step, setStep] = useState<"file" | "currency" | "review" | "students">("file"),
+    [savedImport, setSavedImport] = useState<Row | null>(null),
+    [studentSaving, setStudentSaving] = useState(false),
     [currency, setCurrency] = useState("EUR"),
     [useColumn, setUseColumn] = useState(false),
     [showAll, setShowAll] = useState(false),
@@ -179,11 +183,12 @@ export function HistoryImport({
         { token: preview.token, allowPartial: partial },
         `history:${preview.token}`,
       );
-      onImported(
-        result.item?.alreadyCommitted
+      const message = result.item?.alreadyCommitted
           ? "This file was already imported. No duplicate records were added."
-          : `${result.item?.importedCount ?? result.item?.imported ?? preview.summary.valid} records imported. Your original file is saved.`,
-      );
+          : `${result.item?.importedCount ?? result.item?.imported ?? preview.summary.valid} records imported. Your original file is saved.`;
+      if (result.item?.kind === 'work' && result.item?.importId && business.entitlements.includes('clients') && hasPermission(business, 'clients.read') && hasPermission(business, 'clients.write')) {
+        setSavedImport({ ...result.item, message }); setStep('students');
+      } else onImported(message);
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -218,34 +223,37 @@ export function HistoryImport({
   return (
     <Modal
       title="Import your history"
+      closable={!studentSaving && (!busy || busy === 'Reading your file…')}
       onClose={() => {
-        if (!busy || busy === "Reading your file…") {
+        if (!studentSaving && (!busy || busy === "Reading your file…")) {
           sequence.current++;
           request.current?.abort();
-          onClose();
+          if (savedImport) onImported(`${savedImport.message} Student matching can be completed from Original files.`);
+          else onClose();
         }
       }}
     >
       <div className="history-import">
         <ol className="history-import-steps" aria-label="Import progress">
-          {(["file", "currency", "review"] as const).map((value, index) => (
+          {(["file", "currency", "review", ...(preview?.kind === 'work' ? ['students'] : [])]).map((value, index) => (
             <li
               key={value}
               aria-current={step === value ? "step" : undefined}
               className={step === value ? "active" : ""}
             >
               <span>
-                {["file", "currency", "review"].indexOf(step) > index ? (
+                {["file", "currency", "review", "students"].indexOf(step) > index ? (
                   <Check size={14} />
                 ) : (
                   index + 1
                 )}
               </span>
-              {["File", "Currency", "Review"][index]}
+              {["File", "Currency", "Review", "Students"][index]}
             </li>
           ))}
         </ol>
         <Notice error={error} />
+        {step === 'students' && savedImport && <WorkImportStudents api={api} importId={savedImport.importId} onBusyChange={setStudentSaving} onComplete={message => onImported(`${savedImport.message} ${message}`)} onClose={() => onImported(`${savedImport.message} Student matching can be completed from Original files.`)} />}
         {busy && (
           <p role="status" className="history-import-loading">
             {busy}

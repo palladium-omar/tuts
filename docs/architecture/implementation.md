@@ -4,6 +4,12 @@
 
 This document fixes the common interface used by independently implemented services. Ask the coordinating agent before changing shared packages or these interfaces.
 
+The [business data feeds and imported student identities](business-data-feeds.md)
+document describes current cross-service ownership, reviewed source repair,
+canonical identity verification, per-student work history and Dashboard
+composition. Its [repair review](../reviews/2026-10-11-import-data-feeds.md)
+separates implemented contracts from local and hosted verification.
+
 ## Repository layout
 
 ```
@@ -38,10 +44,13 @@ type RequestContext = {
 // Also exported by @palladium/contracts.
 
 // Injectable; .pool is a pg Pool for internal/migration/platform access.
+type TransactionOptions = {
+  isolation?: 'read committed' | 'repeatable read' | 'serializable';
+};
 class Database {
   pool: Pool;
-  withTenant<T>(businessId: string, work: (tx: PoolClient) => Promise<T>): Promise<T>;
-  transaction<T>(work: (tx: PoolClient) => Promise<T>): Promise<T>;
+  withTenant<T>(businessId: string, work: (tx: PoolClient) => Promise<T>, options?: TransactionOptions): Promise<T>;
+  transaction<T>(work: (tx: PoolClient) => Promise<T>, options?: TransactionOptions): Promise<T>;
 }
 // Decorators for Nest controllers.
 CurrentContext(): ParameterDecorator;
@@ -72,6 +81,12 @@ bootstrap({
 
 Nest providers can use `OnModuleInit` and inject `EventBus` to register subscriptions. Registration occurs before the broker connects. Services use `@Controller('v1/...')`, `@CurrentContext()`, `@Roles(...)`, `Database.withTenant`, parameterized SQL and `parseBody(zodSchema, body)`. The runtime globally validates signed context and the configured service entitlement except on explicitly public routes. Default routes are staff-only. Student/scoped tutor routes opt into StudentScoped and must check requested and canonical student IDs. Versioned contexts require all permission/resource fields; use explicit permissions for new endpoints.
 
+Transaction isolation options are an enumerated allowlist and take effect in
+`BEGIN`, before the tenant-setting SELECT. Never change transaction isolation
+inside a tenant callback after its first query. Service-to-service HTTP calls
+must complete outside a database transaction; recoverable cross-service writes
+use durable decisions and revalidate local revisions before applying state.
+
 SQL migrations live in `services/<name>/migrations/*.sql`, run in lexical order once and are tracked transactionally. Runtime creates service-owned `service_outbox`, `service_inbox` and `service_migrations`. Do not create those tables in service migrations.
 
 Every tenant table enables and forces RLS with `business_id = nullif(current_setting('app.business_id', true), '')::uuid` in both USING and WITH CHECK. Use `CREATE POLICY` per table. UUIDs can be generated with Node's `randomUUID()` or PostgreSQL `gen_random_uuid()`.
@@ -80,7 +95,7 @@ Services have package names `@palladium/<name>` and scripts `dev: tsx watch src/
 
 ## Environment
 
-All services: `DATABASE_URL`, `RABBITMQ_URL`, `CONTEXT_PUBLIC_KEY` (PEM, escaped newlines accepted), `PORT`. Gateway additionally has `CONTEXT_PRIVATE_KEY`, `PLATFORM_INTERNAL_SECRET`, and `<SERVICE>_URL` values. Platform has `PLATFORM_INTERNAL_SECRET`, `BETTER_AUTH_SECRET`, `PUBLIC_APP_URL`, `PUBLIC_GATEWAY_URL`. Payments has `PAYMENT_ENCRYPTION_KEY` and `ALLOW_SANDBOX_PAYMENTS`; production must reject sandbox. Notifications has `COMMUNICATIONS_ENCRYPTION_KEY`, `CLIENTS_URL` and explicit `ALLOW_OUTBOUND_DELIVERY` (false locally). Billing has `SCHEDULING_URL` for signed class reconciliation. Payments also uses trusted `PUBLIC_APP_URL` for Checkout return URLs. Integrations has `INTEGRATIONS_ENCRYPTION_KEY`, a stable 32-byte key encoded as hexadecimal or base64. `pnpm setup:local` creates this key and new local database credentials while preserving existing environment values. Shared infrastructure supports `DISABLE_BROKER=true` only for bounded tests.
+All services: `DATABASE_URL`, `RABBITMQ_URL`, `CONTEXT_PUBLIC_KEY` (PEM, escaped newlines accepted), `PORT`. Gateway additionally has `CONTEXT_PRIVATE_KEY`, `PLATFORM_INTERNAL_SECRET`, and `<SERVICE>_URL` values. Platform has `PLATFORM_INTERNAL_SECRET`, `BETTER_AUTH_SECRET`, `PUBLIC_APP_URL`, `PUBLIC_GATEWAY_URL`. Payments has `PAYMENT_ENCRYPTION_KEY` and `ALLOW_SANDBOX_PAYMENTS`; production must reject sandbox. Notifications has `COMMUNICATIONS_ENCRYPTION_KEY`, `CLIENTS_URL` and explicit `ALLOW_OUTBOUND_DELIVERY` (false locally). Billing has `SCHEDULING_URL` for signed class reconciliation and `CLIENTS_URL` for canonical identity verification and reviewed work-import student resolution. Workers use the corresponding private `SCHEDULING` and `CLIENTS` service bindings. Payments also uses trusted `PUBLIC_APP_URL` for Checkout return URLs. Integrations has `INTEGRATIONS_ENCRYPTION_KEY`, a stable 32-byte key encoded as hexadecimal or base64. `pnpm setup:local` creates this key and new local database credentials while preserving existing environment values. Shared infrastructure supports `DISABLE_BROKER=true` only for bounded tests.
 
 Do not add guessed success stubs for external providers. A provider connection or capability that is not implemented must be returned as unavailable. External API credentials and production authorization are not supplied by this repository.
 

@@ -34,4 +34,17 @@ for (const name of names) {
   });
   if (code) failed=true;
 }
+// Exercise the actual shared tenant transaction helper as an ordinary role too.
+// The build-only suite cannot validate PostgreSQL isolation or scope cleanup.
+const kitUrl = `postgresql://billing:${encodeURIComponent(config.BILLING_DB_PASSWORD)}@127.0.0.1:5434/billing`;
+const kitCode = await new Promise((resolve, reject) => {
+  const child = spawn('pnpm', ['--filter', '@palladium/service-kit', 'test'], {
+    cwd:fileURLToPath(root),env:{...process.env,SERVICE_KIT_TEST_DATABASE_URL:kitUrl,DATABASE_URL:kitUrl},stdio:['ignore','pipe','pipe'],
+  });
+  const detector = skipDetector();
+  child.stdout.on('data', chunk => {const value=chunk.toString();detector.observe(value);process.stdout.write(value);});
+  child.stderr.on('data', chunk => {const value=chunk.toString();detector.observe(value,'stderr');process.stderr.write(value);});
+  child.on('error',reject);child.on('close',code=>resolve(code===0&&!detector.hasSkipped()?0:1));
+});
+if (kitCode) failed=true;
 if (failed) process.exitCode=1;

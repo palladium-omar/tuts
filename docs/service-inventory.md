@@ -48,14 +48,15 @@ Local port: 4002. [Service guide](../services/clients/README.md).
 
 | Method | Service path | Declared access metadata | Controller |
 | --- | --- | --- | --- |
-| GET | `/v1/clients/student-stats` | Roles(owner, admin, tutor); Permissions(clients.read) | [ClientsController.studentStats](../services/clients/src/clients.controller.ts#L50) |
-| GET | `/v1/clients` | Roles(owner, admin, tutor); Permissions(clients.read) | [ClientsController.list](../services/clients/src/clients.controller.ts#L67) |
-| POST | `/v1/clients` | Roles(owner, admin, tutor); Permissions(clients.write) | [ClientsController.create](../services/clients/src/clients.controller.ts#L94) |
-| GET | `/v1/clients/:id` | Roles(owner, admin, tutor); Permissions(clients.read) | [ClientsController.get](../services/clients/src/clients.controller.ts#L109) |
-| PATCH | `/v1/clients/:id` | Roles(owner, admin, tutor); Permissions(clients.write) | [ClientsController.update](../services/clients/src/clients.controller.ts#L119) |
-| DELETE | `/v1/clients/:id` | Roles(owner, admin, tutor); Permissions(clients.write); Roles(owner, admin) | [ClientsController.remove](../services/clients/src/clients.controller.ts#L139) |
-| GET | `/v1/clients/:id/payers` | Roles(owner, admin, tutor); Permissions(clients.read) | [ClientsController.payers](../services/clients/src/clients.controller.ts#L172) |
-| POST | `/v1/clients/:id/payers` | Roles(owner, admin, tutor); Permissions(clients.write) | [ClientsController.linkPayer](../services/clients/src/clients.controller.ts#L201) |
+| GET | `/v1/clients/student-stats` | Roles(owner, admin, tutor); Permissions(clients.read) | [ClientsController.studentStats](../services/clients/src/clients.controller.ts#L53) |
+| GET | `/v1/clients` | Roles(owner, admin, tutor); Permissions(clients.read) | [ClientsController.list](../services/clients/src/clients.controller.ts#L70) |
+| POST | `/v1/clients` | Roles(owner, admin, tutor); Permissions(clients.write) | [ClientsController.create](../services/clients/src/clients.controller.ts#L97) |
+| GET | `/v1/clients/:id` | Roles(owner, admin, tutor); Permissions(clients.read) | [ClientsController.get](../services/clients/src/clients.controller.ts#L112) |
+| GET | `/v1/clients/:id/identity` | Roles(owner, admin, tutor); Roles(owner, admin, tutor); StudentScoped; Permissions(clients.read) | [ClientsController.identity](../services/clients/src/clients.controller.ts#L122) |
+| PATCH | `/v1/clients/:id` | Roles(owner, admin, tutor); Permissions(clients.write) | [ClientsController.update](../services/clients/src/clients.controller.ts#L140) |
+| DELETE | `/v1/clients/:id` | Roles(owner, admin, tutor); Permissions(clients.write); Roles(owner, admin) | [ClientsController.remove](../services/clients/src/clients.controller.ts#L160) |
+| GET | `/v1/clients/:id/payers` | Roles(owner, admin, tutor); Permissions(clients.read) | [ClientsController.payers](../services/clients/src/clients.controller.ts#L195) |
+| POST | `/v1/clients/:id/payers` | Roles(owner, admin, tutor); Permissions(clients.write) | [ClientsController.linkPayer](../services/clients/src/clients.controller.ts#L224) |
 | GET | `/v1/fields` | Roles(owner, admin, tutor); Permissions(clients.read) | [FieldsController.list](../services/clients/src/fields.controller.ts#L37) |
 | POST | `/v1/fields` | Roles(owner, admin, tutor); Permissions(clients.write); Roles(owner, admin) | [FieldsController.create](../services/clients/src/fields.controller.ts#L44) |
 | PATCH | `/v1/fields/:id` | Roles(owner, admin, tutor); Permissions(clients.write); Roles(owner, admin) | [FieldsController.update](../services/clients/src/fields.controller.ts#L77) |
@@ -82,6 +83,8 @@ Local port: 4002. [Service guide](../services/clients/README.md).
 | GET | `/v1/portal/students` | StudentScoped; Permissions(clients.read) | [PortalStudentsController.list](../services/clients/src/portal-students.controller.ts#L20) |
 | GET | `/v1/portal/students/:id` | StudentScoped; Permissions(clients.read) | [PortalStudentsController.get](../services/clients/src/portal-students.controller.ts#L40) |
 | POST | `/v1/recipients` | Roles(owner, admin, tutor); Permissions(clients.write) | [RecipientsController.resolve](../services/clients/src/recipients.controller.ts#L18) |
+| POST | `/v1/clients/work-import/preview` | Roles(owner, admin, tutor); Permissions(clients.read) | [WorkImportController.preview](../services/clients/src/work-import.controller.ts#L10) |
+| POST | `/v1/clients/work-import/resolve` | Roles(owner, admin, tutor); Permissions(clients.read, clients.write) | [WorkImportController.resolve](../services/clients/src/work-import.controller.ts#L13) |
 
 ### Owned schema
 
@@ -94,6 +97,7 @@ Local port: 4002. [Service guide](../services/clients/README.md).
 | [005_student_identity.sql](../services/clients/migrations/005_student_identity.sql) | `related_contacts`, `contact_addresses`, `student_contacts`, `duplicate_dismissals`, `student_merge_audit` |
 | [006_student_groups.sql](../services/clients/migrations/006_student_groups.sql) | `student_groups`, `student_group_members` |
 | [007_student_planning_profile.sql](../services/clients/migrations/007_student_planning_profile.sql) | Alters existing schema/policies |
+| [008_work_import_identities.sql](../services/clients/migrations/008_work_import_identities.sql) | `client_work_import_identities` |
 
 ## scheduling
 
@@ -168,6 +172,8 @@ Local port: 4005. [Service guide](../services/billing/README.md).
 | GET | `/v1/invoices/:id` | Roles(owner, admin, tutor) | [BillingController.get](../services/billing/src/billing.ts#L261) |
 | POST | `/v1/invoices` | Roles(owner, admin, tutor) | [BillingController.create](../services/billing/src/billing.ts#L267) |
 | POST | `/v1/invoices/:id/issue` | Roles(owner, admin, tutor) | [BillingController.issue](../services/billing/src/billing.ts#L310) |
+| GET | `/v1/history-imports/:id/students` | Roles(owner, admin, tutor); Permissions(billing.read, reporting.financial, clients.read) | [HistoryStudentsController.students](../services/billing/src/history-students.controller.ts#L11) |
+| POST | `/v1/history-imports/:id/students` | Roles(owner, admin, tutor); Permissions(billing.read, reporting.financial, clients.read); Permissions(billing.read, billing.write, reporting.financial, clients.read, clients.write) | [HistoryStudentsController.review](../services/billing/src/history-students.controller.ts#L13) |
 | POST | `/v1/history-imports/preview` | Roles(owner, admin, tutor); Permissions(billing.read, reporting.financial); Permissions(billing.read, reporting.financial, billing.write) | [HistoryImportsController.preview](../services/billing/src/history.controller.ts#L16) |
 | POST | `/v1/history-imports/commit` | Roles(owner, admin, tutor); Permissions(billing.read, reporting.financial); Permissions(billing.read, reporting.financial, billing.write) | [HistoryImportsController.commit](../services/billing/src/history.controller.ts#L20) |
 | GET | `/v1/history-imports` | Roles(owner, admin, tutor); Permissions(billing.read, reporting.financial) | [HistoryImportsController.list](../services/billing/src/history.controller.ts#L23) |
@@ -190,6 +196,7 @@ Local port: 4005. [Service guide](../services/billing/README.md).
 | POST | `/v1/monthly/generate` | Roles(owner, admin, tutor); Roles(owner, admin) | [MonthlyController.generate](../services/billing/src/monthly.ts#L758) |
 | GET | `/v1/dashboard` | Roles(owner, admin, tutor) | [MonthlyController.dashboard](../services/billing/src/monthly.ts#L768) |
 | GET | `/v1/portal/finance` | Roles(owner, admin, tutor); StudentScoped; Permissions(billing.read) | [StudentFinanceController.get](../services/billing/src/student-finance.ts#L68) |
+| GET | `/v1/students/:id/work-history` | Roles(owner, admin, tutor); StudentScoped; Permissions(billing.read, reporting.financial, clients.read) | [StudentWorkHistoryController.history](../services/billing/src/student-work-history.controller.ts#L12) |
 
 ### Owned schema
 
@@ -203,6 +210,7 @@ Local port: 4005. [Service guide](../services/billing/README.md).
 | [006_student_finance.sql](../services/billing/migrations/006_student_finance.sql) | `billing_student_aliases` |
 | [007_business_history.sql](../services/billing/migrations/007_business_history.sql) | `billing_history_sources`, `billing_work_log`, `billing_invoice_history` |
 | [008_history_identity.sql](../services/billing/migrations/008_history_identity.sql) | `billing_work_identities` |
+| [009_work_import_students.sql](../services/billing/migrations/009_work_import_students.sql) | `billing_work_import_student_reviews` |
 
 ## payments
 

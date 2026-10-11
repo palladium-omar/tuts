@@ -5,6 +5,15 @@ import { join } from 'node:path';
 import { logDiagnostic } from './diagnostics.js';
 import { invocationPool, isCloudflareRuntime } from './runtime.js';
 
+export type TransactionOptions = {
+  isolation?: 'read committed' | 'repeatable read' | 'serializable';
+};
+const transactionBegins = {
+  'read committed': 'BEGIN ISOLATION LEVEL READ COMMITTED',
+  'repeatable read': 'BEGIN ISOLATION LEVEL REPEATABLE READ',
+  serializable: 'BEGIN ISOLATION LEVEL SERIALIZABLE',
+} as const;
+
 @Injectable()
 export class Database {
   // BetterAuth retains this object. Resolve methods against the invocation's
@@ -19,17 +28,20 @@ export class Database {
         },
       })
     : new Pool({ connectionString: process.env.DATABASE_URL, max: 10, connectionTimeoutMillis: 5000 });
-  async transaction<T>(work: (tx: PoolClient) => Promise<T>): Promise<T> {
+  async transaction<T>(work: (tx: PoolClient) => Promise<T>, options: TransactionOptions = {}): Promise<T> {
+    const isolation = options.isolation;
+    if (isolation !== undefined && !Object.hasOwn(transactionBegins, isolation)) throw new Error('Invalid transaction isolation');
+    const begin = isolation === undefined ? 'BEGIN' : transactionBegins[isolation];
     const started = Date.now();
     const tx = await this.pool.connect();
     logDiagnostic('info', 'database_connected', { durationMs: Date.now() - started });
-    try { await tx.query('BEGIN'); const result = await work(tx); await tx.query('COMMIT'); return result; }
-    catch (error) { await tx.query('ROLLBACK'); throw error; }
+    try { await tx.query(begin); const result = await work(tx); await tx.query('COMMIT'); return result; }
+    catch (error) { logDiagnostic('error', 'database_failed', { error, durationMs: Date.now() - started }); await tx.query('ROLLBACK'); throw error; }
     finally { tx.release(); logDiagnostic('info', 'database_transaction', { durationMs: Date.now() - started }); }
   }
-  async withTenant<T>(businessId: string, work: (tx: PoolClient) => Promise<T>): Promise<T> {
+  async withTenant<T>(businessId: string, work: (tx: PoolClient) => Promise<T>, options: TransactionOptions = {}): Promise<T> {
     if (!/^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(businessId)) throw new Error('Invalid business context');
-    return this.transaction(async tx => { await tx.query("SELECT set_config('app.business_id',$1,true)",[businessId]); return work(tx); });
+    return this.transaction(async tx => { await tx.query("SELECT set_config('app.business_id',$1,true)",[businessId]); return work(tx); }, options);
   }
   async migrate(directory: string): Promise<void> {
     if (isCloudflareRuntime()) throw new Error('Apply migrations outside the Worker runtime');

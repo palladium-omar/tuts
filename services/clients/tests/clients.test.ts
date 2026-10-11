@@ -146,3 +146,41 @@ test('dashboard student counts use one tenant-scoped aggregate and reject studen
  await assert.rejects(controller.studentStats({...context,accessScope:'students',studentIds:[client]}));
  assert.equal(queries,1);
 });
+
+test('deletion explains retained work import identities before deleting or emitting group changes', async () => {
+  const queries: string[] = [];
+  const db = { async withTenant(id: string, work: (tx: unknown) => Promise<unknown>) {
+    assert.equal(id, tenant);
+    return work({ async query(sql: string) {
+      queries.push(sql);
+      return { rows: sql.startsWith('WITH RECURSIVE canonical') ? [row] : [], rowCount: sql.includes('client_work_import_identities') ? 1 : 0 };
+    } });
+  } } as unknown as Database;
+  await assert.rejects(new ClientsController(db).remove(context, client), (error: unknown) => {
+    const conflict = error as { getStatus: () => number; message: string };
+    assert.equal(conflict.getStatus(), 409);
+    assert.match(conflict.message, /reviewed work imports.*inactive/);
+    return true;
+  });
+  assert.equal(queries.some(sql => sql.startsWith('DELETE') || sql.includes('student_group_members') || sql.includes('service_outbox')), false);
+});
+
+test('compact identity verifies requested and canonical student grants and retains staff-only access', async () => {
+  let reads = 0;
+  const db = { async withTenant(id: string, work: (tx: unknown) => Promise<unknown>) {
+    assert.equal(id, tenant);
+    return work({ async query() { reads++; return { rows: [{ ...row, id: payer, photo: 'x'.repeat(340000), notes: 'private', email: 'private@example.test' }] }; } });
+  } } as unknown as Database;
+  const controller = new ClientsController(db);
+  const scoped: RequestContext = { ...context, role: 'tutor', accessScope: 'students', studentIds: [client, payer], permissions: ['clients.read'] };
+  assert.equal(Reflect.getMetadata('palladium.student-scoped', controller.identity), true);
+  assert.deepEqual(Reflect.getMetadata('palladium.roles', controller.identity), ['owner', 'admin', 'tutor']);
+  assert.equal(Reflect.getMetadata('palladium.student-scoped', controller.get), undefined);
+  assert.deepEqual(await controller.identity(scoped, client), { item: { id: payer, kind: 'student' } });
+  assert.ok(JSON.stringify(await controller.identity(context, client)).length < 128);
+  const before = reads;
+  for (const denied of [{ ...scoped, studentIds: [payer] }, { ...scoped, role: 'student' as const }, { ...scoped, role: 'parent' as const }, { ...scoped, entitlements: [] }, { ...scoped, permissions: [] }]) await assert.rejects(controller.identity(denied, client));
+  assert.equal(reads, before, 'requested ID/role/capability denial must not query the client');
+  await assert.rejects(controller.identity({ ...scoped, studentIds: [client] }, client), /Student access is not granted/);
+  assert.equal(reads, before + 1, 'an accessible alias must also grant its canonical student');
+});

@@ -21,6 +21,7 @@ import { ExpensiveRequestGuard } from "./quotas.js";
 import { currentDiagnosticId, logDiagnostic } from './diagnostics.js';
 export { logDiagnostic } from './diagnostics.js';
 export { Database } from "./database.js";
+export type { TransactionOptions } from "./database.js";
 export { EventBus, emitEvent } from "./events.js";
 export { Public, Roles, Permissions, StudentScoped, CurrentContext, assertPermission, assertStudentAccess } from "./auth.js";
 export { isCloudflareRuntime, currentCloudflareBindings, serviceFetch, registerBackgroundTask } from "./runtime.js";

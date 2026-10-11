@@ -1,6 +1,6 @@
 # Tuts documentation
 
-Updated for the **11 October 2026** student portal improvements and the 10 October audit remediation. Release receipts record deployment and validation evidence. Historical review files describe their own release; they are not current deployment guarantees.
+Updated for the **11 October 2026** student portal improvements, import/data-feed repair and the 10 October audit remediation. Release receipts record deployment and validation evidence. Historical review files describe their own release; they are not current deployment guarantees.
 
 ## Start here
 
@@ -8,6 +8,8 @@ Updated for the **11 October 2026** student portal improvements and the 10 Octob
 - [API and schema inventory](service-inventory.md): generated controller routes, their access metadata, source links, and all service migrations. Regenerate rather than hand-edit.
 - [Security model](architecture/security.md): trust boundaries, authorization, credentials, uploads and threat controls.
 - [Performance model](architecture/performance.md): request paths, batching, caches, database lifecycle and measurable budgets.
+- [Business data-feed map](architecture/business-data-feeds.md): full service diagram, imported student identities, live dashboard aggregates, tracker reads and cache invalidation.
+- [Import and data-feed repair review](reviews/2026-10-11-import-data-feeds.md): verified causes, source preservation, local browser evidence and hosted repair checks.
 - [Student experience review](reviews/2026-10-11-student-experience.md): actual student walkthrough, fixed UX issues and remaining opportunities.
 - [Reminder and applicant release review](reviews/2026-10-11-reminders-and-applicants.md): actual provider checks, country rules, test totals and deployment receipts.
 - [Audit remediation and release receipt](reviews/2026-10-10-audit-remediation.md): completed changes and remaining operational limits.
@@ -26,7 +28,7 @@ Updated for the **11 October 2026** student portal improvements and the 10 Octob
 | Student overview and actionable planning | [Overview contracts and UX](architecture/student-overview.md), [Planning](../services/planning/README.md), [Learning](../services/learning/README.md), [Scheduling](../services/scheduling/README.md) |
 | Homework, private files, essays/Google Docs | [Learning](../services/learning/README.md) |
 | Calendars, attendance, student bookings | [Scheduling](../services/scheduling/README.md), [Connector protocols](architecture/connectors.md) |
-| Monthly arrears invoices, historical work/invoices, dashboard | [Monthly billing](architecture/monthly-billing.md), [History and analytics](architecture/business-history-analytics.md), [Billing](../services/billing/README.md) |
+| Monthly arrears invoices, historical work/invoices, dashboard | [Monthly billing](architecture/monthly-billing.md), [History and analytics](architecture/business-history-analytics.md), [Data feeds and import identities](architecture/business-data-feeds.md), [Billing](../services/billing/README.md) |
 | Payment adapters | [Payments](architecture/payments.md), [Payment service](../services/payments/README.md) |
 | Student reminders and direct homework links | [Reminder and applicant architecture](architecture/student-reminders-and-applicant-rules.md), [Notifications](../services/notifications/README.md) |
 | Multiple Kanban boards, templates, education-based cycles | [Planning](../services/planning/README.md), [Applicant rules](architecture/student-reminders-and-applicant-rules.md#applicant-api-contract), [Annual source review](annual-review.md), [Earlier planning revision](architecture/student-workspace.md#kanban-interaction-and-application-planning-revision-2026-10-10) |

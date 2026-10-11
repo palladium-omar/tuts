@@ -1,5 +1,5 @@
 {
-  "scope": "Three reviewed request validators only. This is not complete OpenAPI request or response coverage. JSON Schema describes input shape; custom refinements, transformations, authentication, permissions and revision checks remain authoritative server behavior.",
+  "scope": "6 reviewed request validators only. This is not complete OpenAPI request or response coverage. JSON Schema describes input shape; custom refinements, transformations, authentication, permissions and revision checks remain authoritative server behavior.",
   "generator": "pnpm exec tsx --tsconfig tsconfig.base.json scripts/document-input-schemas.mts",
   "inputs": [
     {
@@ -151,7 +151,7 @@
         "reason": "Reviewed synthetic identity"
       },
       "sourceLine": 6,
-      "sourceSha256": "47ff8e4208e5855a4f3111cb1216032260457884ce42cfcd1057ad5478b0b847",
+      "sourceSha256": "10da4cb5d559dd82c89aa5cb25b962e6743b9d4c71547baed070904426516c10",
       "jsonSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -196,6 +196,265 @@
           "status",
           "expectedWorkRevision",
           "expectedIdentityRevision"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/clients/v1/clients/work-import/preview",
+      "symbol": "workImportPreviewSchema",
+      "source": "services/clients/src/work-import.ts",
+      "serverRules": [
+        "Current business membership, Clients entitlement, owner/admin/tutor role, business access scope and clients.read are required. Student/parent and student-scoped staff are forbidden.",
+        "Accepts 1-100 groups with unique lowercase 64-hex keys and trimmed source names of 1-200 characters. Unique-key refinement is not represented by JSON Schema.",
+        "A group key denotes a Billing-owned reviewed row set, not a unique person. Exact NFKC, collapsed-whitespace and lowercase name candidates are suggestions only; at most 20 candidates are displayed, with an ambiguity flag when multiple students match.",
+        "Saved mappings are scoped to business/import/key. A changed normalized source name conflicts; saved canonical student ID and original create/link action are returned for recovery after a partial cross-service operation. No profiles or work rows are created by preview."
+      ],
+      "example": {
+        "importId": "33333333-3333-4333-8333-333333333333",
+        "groups": [
+          {
+            "key": "b454f82c5857ebabf342b7258e5cf7def78b7cd975814119462973de9a38df10",
+            "name": "Synthetic Student"
+          }
+        ]
+      },
+      "sourceLine": 11,
+      "sourceSha256": "39feaa14b065ff33f2a68c42eac7203b4886b9c42b7a8a8b47b6314a27bd52be",
+      "jsonSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "importId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "groups": {
+            "minItems": 1,
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                }
+              },
+              "required": [
+                "key",
+                "name"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "importId",
+          "groups"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/clients/v1/clients/work-import/resolve",
+      "symbol": "workImportResolveSchema",
+      "source": "services/clients/src/work-import.ts",
+      "serverRules": [
+        "Current business membership, Clients entitlement, owner/admin/tutor role, business access scope, clients.read and clients.write are required. Student/parent and student-scoped staff are forbidden.",
+        "Accepts 1-100 decisions with unique lowercase 64-hex keys and trimmed source names of 1-200 characters. link requires studentId; create forbids studentId. These refinements are not represented by JSON Schema.",
+        "Resolution is an explicit create or link decision, never an automatic name merge. New profiles retain the existing 160-character CRM display-name limit, status lead, null addresses and false communication opt-ins.",
+        "Tenant contact mutation lock, forced RLS, canonical owner-service student lookup and one transaction protect mapping/profile/outbox changes. Payer or foreign-business targets are rejected.",
+        "Durable business/import/key mapping and normalized decision digest replay the original student and creation provenance after Clients commits but Billing fails. Changed decisions return 409; equivalent normalized labels and canonical aliases after a merge may replay. Referenced profiles cannot be hard deleted; set status inactive to retain reviewed history."
+      ],
+      "example": {
+        "importId": "33333333-3333-4333-8333-333333333333",
+        "decisions": [
+          {
+            "key": "b454f82c5857ebabf342b7258e5cf7def78b7cd975814119462973de9a38df10",
+            "name": "Synthetic Student",
+            "action": "create"
+          }
+        ]
+      },
+      "sourceLine": 14,
+      "sourceSha256": "39feaa14b065ff33f2a68c42eac7203b4886b9c42b7a8a8b47b6314a27bd52be",
+      "jsonSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "importId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "decisions": {
+            "minItems": 1,
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "action": {
+                  "type": "string",
+                  "enum": [
+                    "create",
+                    "link"
+                  ]
+                },
+                "studentId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                }
+              },
+              "required": [
+                "key",
+                "name",
+                "action"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "importId",
+          "decisions"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/billing/v1/history-imports/:id/students",
+      "symbol": "importStudentsSchema",
+      "source": "services/billing/src/history-students.ts",
+      "serverRules": [
+        "Current business membership, business access scope, owner/admin/tutor role, Billing and Clients entitlements, billing.read, billing.write, reporting.financial, clients.read and clients.write are required. Signed bearer service context is forwarded to Clients.",
+        "Accepts 1-100 groups and at most 1000 work rows in total. Group keys and work IDs must be unique. link requires studentId; create forbids it. Aggregate bounds, uniqueness and cross-field refinements are not represented by JSON Schema. UUID inputs normalize to lowercase.",
+        "Source must be a committed work import owned by the business. Each key must equal SHA-256 of sorted lowercase work IDs joined by a newline; normalized group names must match all selected source labels. Both work and identity revisions are checked before resolution and after locking. Invalid ownership returns 404 and changed revisions or names return 409.",
+        "Clients resolves profiles over a bounded signed HTTP request with no Billing transaction open. Billing then locks, revalidates and atomically persists reviewed identities, receipts and outbox events. Work dates, original names, hours, money, status and source bytes remain unchanged.",
+        "Durable Clients mappings recover profile creation after a Billing failure; Billing request digests and receipts replay completed choices without new identities or recounting work. Changed decisions or later row/association edits conflict. Grouping is a review convenience and can be split into explicit row sets."
+      ],
+      "example": {
+        "groups": [
+          {
+            "key": "b454f82c5857ebabf342b7258e5cf7def78b7cd975814119462973de9a38df10",
+            "name": "Synthetic Student",
+            "action": "create",
+            "rows": [
+              {
+                "id": "22222222-2222-4222-8222-222222222222",
+                "revision": 1,
+                "identityRevision": 0
+              }
+            ]
+          }
+        ]
+      },
+      "sourceLine": 19,
+      "sourceSha256": "2acea7dea5386b84c1c8d7a833761d27fe9b81fa5a823960e9b7a65a7ac71188",
+      "jsonSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "groups": {
+            "minItems": 1,
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "action": {
+                  "type": "string",
+                  "enum": [
+                    "create",
+                    "link"
+                  ]
+                },
+                "studentId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "rows": {
+                  "minItems": 1,
+                  "maxItems": 1000,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      },
+                      "revision": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 2147483647
+                      },
+                      "identityRevision": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 2147483647
+                          },
+                          {
+                            "type": "number",
+                            "const": 0
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "revision",
+                      "identityRevision"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "key",
+                "name",
+                "action",
+                "rows"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "groups"
         ],
         "additionalProperties": false
       }

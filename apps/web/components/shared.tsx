@@ -26,14 +26,17 @@ export function Modal({
   title,
   children,
   onClose,
+  closable = true,
 }: {
   title: string;
   children: ReactNode;
   onClose: () => void;
+  closable?: boolean;
 }) {
   const dialog = useRef<HTMLElement>(null),
-    close = useRef(onClose);
+    close = useRef(onClose), canClose = useRef(closable);
   close.current = onClose;
+  canClose.current = closable;
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     const oldOverflow = document.body.style.overflow;
@@ -54,7 +57,7 @@ export function Modal({
     const keydown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        close.current();
+        if (canClose.current) close.current();
       }
       if (event.key === "Tab") {
         const elements = targets(),
@@ -84,7 +87,7 @@ export function Modal({
     <div
       className="modal-backdrop"
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (closable && e.target === e.currentTarget) onClose();
       }}
     >
       <section
@@ -96,7 +99,7 @@ export function Modal({
       >
         <div className="panel-title">
           <h2>{title}</h2>
-          <button type="button" aria-label="Close" onClick={onClose}>
+          <button type="button" aria-label="Close" disabled={!closable} onClick={onClose}>
             <X size={18} />
           </button>
         </div>

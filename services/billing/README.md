@@ -12,7 +12,7 @@ Invoices include `sellerSnapshot:{businessId,name,profile,branding}`. Draft crea
 
 Responses use `{items:[...]}` for lists and `{item:...}` for objects/writes.
 
-All writes require `Idempotency-Key` (1–200 printable ASCII characters). Keys are scoped by business and operation; issue keys bind the invoice ID. Identical retries return the original response. Reusing a key for different input returns 409. A later get returns current state; a replayed create response remains its original draft snapshot.
+Invoice creation and issue require `Idempotency-Key` (1–200 printable ASCII characters). Keys are scoped by business and operation; issue keys bind the invoice ID. Identical retries return the original response. Reusing a key for different input returns 409. A later get returns current state; a replayed create response remains its original draft snapshot. Other endpoint-specific retry rules are described below.
 
 Money uses integer minor units, exact BigInt calculation, and a safe-integer total ceiling. Zero-total invoices are unsupported. Currency is an uppercase three-letter code; no decimal-place conversion occurs. `clientId` is a reference supplied by staff and is not validated against a different service's database. Invoice edits, cancellation, refund, taxes, discounts, pagination beyond the latest 200, and automatic session billing are not implemented.
 
@@ -173,10 +173,12 @@ Churn describes inactivity relative to the previous month and remains provisiona
 until the selected month ends. Importing history never issues invoices, charges
 clients, sends messages, or creates payment transactions.
 
-`BILLING_TEST_DATABASE_URL` enables rollback-only synthetic PostgreSQL tests for
+`BILLING_TEST_DATABASE_URL` enables synthetic PostgreSQL tests for
 source bytes/raw retention, tenant boundaries, staged tokens, partial review,
 retries, duplicate prevention, edits and exact multicurrency aggregates. No real
-customer workbook belongs in fixtures or production implementation checks.
+customer workbook belongs in fixtures. Existing transaction fixtures roll back;
+the work-import coordinator uses the actual tenant transaction helper, commits
+its synthetic recovery steps, and deletes its tenant fixtures afterward.
 
 
 ## Reviewed work-row identities
@@ -230,11 +232,130 @@ it is not a person/cohort report. Analytics use locally resolved reviewed UUIDs,
 including delivered student merge aliases. Partial review leaves person metrics
 unknown while preserving exact work hours and monetary totals.
 
+## Students from committed work sources
+
+Student review is available after a new work import and for an already committed
+original file. It repairs student associations without reimporting work. Both
+routes require business scope, an owner/admin/tutor role, Billing and Clients
+entitlements, `billing.read`, `reporting.financial` and `clients.read`. The write
+also requires `billing.write` and `clients.write`. Student/parent accounts and
+student-scoped tutors cannot use these business finance routes.
+
+`GET /v1/history-imports/:id/students?limit=1000&offset=0` returns:
+
+```ts
+{
+  item: {
+    source: { id, fileName, kind, status, contentType, sizeBytes,
+      createdAt, committedAt, summary, sheetName, downloadPath },
+    groups: [{ key, name, normalizedName, rows: [{
+      id, revision, identityRevision, date, studentName, serviceType,
+      hours, identity: { status, studentId, revision, reason, reviewedAt }
+    }] }],
+    total, limit, offset
+  }
+}
+```
+
+Only committed `work` sources are accepted; staged sources, historical invoice
+imports and PDF archives are rejected. Foreign/missing source IDs return 404.
+Rows are ordered by `source_row,id`; `total` counts all rows in that source. Limit
+is 1–1000 (default 1000), and offset is 0–1,000,000 (default 0). The read uses a
+repeatable-read tenant snapshot. Groups cover only the returned page, so a label
+spanning pages can appear as separate reviewed row sets. A page can contain more
+than 100 distinct groups; Clients preview and resolution requests must be batched.
+
+Names group by NFKC normalization, collapsed whitespace and lowercase. Original
+row names remain preserved. A key is the lowercase hexadecimal SHA-256 digest
+of sorted, lowercase work UUIDs joined with a single newline, with no trailing
+newline. It identifies a row set, not a person. Staff may split a group by
+selecting a row subset and computing the corresponding key. No fuzzy match or
+automatic merge occurs.
+
+Clients preview is a separate private request:
+`POST /v1/clients/work-import/preview` accepts
+`{importId,groups:[{key,name}]}` and returns
+`{item:{groups:[{key,name,candidates:[{id,displayName,email}],resolvedStudentId,resolvedAction,ambiguous}]}}`.
+It accepts at most 100 unique groups and displays at most 20 exact-name candidates
+per group. A unique candidate still needs acceptance; ambiguous candidates need
+a deliberate selection. `resolvedAction` is `create`, `link` or null and preserves
+the original saved choice when reopening a partially completed review. Unmatched
+names may explicitly create a name-only CRM student. Source labels accept up to
+200 characters; new profile names retain Clients' 160-character limit. Creating
+a profile does not infer an email, grant portal access, send an invitation or
+record communication consent.
+
+`POST /v1/history-imports/:id/students` accepts:
+
+```ts
+{
+  groups: [{
+    key, name, action: 'create' | 'link', studentId?,
+    rows: [{ id, revision, identityRevision }]
+  }]
+}
+```
+
+The request has 1–100 unique groups and at most 1000 unique work rows in total.
+Each group needs at least one row; both revision fields are mandatory. `link`
+requires a student UUID and `create` requires it to be absent. Billing verifies
+every row belongs to this business and import, its current normalized source
+name matches the group name, the key matches its selected row set, and work and
+identity revisions match. Missing/foreign rows return 404; stale revisions,
+changed names or conflicting saved decisions return 409. Invalid keys or payloads
+return 400. These explicit revision/row-set decisions do not use an
+`Idempotency-Key` header.
+
+Billing closes its validation transaction before forwarding the original signed
+authorization to Clients `/v1/clients/work-import/resolve`. One bounded request
+resolves all pending groups, using `{importId,decisions:[{key,name,action,studentId?}]}`.
+Clients persists the canonical identity and decision digest by business, import
+and key; a repeated creation returns the same student. The HTTP call has an
+eight-second full response deadline and a 256 KiB response limit, with schema and
+group-key validation. Configure the private `CLIENTS` Worker binding or Node
+`CLIENTS_URL`; no cross-service SQL or database transaction spans the HTTP call.
+
+After Clients succeeds, Billing obtains the monthly tenant lock, locks the work
+rows and rechecks ownership, names and both revisions. It atomically writes
+associations, reviewer audit records, transactional work-history events and
+`billing_work_import_student_reviews` receipts from migration
+`009_work_import_students.sql`. Forced tenant RLS protects receipts. Source bytes,
+work dates, quantities, monetary amounts, statuses and classifications are
+preserved; this step creates no work rows, classes, invoices or payment records.
+
+Responses are:
+`{item:{importId,linked,created,replayed,groups:[{key,studentId,created,rows:[{id,revision,identityRevision}]}]}}`.
+`linked` counts rows applied in this request; `replayed` counts rows returned from
+valid completed receipts. The top-level `created` counts newly applied groups
+whose Clients mapping originated from an explicit creation; completed Billing
+replays contribute zero. Returned student IDs follow delivered canonical merge
+aliases.
+
+An identical completed request replays without incrementing identity revisions
+or adding events. It succeeds only while its resulting work and identity
+revisions remain current. A later correction or manual identity review makes
+that receipt conflict; use the individual-row identity review to revise an
+already completed decision. If Clients commits and Billing fails, retrying the
+same choices recovers Clients' saved identities and applies Billing associations
+once. Reopening must retain Clients' `resolvedAction`; changing a saved creation
+to a link is a different decision. A concurrent work correction rejects the
+whole Billing batch after the Clients step, leaving all its associations unapplied.
+Skipped groups remain available for later review. Separate batches can continue
+without resubmitting the original workbook.
+
+`test/history-students.test.ts` verifies ordinary-role PostgreSQL RLS through the
+actual `Database.withTenant` helper, signed authorization forwarding, name-only
+creation, contact-side partial-commit recovery, exact completed replay, canonical
+aliases, permissions and bounds, malformed/upstream errors, concurrent revision
+changes, unchanged source and financial values, and absence of fabricated
+classes/invoices.
+
 ## Analytics query consistency and performance
 
-Analytics execute five statements: repeatable-read configuration, business
-settings, source counts, one shared activity/summary/trend aggregate and the
-financial aggregate. One snapshot prevents imports/payment updates from mixing
+Analytics execute four domain statements: business settings, source counts,
+one shared activity/summary/trend aggregate and the financial aggregate.
+`Database.withTenant` sets repeatable-read isolation in `BEGIN`, before its
+transaction-local tenant-setting SELECT. One snapshot prevents imports/payment updates from mixing
 counts and money across statements. Shared activity materialization removes the
 second trend scan statement. Native monthly expected-value filtering compares
 raw `starts_at` against timezone-derived month bounds, preserving DST/local date
@@ -244,8 +365,50 @@ integer minor units and excludes simulated allocations and paid work declaration
 `test/history-identity.test.ts` exercises duplicate names, spelling variants,
 ambiguity, revision conflicts/staleness, tenant/permission boundaries, canonical
 merge aliases and unchanged source bytes. `test/analytics-performance.test.ts`
-checks the five-statement bound and exact expectations on 4,000 synthetic native
+checks the four-statement bound and exact expectations on 4,000 synthetic native
 classes. Its EXPLAIN check disables sequential scans solely to prove index
 eligibility; it does not measure production latency or establish a production
 query planner choice. Run local ordinary-role suites with
 `node scripts/test-databases.mjs` from the repository root.
+
+## Tutor student work history
+
+`GET /v1/students/:id/work-history?month=YYYY-MM&limit=50&offset=0` reads reviewed
+imported work for one canonical student. Staff owner/admin/tutor roles require
+`billing.read`, `reporting.financial`, `clients.read`, and Billing/Clients
+entitlements. Student and parent roles are denied. Student-scoped staff must
+hold grants for both the requested ID and its resolved canonical ID.
+
+Before reading Billing, the service forwards the original signed Authorization
+to Clients `GET /v1/clients/:id/identity`, which returns only
+`{item:{id,kind}}`. The same compact identity contract verifies individual work
+identity review. This staff-only Clients read checks requested and canonical
+student grants. Its five-second deadline and 64 KiB response limit cover the
+response body; photos, names, contact details and source files are unnecessary
+for verification. An unavailable or non-student identity fails closed.
+
+Billing then uses three domain SELECTs inside one repeatable-read tenant
+transaction: canonical alias resolution, per-currency aggregates/counts, and a
+bounded work page. Only `linked` associations whose `work_revision` matches the
+current row revision qualify. Aliases follow delivered Billing merge events.
+Unreviewed, ambiguous, stale and other-student work rows are excluded. No classes,
+native invoices or payment allocations are created or combined with this ledger.
+
+The response is
+`{item:{studentId,month,currencies,rows,total,limit,offset,provenance:'historical_work_declarations'}}`.
+Each currency contains `{currency,totalHours,totalMinor,paidMinor,pendingMinor,
+unsentMinor,monthHours,monthMinor}`. Total/status declarations are all-time;
+month measures use the selected calendar month and are null when month is
+omitted. Available months without qualifying rows return zero month measures.
+Amounts remain exact integer minor units, currencies are kept separate, and
+currency buckets are capped at 200. Rows expose only
+`{id,date,serviceType,hours,amountMinor,currency,status,countAsClasses}`. The page
+limit is at most 100; totals are independent of pagination. Source labels, raw
+columns and original file downloads are excluded because a source can contain
+other students. Paid status remains a historical declaration, not evidence of
+provider collection.
+
+`test/student-work-history.test.ts` covers permissions, learner rejection,
+signed verification, malformed/oversized/unavailable responses, a stalled-body
+deadline, ordinary-role PostgreSQL RLS, aliases, stale association exclusion,
+pagination, separate currency totals, safe numeric bounds and response fields.

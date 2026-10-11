@@ -112,9 +112,11 @@ const launches = [...names, "gateway", "web"].map((name, index) => {
     env.LEARNING_URL = configuration.LEARNING_URL || "http://127.0.0.1:4004";
     env.PLANNING_URL = configuration.PLANNING_URL || "http://127.0.0.1:4009";
   }
-  if (name === "billing")
+  if (name === "billing") {
     env.SCHEDULING_URL =
       configuration.SCHEDULING_URL || "http://127.0.0.1:4003";
+    env.CLIENTS_URL = configuration.CLIENTS_URL || "http://127.0.0.1:4002";
+  }
   if (name === "planning") env.CLIENTS_URL = configuration.CLIENTS_URL || "http://127.0.0.1:4002";
   if (name === "reporting") Object.assign(env, { PUBLIC_APP_URL: configuration.PUBLIC_APP_URL || "http://localhost:3000", PUBLIC_REPORTING_BASE_URL: `${configuration.PUBLIC_GATEWAY_URL || "http://localhost:8080"}/api/reporting` });
   if (name === "reporting") for (const [service, port] of [["scheduling",4003],["learning",4004],["billing",4005],["clients",4002]]) env[`${service.toUpperCase()}_URL`] = configuration[`${service.toUpperCase()}_URL`] || `http://127.0.0.1:${port}`;
