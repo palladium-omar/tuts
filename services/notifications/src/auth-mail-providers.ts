@@ -10,6 +10,7 @@ export interface PasswordResetMail {
 export interface AuthMailProvider {
   sendPasswordReset(mail: PasswordResetMail): Promise<string>;
   sendPortalInvitation(mail: PortalInvitationMail): Promise<string>;
+  sendStudentReminder(mail: StudentReminderMail): Promise<string>;
 }
 
 export interface PortalInvitationMail {
@@ -18,6 +19,8 @@ export interface PortalInvitationMail {
   deliveryRevision: number;
   inviteUrl: string;
 }
+
+export interface StudentReminderMail {recipientEmail:string; reminderId:string; title:string; portalUrl:string;}
 
 type AuthMessage = {recipientEmail: string; subject: string; text: string};
 
@@ -60,6 +63,13 @@ export class ResendAuthMailProvider implements AuthMailProvider {
       'This link expires in 7 days.',
       'If you were not expecting this invitation, you can ignore this email.',
     ].join('\n')}, `tuts-portal-invite-${mail.invitationId}-${mail.deliveryRevision}`);
+  }
+
+  async sendStudentReminder(mail: StudentReminderMail): Promise<string> {
+    return this.sendMessage({recipientEmail:mail.recipientEmail,subject:'Your Tuts task reminder',text:[
+      'This is the reminder you requested in your student workspace.', '', mail.title, '',
+      'Open your task:',mail.portalUrl,
+    ].join('\n')}, `tuts-student-reminder-${mail.reminderId}`);
   }
 
   private async sendMessage(mail: AuthMessage, idempotencyKey: string): Promise<string> {

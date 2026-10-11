@@ -20,9 +20,9 @@ Password recovery has request/reset pages, expiring single-use links, confirmati
 | Learning | Private uploads/downloads, homework submission/review, student portal, selected Google Docs references | Google sharing remains external; no Google OAuth document creation |
 | Billing | Prior-month completed-class billing, source-preserving CSV/XLSX/PDF history, work log, reviewed student associations, monthly/status filters, exact aggregates and immutable issued snapshots | Historical paid statuses are declarations; unreviewed names do not establish student identities; no OCR or automatic real charges |
 | Payments | Existing Stripe test adapters and local simulation, clearly separate from confirmed collections | Live Stripe/PayPal/bank provider activation remains separate |
-| Notifications | Durable campaigns and system invite/recovery sender adapter | Verified system sender; live recovery delivery confirmed; outbound campaigns disabled by default |
+| Notifications | Durable campaigns, student reminder inbox/scheduling and system invite/recovery sender adapter | Verified system sender; reminder email is opt-in with access rechecks; outbound campaigns disabled by default |
 | Integrations | Calendar/contact connectors, safe student booking links and provider reconciliation | Customer credentials required; no new OAuth registrations |
-| Planning | Multiple boards, whole-card drag, ordered background saves, profile-based application cycles, dated/versioned templates and explicit upgrades | Typical dates are planning defaults; institution/program/round details still require confirmation |
+| Planning | Multiple boards, ordered background saves, profile-based cycles, country-aware personalized templates, conditional aid/testing tasks and explicit upgrades | Local researched calendars cover France/USA/Morocco 2027 procedures; other dates and institution requirements need confirmation |
 | Reporting | Business dashboard, batch student summaries, coverage/asOf, engagement/inactivity metrics, estimated activity and tagged Beacons links | Imported engagement requires reviewed student associations; incomplete-month churn is provisional; no direct Beacons conversion writes |
 
 The [Cloudflare deployment guide](docs/cloudflare-deployment.md) describes separate private service Workers, PostgreSQL databases, Queues and private R2 uploads. Its adapter preserves the HTTP and event contracts. SMTP, arbitrary contact API pulls and custom AI endpoints require an additional safe egress adapter on Cloudflare; Cal.com, Calendly, Resend and WhatsApp use fixed provider endpoints. Production payments remain unavailable, and outbound messaging is disabled by default. The audit records public HTTP checks and local authenticated verification separately; hosted authenticated performance remains unmeasured; current recovery delivery proof is in the remediation receipt. The earlier [Google Cloud container configuration](docs/deployment.md) remains an alternative and has not been provisioned.
@@ -126,6 +126,8 @@ Read the contracts before extending a service:
 11. [Password recovery and system email](docs/architecture/password-recovery.md)
 12. [Student workspace and scoped capabilities](docs/architecture/student-workspace.md)
 13. [Student overview and actionable planning](docs/architecture/student-overview.md)
+14. [Student reminders and country-aware applicant rules](docs/architecture/student-reminders-and-applicant-rules.md)
+15. [Annual application-source review register](docs/annual-review.md)
 
 The student workspace expansion follows the [delivery tracker](docs/student-workspace-delivery.md).
 The release is deployed on the existing Cloudflare/Neon/R2 installation.

@@ -25,9 +25,14 @@ test('overview aggregate and bounded items enforce ordinary-role tenant/student 
   await tx.query('BEGIN');await tx.query("SELECT set_config('app.business_id',$1,true)",[businessId]);
   await tx.query("INSERT INTO sessions(id,business_id,client_id,title,starts_at,ends_at,created_by) SELECT gen_random_uuid(),$1,$2,'Synthetic',now()+n*interval '1 day',now()+n*interval '1 day'+interval '1 hour','synthetic' FROM generate_series(1,7) n",[businessId,student]);
   await tx.query("INSERT INTO sessions(id,business_id,client_id,title,starts_at,ends_at,created_by) VALUES(gen_random_uuid(),$1,$2,'Other student',now()+interval '20 days',now()+interval '20 days 1 hour','synthetic')",[businessId,otherStudent]);
+  const cancelled=randomUUID();
+  await tx.query("INSERT INTO external_sessions(id,business_id,connection_id,provider,external_id,owner_user_id,title,starts_at,ends_at,status) VALUES($1,$2,$3,'calcom','synthetic-cancelled','synthetic','Provider cancelled',now()+interval '1 hour',now()+interval '2 hours','cancelled')",[cancelled,businessId,randomUUID()]);
+  await tx.query("INSERT INTO class_annotations(business_id,class_id,source,client_id,status) VALUES($1,$2,'external',$3,'scheduled')",[businessId,cancelled,student]);
   const db={withTenant:async(id:string,work:any)=>{await tx.query("SELECT set_config('app.business_id',$1,true)",[id]);return work(tx);}} as unknown as Database;
   const service=new PortalSessionsService(db),result=await service.overview(ctx,{studentId:student});
   assert.equal(result.summary.upcoming,7);assert.equal(result.sessions.length,5);
+  assert.equal(result.sessions.some(row=>row.id===cancelled),false);
+  assert.equal((await tx.query('SELECT status FROM class_annotations WHERE class_id=$1',[cancelled])).rows[0].status,'scheduled');
   await assert.rejects(service.overview(ctx,{studentId:otherStudent}),{status:403});
   const foreign=await service.overview({...ctx,businessId:randomUUID()},{studentId:student});
   assert.equal(foreign.summary.upcoming,0);assert.equal(foreign.sessions.length,0);

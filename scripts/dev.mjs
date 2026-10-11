@@ -108,6 +108,9 @@ const launches = [...names, "gateway", "web"].map((name, index) => {
       select(["COMMUNICATIONS_ENCRYPTION_KEY", "ALLOW_OUTBOUND_DELIVERY", "PUBLIC_APP_URL", "AUTH_MAIL_INTERNAL_SECRET", "AUTH_MAIL_ENABLED", "AUTH_MAIL_PROVIDER", "AUTH_MAIL_FROM", "AUTH_MAIL_API_KEY"]),
     );
     env.CLIENTS_URL = configuration.CLIENTS_URL || "http://127.0.0.1:4002";
+    env.PLATFORM_URL = configuration.PLATFORM_URL || "http://127.0.0.1:4001";
+    env.LEARNING_URL = configuration.LEARNING_URL || "http://127.0.0.1:4004";
+    env.PLANNING_URL = configuration.PLANNING_URL || "http://127.0.0.1:4009";
   }
   if (name === "billing")
     env.SCHEDULING_URL =

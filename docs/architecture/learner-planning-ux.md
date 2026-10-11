@@ -2,7 +2,7 @@
 
 ## Access boundary
 
-The student portal contains homework, resources, booking, sessions, planning and
+The student portal contains homework, resources, booking, sessions, reminders, planning and
 shared contact details. Financial history, attendance analytics, activity reports
 and reconciliation are tutor workspace features. Billing and Reporting enforce
 staff roles and capabilities on their read endpoints. Shared permission policy
@@ -98,3 +98,9 @@ rendered in the portal. Learning tabs support arrow keys, Home and End.
 
 These changes use the existing Cloudflare gateway assets, Planning API and
 Learning Worker. They require no new service, paid product or database migration.
+
+## Applicant detail review and reminders (11 October 2026)
+
+The current template wizard prefills approved education/applicant profile facts and asks missing questions through Planning’s personalized preview API. **Review applicant details** exposes saved/current answers with individual Change actions; changing residence, citizenship, qualification or study level clears the old route and requests a new preview. Failed template/country loading offers a retry. Institution aid/testing requirements and unknown eligibility remain explicit. The [applicant/reminder contract](student-reminders-and-applicant-rules.md) documents API shapes and the [annual source register](../annual-review.md) limits verified country calendars.
+
+Homework links include a validated assignment ID and open the authorized detail directly across filters/pages. Student reminders belong to the current account, business and student; in-app reminders work independently of opt-in email delivery. Notifications owns schedule/inbox state, and Platform privately rechecks recipient access. Completion suppression is eventual; provider-accepted email cannot be recalled.

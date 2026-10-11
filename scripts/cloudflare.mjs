@@ -8,7 +8,7 @@ import pg from 'pg';
 
 export const root = fileURLToPath(new URL('../', import.meta.url));
 export const serviceNames = ['platform', 'clients', 'scheduling', 'learning', 'billing', 'payments', 'notifications', 'integrations', 'planning', 'reporting'];
-export const deployOrder = ['platform', 'clients', 'scheduling', 'learning', 'payments', 'integrations', 'billing', 'notifications', 'planning', 'reporting', 'gateway'];
+export const deployOrder = ['platform', 'clients', 'scheduling', 'learning', 'payments', 'integrations', 'billing', 'planning', 'notifications', 'reporting', 'gateway'];
 const directory = join(root, '.cloudflare');
 const deploymentPath = join(directory, 'deployment.json');
 const secretsPath = join(directory, 'secrets.json');
@@ -136,7 +136,7 @@ export function createConfigs(configInput, subscriptions, projectRoot = root, ma
       ...(name === 'reporting' ? { services: ['scheduling', 'learning', 'billing', 'clients'].map(service => ({ binding: service.toUpperCase(), service: `${config.prefix}-${service}` })) } : {}),
       ...(name === 'billing' ? { services: ['scheduling', 'clients'].map(service => ({ binding: service.toUpperCase(), service: `${config.prefix}-${service}` })) } : {}),
       ...(['integrations', 'planning'].includes(name) ? { services: [{ binding: 'CLIENTS', service: `${config.prefix}-clients` }] } : {}),
-      ...(name === 'notifications' ? { services: [{ binding: 'CLIENTS', service: `${config.prefix}-clients` }] } : {}),
+      ...(name === 'notifications' ? { services: ['clients', 'platform', 'learning', 'planning'].map(service => ({ binding: service.toUpperCase(), service: `${config.prefix}-${service}` })) } : {}),
       ...(name === 'platform' ? { services: [{ binding: 'NOTIFICATIONS', service: `${config.prefix}-notifications` }, { binding: 'CLIENTS', service: `${config.prefix}-clients` }] } : {}),
     };
   }

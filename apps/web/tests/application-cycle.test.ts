@@ -32,3 +32,10 @@ test("profile identity changes when education or applicability changes, even wit
   assert.notEqual(planningProfileKey(original), planningProfileKey({ ...original, applicantCountry: "MA" }));
   assert.notEqual(planningProfileKey(original), planningProfileKey({ currentGrade: 11, academicYear: 2026 }));
 });
+
+test("approved applicant fact edits invalidate a pending template preview", () => {
+  const original = { graduationYear: 2027, applicantFacts: { residenceCountry: "MA", aidSeeking: true } };
+  assert.notEqual(planningProfileKey(original), planningProfileKey({ ...original, applicantFacts: { ...original.applicantFacts, residenceCountry: "US" } }));
+  assert.notEqual(planningProfileKey(original), planningProfileKey({ ...original, applicantFacts: { ...original.applicantFacts, aidSeeking: false } }));
+  assert.equal(planningProfileKey(original), planningProfileKey({ graduationYear: 2027, applicantFacts: { aidSeeking: true, residenceCountry: "MA" } }));
+});

@@ -3,6 +3,8 @@ import { date, downloadFile, errorMessage, type Api, type Business, type Row } f
 import { hasPermission } from "@palladium/contracts";
 import { DatePicker } from "../components/date-picker";
 import { zonedDateInput, zonedDateInstant } from "../lib/zoned-date";
+import { homeworkLink, loadLinkedHomework, homeworkOpenError } from "../app/portal/homework-navigation";
+import { ReminderControl, canUseReminders } from "../app/portal/portal-reminders";
 import { Modal, Notice } from "../components/shared";
 
 import { publicLink, deadlineTime, deadlinePreviewTime, deadlineCaption } from "../lib/student-board-presentation";
@@ -57,18 +59,20 @@ export function StudentBoardCard(props: CardProps) {
       <div className="planning-task-toolbar"><span className="tag">{columns.find(row => row.id === current.columnId)?.name}</span>{canWrite && <button disabled={busy} onClick={() => setEditing(true)}>Edit task</button>}</div>
       {current.description && <p className="planning-task-description">{current.description}</p>}
       {current.deadline && <DeadlineLabel deadline={current.deadline} />}
+      <ReminderControl api={api} studentId={props.studentId} allowed={canUseReminders(business)} target={{targetKind:"planning",boardId:props.board.id,cardId:current.id}} dueAt={current.deadline?.dueAt} completed={["done", "completed", "complete"].includes(String(columns.find(row => row.id === current.columnId)?.name ?? "").trim().toLowerCase())} />
       {checklist.length > 0 && <section className="planning-task-checklist-section"><div className="planning-task-section-title"><h3>Your checklist</h3><span>{completed} of {checklist.length}</span></div><progress value={completed} max={checklist.length} aria-label="Checklist progress" />{checklist.map(row => <label className={`planning-task-check${row.done ? " is-complete" : ""}`} key={row.id}><input id={`planning-check-${row.id}`} type="checkbox" checked={row.done} disabled={busy || !canWrite} onChange={event => void tick(row.id, event.target.checked)} /><span>{row.text}</span></label>)}<small role="status">{busy ? "Saving checklist…" : saved || (canWrite ? "Changes save automatically." : "View only")}</small></section>}
       {references.length > 0 && <section><h3>Documents & resources</h3><div className="planning-task-references">{references.map((row, index) => row.kind === "learning_resource" ? <ResourcePreview key={index} api={api} business={business} allowed={learning} reference={row} /> : publicLink(row.url) && <a className="planning-task-reference" key={index} href={row.url} target="_blank" rel="noopener noreferrer"><span>{row.kind === "google_doc" && <small>Google Docs essay</small>}<strong>{row.label}</strong></span><span aria-hidden="true">↗</span></a>)}</div>{references.some(row => row.kind === "google_doc") && <p className="crm-helper">Your tutor controls sharing in Google Docs. Ask them for access if the document won't open.</p>}</section>}
-      {current.learningAssignmentId && learning && <RelatedHomework api={api} id={current.learningAssignmentId} />}
+      {current.learningAssignmentId && learning && <RelatedHomework api={api} id={current.learningAssignmentId} studentId={props.studentId} businessId={business.id} />}
       <div className="form-actions"><button disabled={busy} onClick={onClose}>Close task</button></div>
     </div>
   </Modal>;
 }
 
-function RelatedHomework({ api, id }: { api: Api; id: string }) {
-  const [assignment, setAssignment] = useState<Row | null>(null), [error, setError] = useState("");
-  useEffect(() => { let cancelled = false; api(`learning/v1/portal/assignments/${id}`).then(data => { if (!cancelled) setAssignment(data.item); }).catch(e => { if (!cancelled) setError(errorMessage(e)); }); return () => { cancelled = true; }; }, [api, id]);
-  return <section><h3>Related homework</h3><Notice error={error} />{assignment ? <p>{assignment.title}</p> : !error && <p className="crm-helper">Loading homework…</p>}<p className="crm-helper">Submit your work in Homework. Completing a planning checklist does not submit the assignment.</p></section>;
+function RelatedHomework({ api, id, studentId, businessId }: { api: Api; id: string; studentId: string; businessId: string }) {
+  const [assignment, setAssignment] = useState<Row | null>(null), [error, setError] = useState(""), [revision,setRevision] = useState(0);
+  useEffect(() => { const controller = new AbortController(); setAssignment(null); setError(""); loadLinkedHomework(api,studentId,id,controller.signal).then(item => { if (!controller.signal.aborted) setAssignment(item); }).catch(e => { if (!controller.signal.aborted) setError(homeworkOpenError(e)); }); return () => controller.abort(); }, [api, id, studentId, revision]);
+  const href = homeworkLink(typeof window === "undefined" ? "https://local/portal" : window.location.href, studentId, id, businessId);
+  return <section><h3>Related homework</h3>{error && <div role="alert"><p>{error}</p><button onClick={() => setRevision(n=>n+1)}>Retry homework</button></div>}{assignment ? <><p>{assignment.title}</p>{href && <a className="button" href={href}>Open assignment in Homework</a>}</> : !error && <p className="crm-helper">Loading homework…</p>}<p className="crm-helper">Submit your work in Homework. Completing a planning checklist does not submit the assignment.</p></section>;
 }
 
 function StudentBoardCardEditor({ api, business, studentId, board, columns, card, canWrite, onClose, onSaved }: { api: Api; business: Business; studentId: string; board: Row; columns: Row[]; card: Row; canWrite: boolean; onClose: () => void; onSaved: () => Promise<void> }) {

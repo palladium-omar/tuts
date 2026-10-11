@@ -19,6 +19,7 @@ import type {
   ConnectionRow,
   RecipientRow,
 } from "./communications.js";
+import {budgetRemaining, campaignLeaseBudgetMs, notificationDeadline} from "./tick-budget.js";
 type Leased = RecipientRow & {
   campaign_id: string;
   lease_token: string;
@@ -84,7 +85,7 @@ export class CommunicationWorker implements OnModuleInit, OnModuleDestroy {
     this.stopping = true;
     if (this.interval) clearInterval(this.interval);
   }
-  async tick() {
+  async tick(deadline = notificationDeadline(isCloudflareRuntime() ? 22_000 : 32_000)) {
     if (this.busy || this.stopping) return;
     this.busy = true;
     try {
@@ -108,9 +109,9 @@ export class CommunicationWorker implements OnModuleInit, OnModuleDestroy {
         ).rows;
       }
       for (const tenant of tenants) {
-        if (this.stopping) break;
+        if (this.stopping || budgetRemaining(deadline) < 500) break;
         this.cursor = tenant.business_id;
-        await this.processTenant(tenant.business_id);
+        await this.processTenant(tenant.business_id, deadline);
       }
     } catch {
       console.warn(
@@ -120,7 +121,8 @@ export class CommunicationWorker implements OnModuleInit, OnModuleDestroy {
       this.busy = false;
     }
   }
-  async processTenant(businessId: string) {
+  async processTenant(businessId: string, deadline = notificationDeadline(isCloudflareRuntime() ? 22_000 : 32_000)) {
+    const leaseBudget = isCloudflareRuntime() ? campaignLeaseBudgetMs : 27_000;
     const lease = await this.db.withTenant(businessId, async (tx) => {
       // Any expired lease can have crossed the provider acceptance boundary. It must never be resent automatically.
       await tx.query(
@@ -131,7 +133,7 @@ export class CommunicationWorker implements OnModuleInit, OnModuleDestroy {
         "UPDATE communication_campaigns c SET status='completed',updated_at=now() WHERE c.business_id=$1 AND c.status='queued' AND NOT EXISTS(SELECT 1 FROM communication_recipients r WHERE r.business_id=c.business_id AND r.campaign_id=c.id AND r.status IN ('pending','sending'))",
         [businessId],
       );
-      if (!deliveryEnabled()) return null;
+      if (!deliveryEnabled() || budgetRemaining(deadline) < leaseBudget) return null;
       const campaign = (
         await tx.query<CampaignRow>(
           "SELECT * FROM communication_campaigns c WHERE business_id=$1 AND status='queued' AND EXISTS(SELECT 1 FROM communication_recipients r WHERE r.business_id=c.business_id AND r.campaign_id=c.id AND r.status='pending') ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1",
@@ -167,6 +169,7 @@ export class CommunicationWorker implements OnModuleInit, OnModuleDestroy {
         )
       ).rows[0];
       if (!recipient) return null;
+      if (budgetRemaining(deadline) < leaseBudget) return null;
       const token = randomUUID();
       await tx.query(
         "UPDATE communication_recipients SET status='sending',lease_token=$3,lease_until=now()+interval '60 seconds',attempted_at=now(),updated_at=now() WHERE business_id=$1 AND id=$2",
@@ -210,6 +213,14 @@ export class CommunicationWorker implements OnModuleInit, OnModuleDestroy {
         status = "skipped";
         reason = "authorization_or_consent_changed";
       } else {
+        if (budgetRemaining(deadline) < leaseBudget - 1_000) {
+          // This lease has not reached transport, so safe deferral is possible.
+          await this.db.withTenant(businessId, tx => tx.query(
+            "UPDATE communication_recipients SET status='pending',reason=NULL,lease_token=NULL,lease_until=NULL,attempted_at=NULL,updated_at=now() WHERE id=$1 AND status='sending' AND lease_token=$2",
+            [lease.recipient.id, lease.recipient.lease_token],
+          ));
+          return;
+        }
         providerId = await deliver(
           {
             provider: lease.connection.provider,

@@ -37,6 +37,7 @@ function fixture(actionable=false){
   if(sql.startsWith('SELECT planning_canonical_student'))return {rows:[{id:studentId}]};
   if(sql.startsWith('SELECT * FROM planning_templates'))return {rows:[{definition}]};
   if(sql.startsWith('SELECT * FROM planning_cards'))return {rows:cards.map(c=>({...c}))};
+  if(sql.startsWith('SELECT name FROM planning_columns'))return {rows:columns.filter(c=>c.id===args[0]).map(c=>({name:c.name}))};
   if(sql.startsWith('SELECT * FROM planning_columns'))return {rows:columns.map(c=>({...c}))};
   if(sql.startsWith('INSERT INTO planning_cards')){
    const c={id:args[0],business_id:args[1],board_id:args[2],column_id:args[3],position:args[4],title:args[5],description:args[6],checklist:JSON.parse(args[7]),resource_references:JSON.parse(args[8]),deadline:JSON.parse(args[9]),learning_assignment_id:args[10],template_card_key:args[11],created_by:args[12],deadline_edited:false,revision:1,created_at:stamp,updated_at:stamp};
@@ -137,4 +138,61 @@ test('same-version resource review includes only actual missing additions and pr
  await f.service.applyTemplate(ctx,f.board.id,{version:3,expectedRevision:5,cardIds:[],resourceCardIds:[target.id]});assert.equal(target.checklist[0].done,true);assert.ok(target.resource_references.some((r:any)=>r.url==='https://example.com/Custom'));assert.ok(target.resource_references.some((r:any)=>r.url===missing.url));
  assert.deepEqual((await f.service.reviewTemplate(ctx,f.board.id,3)).resourceSuggestions,[]);
  const repeat=await f.service.applyTemplate(ctx,f.board.id,{version:3,expectedRevision:6,cardIds:[],resourceCardIds:[target.id]});assert.deepEqual(repeat.cards,[]);
+});
+
+test('personalized preview and instantiation are server-derived and reject missing facts before creating a board',async()=>{
+ const {applicantTemplatesForCycle}=await import('../src/templates.js');const {instantiateSchema}=await import('../src/schemas.js');const {ruleVersion}=await import('../src/applicant-rules.js');
+ const t=applicantTemplatesForCycle(2027).find(t=>t.key.startsWith('common-app'))!,studentId=randomUUID(),boardId=randomUUID(),stamp='2026-10-11T15:00:00Z';
+ const writes:any[]=[],tenants:string[]=[];let board:any;
+ const tx:any={query:async(sql:string,args:any[]=[])=>{
+  if(sql.startsWith('SELECT * FROM planning_templates'))return {rows:[{template_key:t.key,version:t.version,name:t.name,definition:t,system:true}]};
+  if(sql.startsWith('INSERT INTO planning_boards')){board={id:boardId,student_id:studentId,name:args[3],sharing:args[4],created_by:ctx.sub,revision:1,applicability:JSON.parse(args[8]),updated_at:stamp};writes.push({sql,args});return {rows:[board]};}
+  if(sql.startsWith('INSERT INTO planning_cards')){writes.push({sql,args});return {rows:[{id:args[0],board_id:args[2],column_id:args[3],title:args[5],revision:1,updated_at:stamp}]};}
+  if(sql.startsWith('SELECT name FROM planning_columns'))return {rows:[{name:'To do'}]};
+  return {rows:[]};
+ }};
+ const service=new PlanningService({withTenant:async(tenant:string,work:Function)=>{tenants.push(tenant);return work(tx);}} as unknown as Database);
+ (service as any).student=async()=>studentId;(service as any).canonical=async()=>studentId;(service as any).detail=async()=>({item:board,cards:writes.filter(w=>w.sql.startsWith('INSERT INTO planning_cards')).map(w=>({key:w.args[11],deadline:JSON.parse(w.args[9])}))});
+ const scope={cycle:t.cycle,country:t.country,applicantCategory:t.applicantCategory,program:t.program,round:t.round};
+ const input=instantiateSchema.parse({studentId,version:t.version,idempotencyKey:randomUUID(),applicabilityConfirmed:true,applicability:scope,sharing:'student'});
+ await assert.rejects(service.instantiate(ctx,t.key,input,'Bearer fixture'),/Complete the applicant questions/);assert.equal(writes.length,0);
+ const facts={aidSeeking:true,federalAidEligibility:'eligible_noncitizen' as const,cssProfileRequired:'required' as const,satRequired:'not_required' as const};
+ const preview=await service.templatePreview(ctx,t.key,{version:t.version,applicantFacts:facts});assert.equal(preview.ready,true);assert.ok(preview.item.definition.cards.some(c=>c.key==='fafsa'));
+ const result=await service.instantiate(ctx,t.key,{...input,applicability:{...scope,applicantFacts:facts,ruleVersion}},'Bearer fixture');
+ assert.deepEqual(result.item.applicability.applicantFacts,facts);assert.equal(result.item.applicability.ruleVersion,ruleVersion);
+ assert.deepEqual(result.cards.map((c:any)=>c.key),preview.definition.cards.map(c=>c.key));assert.ok(!result.cards.some((c:any)=>c.key.startsWith('sat-')));
+ assert.ok(tenants.every(tenant=>tenant===ctx.businessId));
+});
+
+test('column completion rename emits revised completion evidence while reordering does not change tasks',async()=>{
+ for(const [name,changed] of [['Done',true],['To do',false]] as const){
+  const boardId=randomUUID(),columnId=randomUUID(),studentId=randomUUID(),cardId=randomUUID(),events:any[]=[],writes:string[]=[];
+  const board:any={id:boardId,student_id:studentId,created_by:ctx.sub,sharing:'student',revision:1};
+  const tx:any={query:async(sql:string,args:any[])=>{
+   if(sql.startsWith('SELECT * FROM planning_boards'))return {rows:[board]};
+   if(sql.startsWith('SELECT planning_canonical_student'))return {rows:[{id:studentId}]};
+   if(sql.startsWith('SELECT * FROM planning_columns'))return {rows:[{id:columnId,name:'To do',position:0,revision:1}]};
+   if(sql.startsWith('UPDATE planning_columns'))return {rows:[{id:columnId,name,position:1,revision:2}]};
+   if(sql.startsWith('UPDATE planning_boards SET revision'))return {rows:[{...board,revision:2}]};
+   if(sql.startsWith('UPDATE planning_cards SET revision')){writes.push(sql);return {rows:[{id:cardId,column_id:columnId,revision:2}]};}
+   if(sql.startsWith('SELECT name FROM planning_columns'))return {rows:[{name}]};
+   if(sql.startsWith('INSERT INTO service_outbox')){events.push(JSON.parse(args[1]));return {rows:[]};}
+   throw new Error(sql);
+  }};
+  const service=new PlanningService({withTenant:async(tenant:string,work:Function)=>{assert.equal(tenant,ctx.businessId);return work(tx);}} as unknown as Database);
+  await service.updateColumn(ctx,boardId,columnId,{expectedBoardRevision:1,expectedRevision:1,name,position:1});
+  const cards=events.filter(e=>e.type==='planning.card-updated.v1');assert.equal(cards.length,changed?1:0);assert.equal(writes.length,changed?1:0);if(changed){assert.equal(cards[0].data.completed,true);assert.equal(cards[0].data.revision,2);}
+ }
+});
+
+test('USA HDAP first-year and unanswered course procedure reject instantiation before writing',async()=>{
+ const {campusTemplate,ruleVersion}=await import('../src/applicant-rules.js');const {instantiateSchema}=await import('../src/schemas.js');const t=campusTemplate(2027),studentId=randomUUID();let writes=0;
+ const service=new PlanningService({withTenant:async(_tenant:string,work:Function)=>work({query:async(sql:string)=>{if(sql.startsWith('SELECT * FROM planning_templates'))return{rows:[{definition:t}]};if(sql.startsWith('INSERT INTO planning_boards'))writes++;return{rows:[]};}})} as unknown as Database);
+ (service as any).student=async()=>studentId;(service as any).canonical=async()=>studentId;
+ for(const campusFranceProcedure of [undefined,'hdap'] as const){
+  const applicantFacts={residenceCountry:'US',citizenshipCountries:['MA'],qualification:'other',entryLevel:'first_year',applicationRoute:'etudes_en_france',campusFranceProcedure};
+  const input=instantiateSchema.parse({studentId,version:1,idempotencyKey:randomUUID(),applicabilityConfirmed:true,applicability:{cycle:t.cycle,country:t.country,applicantCategory:t.applicantCategory,program:t.program,round:t.round,applicantCountry:'US',applicationRoute:'etudes_en_france',applicantFacts,ruleVersion}});
+  await assert.rejects(service.instantiate(ctx,t.key,input,'Bearer fixture'),/Complete the applicant questions/);
+ }
+ assert.equal(writes,0);
 });

@@ -22,6 +22,7 @@ export function StudentEducationProfile({ api, student, canWrite, onChanged, onB
     if (!canWrite || busy) return;
     const next: PlanningProfile | null = clear ? null : {
       ...(profile?.applicantCountry ? { applicantCountry: profile.applicantCountry } : {}),
+      ...(profile?.applicantFacts ? { applicantFacts: profile.applicantFacts } : {}),
       ...(profile?.templateKey ? { templateKey: profile.templateKey } : {}),
       ...(grade ? { currentGrade: Number(grade), academicYear: Number(schoolYear) } : {}),
       ...(graduation ? { graduationYear: Number(graduation) } : {}),
@@ -35,7 +36,7 @@ export function StudentEducationProfile({ api, student, canWrite, onChanged, onB
   }
   return <section className="tracker-detail-item" aria-label="Education and application planning">
     <h3>Education & application planning</h3><Notice error={error} />
-    {!editing ? <>{resolved.cycle === null ? <p className="crm-helper">Add the grade and school year, or expected graduation, to choose the right application dates.</p> : <p>{profile?.currentGrade && <>Grade {profile.currentGrade} · </>}{profile?.academicYear && <>{profile.academicYear}–{String(profile.academicYear + 1).slice(-2)} · </>}Graduation {resolved.graduationYear ?? "to confirm"} · University entry {resolved.cycle}</p>}{canWrite && <button onClick={edit}>Edit education details</button>}</> : <form onSubmit={event => { event.preventDefault(); void save(); }}>
+    {!editing ? <>{resolved.cycle === null ? <p className="crm-helper">Add the grade and school year, or expected graduation, to choose the right application dates.</p> : <p>{profile?.currentGrade && <>Grade {profile.currentGrade} · </>}{profile?.academicYear && <>{profile.academicYear}–{String(profile.academicYear + 1).slice(-2)} · </>}Graduation {resolved.graduationYear ?? "to confirm"} · University entry {resolved.cycle}</p>}{profile?.applicantFacts?.residenceCountry && <p className="crm-helper">Confirmed residence: {new Intl.DisplayNames(undefined, { type: "region" }).of(profile.applicantFacts.residenceCountry)}{profile.applicantFacts.citizenshipCountries?.length ? ` · Citizenship: ${profile.applicantFacts.citizenshipCountries.map(code => new Intl.DisplayNames(undefined, { type: "region" }).of(code)).join(", ")}` : ""}. Application plans use these confirmed details.</p>}{canWrite && <button onClick={edit}>Edit education details</button>}</> : <form onSubmit={event => { event.preventDefault(); void save(); }}>
       <div className="form-grid">
         <label>Current grade<select value={grade} disabled={busy} onChange={event => updateGrade(event.target.value)}><option value="">Other school system / grade unknown</option>{[9, 10, 11, 12].map(value => <option key={value} value={value}>Grade {value}</option>)}</select></label>
         <label>School year starting in September<input type="number" min={2000} max={2199} required={Boolean(grade)} disabled={busy || !grade} value={schoolYear} onChange={event => updateSchoolYear(event.target.value)} /><small>2026 means the 2026–27 school year.</small></label>

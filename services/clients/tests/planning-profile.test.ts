@@ -96,3 +96,18 @@ test("merge preserves the target's reviewed profile and recovers a source profil
     assert.deepEqual(JSON.parse(update.values[binding - 1] as string), targetProfile ?? profile);
   }
 });
+
+test("approved applicant facts are bounded and visible through the portal whitelist", () => {
+  const applicantFacts = { residenceCountry: "US", citizenshipCountries: ["FR", "MA"], qualification: "french_baccalaureate", entryLevel: "first_year", campusFranceProcedure: "dap", federalAidEligibility: "eligible_noncitizen", cssProfileRequired: "required" };
+  const value = { graduationYear: 2027, applicantCountry: "MA", templateKey: "campus-france-2027", applicantFacts };
+  assert.deepEqual(studentPlanningProfile(value), { graduationYear: 2027, applicantFacts });
+  for (const facts of [{ residenceCountry: "ZZ" }, { citizenshipCountries: ["MA", "MA"] }, { federalAidEligibility: "citizen_only" }, { campusFranceProcedure: "unverified-hdap" }, { notes: "private" }, { medicalDiagnosis: "private" }]) assert.equal(planningProfileSchema.safeParse({ graduationYear: 2027, applicantFacts: facts }).success, false);
+  assert.equal(studentPlanningProfile({ ...value, applicantFacts: { ...applicantFacts, privateNotes: "secret" } }), null);
+});
+
+test("every approved Campus France procedure can be saved without broadening the portal whitelist", () => {
+ for (const campusFranceProcedure of ["hdap", "dap", "other", "unknown"]) {
+  const applicantFacts={residenceCountry:"US",entryLevel:"masters",campusFranceProcedure};
+  assert.deepEqual(studentPlanningProfile({entryCycle:2027,applicantFacts,templateKey:"campus-france-2027"}),{entryCycle:2027,applicantFacts});
+ }
+});

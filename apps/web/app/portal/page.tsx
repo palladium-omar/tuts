@@ -9,6 +9,8 @@ import { BrandLogo } from "../../components/brand-logo";
 import { Registration } from "../../features/registration";
 import { PortalOverview } from "./portal-overview";
 import { PortalLearning } from "./portal-learning";
+import { portalUuid } from "./homework-navigation";
+import { studentSessionStatus, studentSessionStatusLabel } from "./session-model";
 import { StudentBoards } from "../../features/student-boards";
 import { clearHomeworkDrafts } from "../../lib/homework-draft";
 import { installClientDiagnostics, portalDiagnosticView } from "../../lib/client-diagnostics";
@@ -42,7 +44,7 @@ export default function StudentPortal() {
     } finally { setLoading(false); }
   }
   useEffect(() => { void load(); }, [platform]);
-  function choose(selected: Business) { setBusiness(selected); const url = new URL(window.location.href); url.searchParams.set("business", selected.id); url.searchParams.delete("student"); url.searchParams.delete("board"); url.searchParams.delete("card"); window.history.replaceState(null, "", url); }
+  function choose(selected: Business) { setBusiness(selected); const url = new URL(window.location.href); url.searchParams.set("business", selected.id); url.searchParams.delete("student"); url.searchParams.delete("assignment"); url.searchParams.delete("board"); url.searchParams.delete("card"); window.history.replaceState(null, "", url); }
   async function signOut() { try { await platform("platform/auth/sign-out", "POST", {}); try { clearHomeworkDrafts(window.sessionStorage, session?.user?.id ?? ""); } catch {} setSession(null); setBusiness(null); setBusinesses([]); } catch (e) { setError(errorMessage(e)); } }
   if (loading) return <main className="loading-screen"><GraduationCap size={32} /><p>Opening your learning space…</p></main>;
   if (!session) return <><Notice error={error} /><Registration api={platform} audience="student" onSignedIn={load} /></>;
@@ -59,6 +61,7 @@ function PortalWorkspace({ platform, business, authorId }: { platform: Api; busi
   const api = useMemo(() => createApi(business.id), [business.id,capabilityKey]);
   useEffect(() => () => clearApi(api), [api]);
   const [grants, setGrants] = useState<Row[]>([]), [students, setStudents] = useState<Row[]>([]), [selected, setSelected] = useState<Row | null>(null), [studentOffset, setStudentOffset] = useState(0), [tab, setTab] = useState(() => typeof window === "undefined" ? "overview" : new URLSearchParams(window.location.search).get("section") ?? "overview"), [loading, setLoading] = useState(true), [error, setError] = useState(""), [revision, setRevision] = useState(0);
+  const [assignmentId, setAssignmentId] = useState<string | null>(() => typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("assignment"));
   const diagnosticView = useRef(tab);
   diagnosticView.current = portalDiagnosticView(tab);
   useEffect(() => installClientDiagnostics(api, () => diagnosticView.current), [api]);
@@ -77,7 +80,12 @@ function PortalWorkspace({ platform, business, authorId }: { platform: Api; busi
         const batch = await Promise.all(ids.slice(at, Math.min(at + 5, studentOffset + 50)).map((id) => api(`clients/v1/portal/students/${id}`)));
         if (cancelled) return; found.push(...batch.map((item) => item.item));
       }
-      if (!cancelled) { setStudents(found); const requested = new URLSearchParams(window.location.search).get("student"); setSelected(found.find((student) => student.id === requested) ?? found[0] ?? null); }
+      if (!cancelled) {
+        const requested = new URLSearchParams(window.location.search).get("student");
+        if (requested && (!portalUuid(requested) || !ids.includes(requested))) { setStudents(found); setError("This student link is invalid or is no longer shared with this account."); return; }
+        if (requested && !found.some(student => student.id === requested)) { const result = await api(`clients/v1/portal/students/${requested}`); if (cancelled) return; found.push(result.item); }
+        setStudents(found); setSelected(found.find((student) => student.id === requested) ?? found[0] ?? null);
+      }
     }
     loadStudents().catch((e) => { if (!cancelled) setError(errorMessage(e)); }).finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
@@ -87,19 +95,23 @@ function PortalWorkspace({ platform, business, authorId }: { platform: Api; busi
     const restore = () => {
       const query = new URLSearchParams(window.location.search);
       setTab(query.get("section") ?? "overview");
+      setAssignmentId(query.get("assignment"));
       const student = students.find(row => row.id === query.get("student"));
-      if (student) setSelected(student);
+      if (student) { setSelected(student); setError(""); }
+      else if (query.get("student")) { setSelected(null); setRevision(n => n + 1); }
     };
     window.addEventListener("popstate", restore);
     return () => window.removeEventListener("popstate", restore);
   }, [students]);
-  function chooseTab(name: string, boardId?: string, cardId?: string) {
+  function chooseTab(name: string, boardId?: string, cardId?: string, linkedAssignmentId?: string) {
     setTab(name);
     const url = new URL(window.location.href);
     url.searchParams.set("section", name);
     if (selected) url.searchParams.set("student", selected.id);
     if (boardId) url.searchParams.set("board", boardId);
-    url.searchParams.delete("card");
+    url.searchParams.delete("card"); url.searchParams.delete("assignment");
+    setAssignmentId(name === "homework" ? linkedAssignmentId ?? null : null);
+    if (name === "homework" && linkedAssignmentId && portalUuid(linkedAssignmentId)) url.searchParams.set("assignment", linkedAssignmentId);
     if (boardId && cardId) url.searchParams.set("card", cardId);
     if (url.href !== window.location.href) window.history.pushState(null, "", url);
   }
@@ -116,12 +128,12 @@ function PortalWorkspace({ platform, business, authorId }: { platform: Api; busi
     <Notice error={error} />
     {!selected ? <Empty><h2>No student record is shared with this account.</h2><p>Use the invitation from your tutor and accept it while signed in with the invited email.</p><button onClick={() => setRevision((n) => n + 1)}>Refresh access</button></Empty> : <>
       <div className="portal-welcome"><span className="portal-photo">{selected.photo ? <img src={selected.photo} alt="" /> : String(selected.displayName || "?")[0]}</span><div><h1>{selected.displayName}</h1><p className="muted">Your learning space with {business.name}.</p></div></div>
-      <div className="portal-student-switch">{students.length > 1 && <label>Student<select aria-label="Choose shared student" value={selected.id} onChange={(e) => { const next = students.find((student) => student.id === e.target.value); if (next) { setSelected(next); const url = new URL(window.location.href); url.searchParams.set("student", next.id); url.searchParams.delete("board"); url.searchParams.delete("card"); window.history.replaceState(null, "", url); } }}>{students.map((student) => <option value={student.id} key={student.id}>{student.displayName}</option>)}</select></label>}<span className="tag">{grants.find((grant) => grant.studentId === selected.id)?.relationship === "guardian" ? "Guardian access" : "Student access"}</span><button className="portal-refresh-access" title="Refresh access" aria-label="Refresh access" onClick={() => setRevision((n) => n + 1)}><RefreshCw size={15} /></button></div>
+      <div className="portal-student-switch">{students.length > 1 && <label>Student<select aria-label="Choose shared student" value={selected.id} onChange={(e) => { const next = students.find((student) => student.id === e.target.value); if (next) { setSelected(next); const url = new URL(window.location.href); url.searchParams.set("student", next.id); setAssignmentId(null); url.searchParams.delete("assignment"); url.searchParams.delete("board"); url.searchParams.delete("card"); window.history.replaceState(null, "", url); } }}>{students.map((student) => <option value={student.id} key={student.id}>{student.displayName}</option>)}</select></label>}<span className="tag">{grants.find((grant) => grant.studentId === selected.id)?.relationship === "guardian" ? "Guardian access" : "Student access"}</span><button className="portal-refresh-access" title="Refresh access" aria-label="Refresh access" onClick={() => setRevision((n) => n + 1)}><RefreshCw size={15} /></button></div>
       {studentCount > 50 && <div className="portal-pagination"><span>Students {studentOffset + 1}–{Math.min(studentOffset + 50, studentCount)} of {studentCount}</span><button disabled={studentOffset === 0} onClick={() => setStudentOffset((n) => Math.max(0, n - 50))}>Previous students</button><button disabled={studentOffset + 50 >= studentCount} onClick={() => setStudentOffset((n) => n + 50)}>Next students</button></div>}
       <nav className="portal-tabs" role="tablist" aria-label="Learning sections">{tabs.map((name) => <button key={name} role="tab" id={`portal-tab-${name}`} aria-controls="portal-section" tabIndex={tab === name ? 0 : -1} aria-selected={tab === name} onKeyDown={event => tabKey(event, name)} onClick={() => chooseTab(name)}>{({ overview: "Overview", homework: "Homework", resources: "Resources", booking: "Book a session", sessions: "Sessions", planning: "Planning", contacts: "Contacts" } as Record<string, string>)[name]}</button>)}</nav>
       <section id="portal-section" role="tabpanel" aria-labelledby={`portal-tab-${tab}`} tabIndex={-1}>
       {tab === "overview" && <PortalOverview key={`${business.id}:${selected.id}:${capabilityKey}`} api={api} business={business} studentId={selected.id} onNavigate={chooseTab} />}
-      {tabs.includes(tab) && ["homework", "resources"].includes(tab) && <PortalLearning key={`${business.id}:${selected.id}:${tab}`} api={api} businessId={business.id} authorId={authorId} studentId={selected.id} resourcesOnly={tab === "resources"} canSubmit={hasPermission(business, "learning.write")} />}
+      {tabs.includes(tab) && ["homework", "resources"].includes(tab) && <PortalLearning key={`${business.id}:${selected.id}:${tab}`} api={api} businessId={business.id} authorId={authorId} studentId={selected.id} resourcesOnly={tab === "resources"} assignmentId={assignmentId} onAssignmentChange={id => { setAssignmentId(id); const url = new URL(window.location.href); if (id) { url.searchParams.set("assignment", id); url.searchParams.set("student", selected.id); } else url.searchParams.delete("assignment"); window.history.pushState(null, "", url); }} business={business} canSubmit={hasPermission(business, "learning.write")} />}
       {tabs.includes(tab) && tab === "booking" && <PortalBooking api={api} studentId={selected.id} />}
       {tabs.includes(tab) && tab === "sessions" && <PortalSessions api={api} studentId={selected.id} />}
       {tabs.includes(tab) && tab === "planning" && <StudentBoards key={selected.id} api={api} business={business} studentId={selected.id} student={selected} persistNavigation />}
@@ -142,5 +154,5 @@ function PortalSessions({ api, studentId }: { api: Api; studentId: string }) {
   const [items, setItems] = useState<Row[]>([]), [total, setTotal] = useState(0), [offset, setOffset] = useState(0), [loading, setLoading] = useState(true), [error, setError] = useState(""), [revision, setRevision] = useState(0);
   useEffect(() => { setOffset(0); }, [studentId]);
   useEffect(() => { let cancelled = false; setLoading(true); setError(""); api(`scheduling/v1/portal/sessions?${new URLSearchParams({ studentId, limit: "20", offset: String(offset) })}`).then((data) => { if (!cancelled) { setItems(data.items ?? []); setTotal(data.total ?? 0); } }).catch((e) => { if (!cancelled) setError(errorMessage(e)); }).finally(() => { if (!cancelled) setLoading(false); }); return () => { cancelled = true; }; }, [api, studentId, offset, revision]);
-  return <><Notice error={error} /><button disabled={loading} onClick={() => setRevision((n) => n + 1)}>Refresh sessions</button>{loading ? <Empty>Loading sessions…</Empty> : !items.length && !error ? <Empty>No sessions have been linked to this student yet.</Empty> : <div className="portal-session-list" style={{ marginTop: 18 }}>{items.map((item) => { const url = safeCalUrl(item.bookingUrl); return <article className="portal-card" key={`${item.source}:${item.id}`}><div><h3>{item.title}</h3><p>{date(item.startsAt)} – {date(item.endsAt)}</p><span className={`status ${item.status}`}>{({ scheduled: "Scheduled", completed: "Completed", cancelled: "Cancelled", no_show: "No-show" } as Record<string, string>)[item.status] ?? item.status}</span></div>{url && <a href={url.href} target="_blank" rel="noopener noreferrer">Manage booking in Cal.com</a>}</article>; })}</div>}{items.some(item => safeCalUrl(item.bookingUrl)) && <p className="portal-external-notice">Need to change a booking? Open its Cal.com link above.</p>}{total > 20 && <div className="portal-pagination"><span>{total ? `${offset + 1}–${Math.min(offset + items.length, total)} of ${total}` : ""}</span><button disabled={loading || offset === 0} onClick={() => setOffset((n) => Math.max(0, n - 20))}>Previous</button><button disabled={loading || offset + 20 >= total} onClick={() => setOffset((n) => n + 20)}>Next</button></div>}</>;
+  return <><Notice error={error} /><button disabled={loading} onClick={() => setRevision((n) => n + 1)}>Refresh sessions</button>{loading ? <Empty>Loading sessions…</Empty> : !items.length && !error ? <Empty>No sessions have been linked to this student yet.</Empty> : <div className="portal-session-list" style={{ marginTop: 18 }}>{items.map((item) => { const url = safeCalUrl(item.bookingUrl); return <article className="portal-card" key={`${item.source}:${item.id}`}><div><h3>{item.title}</h3><p>{date(item.startsAt)} – {date(item.endsAt)}</p><span className={`status ${studentSessionStatus(item)}`}>{studentSessionStatusLabel(item)}</span>{item.providerStatus === "cancelled" && <p className="crm-helper">Cancelled in Cal.com.</p>}</div>{url && <a href={url.href} target="_blank" rel="noopener noreferrer">Open Cal.com booking page</a>}</article>; })}</div>}{items.some(item => safeCalUrl(item.bookingUrl)) && <p className="portal-external-notice">To change or cancel a booking, use the management links in your Cal.com confirmation email. The booking page above opens your tutor’s calendar.</p>}{total > 20 && <div className="portal-pagination"><span>{total ? `${offset + 1}–${Math.min(offset + items.length, total)} of ${total}` : ""}</span><button disabled={loading || offset === 0} onClick={() => setOffset((n) => Math.max(0, n - 20))}>Previous</button><button disabled={loading || offset + 20 >= total} onClick={() => setOffset((n) => n + 20)}>Next</button></div>}</>;
 }

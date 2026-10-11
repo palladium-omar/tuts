@@ -5,9 +5,10 @@ import type {PoolClient} from 'pg';
 import {createHash,randomUUID} from 'node:crypto';
 import {z} from 'zod';
 import * as s from './schemas.js';
-import {builtInTemplates,cycleForSystemKey,milestoneTemplatesForCycle,templatesForCycle,type TemplateDefinition} from './templates.js';
-import {overviewSql} from './overview.js';
+import {applicantTemplatesForCycle,builtInTemplates,cycleForSystemKey,milestoneTemplatesForCycle,templatesForCycle,type TemplateDefinition} from './templates.js';
+import {overviewSql,planningColumnKind} from './overview.js';
 import {sameDeadline} from './deadline-comparison.js';
+import {personalizedTemplate,applicantCountries,usesApplicantRules} from './applicant-rules.js';
 import {mergeTemplateResources} from './template-resources.js';
 type Row=Record<string,any>;
 const scoped=(ctx:RequestContext)=>ctx.accessScope==='students'||['student','parent'].includes(ctx.role);
@@ -19,8 +20,10 @@ export function cardItem(row:Row) {return {id:row.id,boardId:row.board_id,column
 export async function boardEvent(tx:PoolClient,ctx:Pick<RequestContext,'businessId'|'requestId'>,row:Row) {
  await emitEvent(tx,{type:'planning.board-updated.v1',producer:'planning',businessId:ctx.businessId,correlationId:ctx.requestId,data:{boardId:row.id,studentId:row.student_id,revision:Number(row.revision),sharing:row.sharing,archived:Boolean(row.archived_at),updatedAt:iso(row.updated_at)}});
 }
-async function cardEvent(tx:PoolClient,ctx:RequestContext,board:Row,row:Row) {
- await emitEvent(tx,{type:'planning.card-updated.v1',producer:'planning',businessId:ctx.businessId,correlationId:ctx.requestId,data:{cardId:row.id,boardId:board.id,studentId:board.student_id,revision:Number(row.revision),columnId:row.column_id,archived:Boolean(row.archived_at)||Boolean(board.archived_at),sharing:board.sharing,learningAssignmentId:row.learning_assignment_id,updatedAt:iso(row.updated_at)}});
+export async function cardEvent(tx:PoolClient,ctx:RequestContext,board:Row,row:Row) {
+ const column=(await tx.query('SELECT name FROM planning_columns WHERE id=$1 AND board_id=$2 LIMIT 1',[row.column_id,board.id])).rows[0];
+ const completed=Boolean(column)&&planningColumnKind(column.name)==='completed';
+ await emitEvent(tx,{type:'planning.card-updated.v1',producer:'planning',businessId:ctx.businessId,correlationId:ctx.requestId,data:{cardId:row.id,completed,boardId:board.id,studentId:board.student_id,revision:Number(row.revision),columnId:row.column_id,archived:Boolean(row.archived_at)||Boolean(board.archived_at),sharing:board.sharing,learningAssignmentId:row.learning_assignment_id,updatedAt:iso(row.updated_at)}});
 }
 @Injectable()
 export class PlanningService {
@@ -55,7 +58,7 @@ export class PlanningService {
   }catch(error){if(error instanceof NotFoundException||error instanceof ForbiddenException)throw error;throw new ServiceUnavailableException('Student validation is unavailable');}
  }
  private async seed(tx:PoolClient,ctx:RequestContext,cycle?:number) {
-  const templates=cycle&&cycle>2031?[...builtInTemplates,...milestoneTemplatesForCycle(cycle),...templatesForCycle(cycle)]:builtInTemplates;
+  const templates=cycle&&cycle>2031?[...builtInTemplates,...milestoneTemplatesForCycle(cycle),...templatesForCycle(cycle),...applicantTemplatesForCycle(cycle)]:builtInTemplates;
   // One tenant-scoped insert per request, regardless of the number of releases.
   // Existing versions remain immutable and previously-created boards untouched.
   await tx.query(`INSERT INTO planning_templates(business_id,template_key,version,name,definition,system)
@@ -69,7 +72,11 @@ export class PlanningService {
  }
  private templateItem(row:Row) {return {key:row.template_key,version:row.version,name:row.name,system:row.system,definition:row.definition,createdAt:iso(row.created_at)};}
  async templates(ctx:RequestContext,query:z.infer<typeof s.templateQuerySchema>) {
-  return this.db.withTenant(ctx.businessId,async tx=>{await this.seed(tx,ctx,query.cycle);const rows=(await tx.query(`SELECT DISTINCT ON(template_key) * FROM planning_templates WHERE (definition->>'cycle')::integer=$1 ORDER BY template_key,version DESC LIMIT 200`,[query.cycle])).rows;return {items:rows.map(row=>this.templateItem(row)),cycle:query.cycle};});
+  return this.db.withTenant(ctx.businessId,async tx=>{await this.seed(tx,ctx,query.cycle);const rows=(await tx.query(`SELECT DISTINCT ON(template_key) * FROM planning_templates WHERE (definition->>'cycle')::integer=$1 ORDER BY template_key,version DESC LIMIT 200`,[query.cycle])).rows;return {items:rows.filter(row=>!row.template_key.startsWith('campus-france-maroc-')).map(row=>this.templateItem(row)),cycle:query.cycle};});
+ }
+ applicantCountries() {return {items:applicantCountries()};}
+ async templatePreview(ctx:RequestContext,key:string,input:z.infer<typeof s.templatePreviewSchema>) {
+  return this.db.withTenant(ctx.businessId,async tx=>{await this.seed(tx,ctx,cycleForSystemKey(key));const {item,definition}=await this.template(tx,key,input.version);const preview=personalizedTemplate(definition,input.applicantFacts);return {...preview,item:{...this.templateItem(item),definition:preview.definition}};});
  }
  async templateDetail(ctx:RequestContext,key:string,version?:number) {
   return this.db.withTenant(ctx.businessId,async tx=>{await this.seed(tx,ctx,cycleForSystemKey(key));return {item:this.templateItem((await this.template(tx,key,version)).item)};});
@@ -135,7 +142,13 @@ export class PlanningService {
  }
  async updateColumn(ctx:RequestContext,id:string,columnId:string,input:z.infer<typeof s.columnUpdateSchema>) {
   return this.db.withTenant(ctx.businessId,async tx=>{const board=await this.board(tx,ctx,id,true);this.manager(ctx,board);this.expect(board.revision,input.expectedBoardRevision,'Board');const col=await this.column(tx,id,columnId);this.expect(col.revision,input.expectedRevision,'Column');
-   const row=(await tx.query('UPDATE planning_columns SET name=$2,position=$3,revision=revision+1,updated_at=now() WHERE id=$1 RETURNING *',[columnId,input.name??col.name,input.position??col.position])).rows[0];return {item:columnItem(row),board:boardItem(await this.bump(tx,ctx,board))};});
+   const row=(await tx.query('UPDATE planning_columns SET name=$2,position=$3,revision=revision+1,updated_at=now() WHERE id=$1 RETURNING *',[columnId,input.name??col.name,input.position??col.position])).rows[0];
+   const changed=await this.bump(tx,ctx,board);
+   if(planningColumnKind(col.name)!==planningColumnKind(row.name)) {
+    const cards=(await tx.query('UPDATE planning_cards SET revision=revision+1,updated_at=now() WHERE board_id=$1 AND column_id=$2 AND archived_at IS NULL RETURNING *',[id,columnId])).rows;
+    for(const card of cards)await cardEvent(tx,ctx,changed,card);
+   }
+   return {item:columnItem(row),board:boardItem(changed)};});
  }
  async deleteColumn(ctx:RequestContext,id:string,columnId:string,input:z.infer<typeof s.columnDeleteSchema>) {
   return this.db.withTenant(ctx.businessId,async tx=>{const board=await this.board(tx,ctx,id,true);this.manager(ctx,board);this.expect(board.revision,input.expectedBoardRevision,'Board');const col=await this.column(tx,id,columnId);this.expect(col.revision,input.expectedRevision,'Column');
@@ -165,7 +178,7 @@ export class PlanningService {
   const board=await this.board(tx,ctx,original.board_id,true);
   const row=(await tx.query('SELECT * FROM planning_cards WHERE id=$1 AND archived_at IS NULL FOR UPDATE',[id])).rows[0];if(!row)throw new NotFoundException('Card not found');return {board,row};
  }
- async cardDetail(ctx:RequestContext,id:string) {return this.db.withTenant(ctx.businessId,async tx=>{const {board,row}=await this.card(tx,ctx,id);return {item:cardItem(row),board:boardItem(board)};});}
+ async cardDetail(ctx:RequestContext,id:string) {return this.db.withTenant(ctx.businessId,async tx=>{const {board,row}=await this.card(tx,ctx,id);const column=await this.column(tx,board.id,row.column_id);return {item:{...cardItem(row),columnKind:planningColumnKind(column.name)},board:boardItem(board)};});}
  async updateCard(ctx:RequestContext,id:string,input:z.infer<typeof s.cardUpdateSchema>) {
   return this.db.withTenant(ctx.businessId,async tx=>{const {board,row}=await this.card(tx,ctx,id);this.expect(row.revision,input.expectedRevision,'Card');
    const updated=(await tx.query(`UPDATE planning_cards SET title=$2,description=$3,checklist=$4,resource_references=$5,deadline=$6,learning_assignment_id=$7,
@@ -186,7 +199,11 @@ export class PlanningService {
    await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[`${ctx.businessId}:${ctx.sub}:instantiate:${input.idempotencyKey}`]);
    const saved=(await tx.query('SELECT * FROM planning_instantiations WHERE actor_id=$1 AND idempotency_key=$2',[ctx.sub,input.idempotencyKey])).rows[0];
    if(saved){if(saved.request_hash!==hash)throw new ConflictException('Idempotency key was used for different template choices');return {...await this.detail(tx,ctx,await this.board(tx,ctx,saved.board_id)),replayed:true};}
-   const {definition:t}=await this.template(tx,key,input.version),a=input.applicability;
+   const {definition:base}=await this.template(tx,key,input.version),a=input.applicability;
+   const preview=personalizedTemplate(base,a.applicantFacts??{});
+   if(usesApplicantRules(base)&&(!preview.ready||a.ruleVersion!==preview.ruleVersion))throw new BadRequestException('Complete the applicant questions and review the personalized plan before creating it');
+   if(base.applicantCategory==='country_aware'&&(a.applicantCountry!==preview.applicantFacts.residenceCountry||a.applicationRoute!==preview.applicantFacts.applicationRoute))throw new BadRequestException('Confirm residence and route from the personalized preview');
+   const t=preview.definition;
    if(a.cycle!==t.cycle||a.country!==t.country||a.applicantCategory!==t.applicantCategory||a.program!==t.program||a.round!==t.round||(t.applicantCountries.length&&!t.applicantCountries.includes(a.applicantCountry??'')))throw new BadRequestException('Confirm a country, applicant category, program and round that match this template');
    const canonical=await this.canonical(tx,student);assertStudentAccess(ctx,canonical);
    const board=(await tx.query(`INSERT INTO planning_boards(id,business_id,student_id,name,sharing,created_by,template_key,template_version,applicability)
@@ -198,7 +215,10 @@ export class PlanningService {
  }
  private async review(tx:PoolClient,ctx:RequestContext,id:string,version:number) {
   const board=await this.board(tx,ctx,id,true);this.manager(ctx,board);if(!board.template_key)throw new BadRequestException('Board was not created from a template');if(version<board.template_version)throw new ConflictException('Template review cannot roll back to an older version');
-  const {definition}=await this.template(tx,board.template_key,version);if(definition.cycle!==board.applicability?.cycle||definition.country!==board.applicability?.country||definition.round!==board.applicability?.round||definition.program!==board.applicability?.program||definition.applicantCategory!==board.applicability?.applicantCategory||(definition.applicantCountries.length&&!definition.applicantCountries.includes(board.applicability?.applicantCountry)))throw new ConflictException('New template applicability requires a new board');
+  const {definition:base}=await this.template(tx,board.template_key,version);
+  const preview=personalizedTemplate(base,board.applicability?.applicantFacts??{});
+  if(usesApplicantRules(base)&&!preview.ready)throw new ConflictException('New applicant rules need confirmed facts; create a personalized board');
+  const definition=preview.definition;if(definition.cycle!==board.applicability?.cycle||definition.country!==board.applicability?.country||definition.round!==board.applicability?.round||definition.program!==board.applicability?.program||definition.applicantCategory!==board.applicability?.applicantCategory||(definition.applicantCountries.length&&!definition.applicantCountries.includes(board.applicability?.applicantCountry)))throw new ConflictException('New template applicability requires a new board');
   const rows=(await tx.query('SELECT * FROM planning_cards WHERE board_id=$1 AND archived_at IS NULL',[id])).rows;
   const columns=(await tx.query('SELECT * FROM planning_columns WHERE board_id=$1 ORDER BY position,id LIMIT 30',[id])).rows;
   const suggestions=rows.filter(row=>row.template_card_key&&definition.cards.some(card=>card.key===row.template_card_key)).map(row=>({cardId:row.id,expectedRevision:Number(row.revision),templateCardKey:row.template_card_key,currentDeadline:row.deadline,proposedDeadline:definition.cards.find(card=>card.key===row.template_card_key)!.deadline,preserveUserEdit:Boolean(row.deadline_edited)})).filter(suggestion=>!sameDeadline(suggestion.currentDeadline,suggestion.proposedDeadline));

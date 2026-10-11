@@ -5,7 +5,7 @@ import { deadlineCaption, deadlinePreviewTime, templateBrand } from "../lib/stud
 import { BrandLogo } from "../components/brand-logo";
 import { Empty, Notice } from "../components/shared";
 import { publicLink } from "./student-board-card";
-import { applicationCycle, currentAcademicYear, planningProfileKey, type PlanningProfile } from "../lib/application-cycle";
+import { applicationCycle, currentAcademicYear, planningProfileKey, type PlanningProfile, type ApplicantFacts } from "../lib/application-cycle";
 
 const paths = [
   { key: "ucas", name: "UCAS", detail: "Apply to universities in the UK", mark: "UK" },
@@ -19,13 +19,22 @@ function routeLabel(row: Row) {
   if (/^ucas-\d+-early$/.test(value.key)) return ["Oxford, Cambridge or an October-deadline course", "Includes most medicine, dentistry and veterinary courses"];
   return [value.name, value.applicability];
 }
-export function templateScope(definition: Row, applicantCountry?: string): Row {
-  return { cycle: definition.cycle, country: definition.country, applicantCategory: definition.applicantCategory, program: definition.program, round: definition.round, ...(applicantCountry ? { applicantCountry } : {}) };
+export function templateScope(definition: Row, applicantCountry?: string, applicantFacts?: ApplicantFacts, ruleVersion?: string): Row {
+  return { cycle: definition.cycle, country: definition.country, applicantCategory: definition.applicantCategory, program: definition.program, round: definition.round, ...(applicantCountry ? { applicantCountry } : {}), ...(ruleVersion ? { applicantFacts, ruleVersion, ...(applicantFacts?.applicationRoute ? { applicationRoute: applicantFacts.applicationRoute } : {}) } : {}) };
 }
+export function changeApplicantFact(facts: ApplicantFacts, key: keyof ApplicantFacts, value: unknown): ApplicantFacts {
+  const next = { ...facts, [key]: value };
+  if (value === undefined) delete next[key];
+  if (["residenceCountry", "citizenshipCountries", "qualification", "entryLevel"].includes(key)) { delete next.applicationRoute; delete next.campusFranceProcedure; }
+  if (key === "applicationRoute") delete next.campusFranceProcedure;
+  return next;
+}
+
 export function StudentBoardTemplates({ api, studentId, student, canSaveProfile = false, onProfileSaved, onClose, onCreated }: { api: Api; studentId: string; student?: Row; canSaveProfile?: boolean; onProfileSaved?: (student: Row) => void; onClose: () => void; onCreated: (id: string) => void }) {
   const guide = useRef<HTMLElement>(null);
   const [items, setItems] = useState<Row[]>([]), [path, setPath] = useState(""), [selectedState, setSelected] = useState<Row | null>(null), [loading, setLoading] = useState(true), [busy, setBusy] = useState(false), [error, setError] = useState("");
   const [name, setName] = useState(""), [rename, setRename] = useState(false), [applicantCountry, setApplicantCountry] = useState(""), [key, setKey] = useState(() => crypto.randomUUID());
+  const [applicantFacts, setApplicantFacts] = useState<ApplicantFacts>({}), [questions, setQuestions] = useState<Row[]>([]), [countries, setCountries] = useState<Row[]>([]), [previewReady, setPreviewReady] = useState(false), [saveApplicantFacts, setSaveApplicantFacts] = useState(false), [reviewApplicantDetails, setReviewApplicantDetails] = useState(false), [loadAttempt, setLoadAttempt] = useState(0);
   const [transientProfile, setTransientProfile] = useState<PlanningProfile | null>(null), [schoolYear, setSchoolYear] = useState(() => String(currentAcademicYear())), [graduation, setGraduation] = useState(""), [entryYear, setEntryYear] = useState(""), [askGraduation, setAskGraduation] = useState(false), [editSchoolYear, setEditSchoolYear] = useState(false);
   const earliestUpcomingEntry = Math.max(2027, currentAcademicYear() + 1);
   const savedIdentity = `${studentId}:${planningProfileKey(student?.planningProfile)}`;
@@ -36,12 +45,12 @@ export function StudentBoardTemplates({ api, studentId, student, canSaveProfile 
   const profileIdentity = `${studentId}:${planningProfileKey(profile)}`, requestGeneration = useRef(0);
   useEffect(() => {
     let cancelled = false; requestGeneration.current += 1;
-    setItems([]); setSelected(null); setPath(""); setApplicantCountry(""); setName(""); setError(""); setKey(crypto.randomUUID());
+    setItems([]); setSelected(null); setReviewApplicantDetails(false); setSaveApplicantFacts(false); setQuestions([]); setPreviewReady(false); setApplicantFacts(profile.applicantFacts ?? {}); setPath(""); setApplicantCountry(""); setName(""); setError(""); setKey(crypto.randomUUID());
     if (cycle === null || cycle < earliestUpcomingEntry) { setLoading(false); return; }
     setLoading(true);
-    api(`planning/v1/templates?cycle=${cycle}`).then(data => { if (!cancelled) setItems((data.items ?? []).filter((row: Row) => (row.definition ?? row).cycle === cycle)); }).catch(e => { if (!cancelled) setError(errorMessage(e)); }).finally(() => { if (!cancelled) setLoading(false); });
+    Promise.all([api(`planning/v1/templates?cycle=${cycle}`), api("planning/v1/applicant-countries")]).then(([data, choices]) => { if (!cancelled) { setItems((data.items ?? []).filter((row: Row) => (row.definition ?? row).cycle === cycle)); setCountries(choices.items ?? []); } }).catch(e => { if (!cancelled) setError(errorMessage(e)); }).finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; requestGeneration.current += 1; };
-  }, [api, profileIdentity, cycle, earliestUpcomingEntry]);
+  }, [api, profileIdentity, cycle, earliestUpcomingEntry, loadAttempt]);
   async function applyProfile(next: PlanningProfile) {
     const check = applicationCycle(next);
     if (check.cycle === null) { setError(check.reason); return; }
@@ -52,31 +61,50 @@ export function StudentBoardTemplates({ api, studentId, student, canSaveProfile 
     catch (e) { setError(errorMessage(e)); }
     finally { setBusy(false); }
   }
-  function gradeProfile(grade: number): PlanningProfile { return { ...(profile.applicantCountry ? { applicantCountry: profile.applicantCountry } : {}), ...(profile.templateKey ? { templateKey: profile.templateKey } : {}), currentGrade: grade, academicYear: Number(schoolYear) }; }
+  function gradeProfile(grade: number): PlanningProfile { return { ...(profile.applicantFacts ? { applicantFacts: profile.applicantFacts } : {}), ...(profile.applicantCountry ? { applicantCountry: profile.applicantCountry } : {}), ...(profile.templateKey ? { templateKey: profile.templateKey } : {}), currentGrade: grade, academicYear: Number(schoolYear) }; }
   const selected = selectedState?.profileIdentity === profileIdentity ? selectedState : null;
   const routes = items.filter(row => (row.definition ?? row).key.startsWith(path) && !(row.definition ?? row).name.includes("(closed)"));
   const definition = selected?.definition;
-  const needsCountry = definition?.applicantCountries?.length > 1 && !applicantCountry;
-  const step = !path ? 1 : !selected ? 2 : needsCountry ? 2 : 3;
+  const needsCountry = questions.length > 0 || (definition?.applicantCountries?.length > 0 && !applicantCountry);
+  const step = !path ? 1 : !selected ? 2 : needsCountry || reviewApplicantDetails ? 2 : 3;
   useEffect(() => {
     if (loading) return;
     const heading = guide.current?.querySelector("h2");
     heading?.setAttribute("tabindex", "-1"); heading?.focus({ preventScroll: true });
     guide.current?.scrollIntoView({ block: "start", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
-  }, [loading, path, selected?.key, needsCountry]);
+  }, [loading, path, selected?.key, needsCountry, reviewApplicantDetails]);
   async function select(row: Row) {
     const generation = ++requestGeneration.current;
     setLoading(true); setError("");
     try {
       const data = await api(`planning/v1/templates/${row.key}?version=${row.version}`), value = data.item.definition ?? data.item;
       if (generation !== requestGeneration.current || value.cycle !== cycle) return;
-      setSelected({ ...data.item, definition: value, profileIdentity });
+      const facts = profile.applicantFacts ?? {};
+      const preview = await api(`planning/v1/templates/${row.key}/preview`, "POST", { version: row.version, applicantFacts: facts });
+      if (generation !== requestGeneration.current || value.cycle !== cycle) return;
+      setSelected({ ...preview.item, definition: preview.definition, ruleVersion: preview.ruleVersion, profileIdentity });
+      setApplicantFacts(facts); setQuestions(preview.questions ?? []); setPreviewReady(preview.ready === true);
       const known = profile.applicantCountry;
-      setApplicantCountry(value.applicantCountries?.includes(known) ? known : value.applicantCountries?.length === 1 ? value.applicantCountries[0] : "");
+      setApplicantCountry(value.applicantCategory === "country_aware" ? facts.residenceCountry ?? "" : value.applicantCountries?.includes(known) ? known ?? "" : "");
       const family = paths.find(item => value.key.startsWith(item.key));
       setName(`${student?.displayName ? `${student.displayName} · ` : ""}${family?.name ?? value.name} ${value.cycle}`.slice(0, 200));
       setRename(false); setKey(crypto.randomUUID());
     } catch (e) { if (generation === requestGeneration.current) setError(errorMessage(e)); } finally { if (generation === requestGeneration.current) setLoading(false); }
+  }
+  async function answerApplicant(key: keyof ApplicantFacts, value: unknown) {
+    if (!selected || busy) return;
+    const facts = changeApplicantFact(applicantFacts, key, value);
+    setReviewApplicantDetails(false);
+    const generation = ++requestGeneration.current;
+    setBusy(true); setError("");
+    try {
+      const preview = await api(`planning/v1/templates/${selected.key}/preview`, "POST", { version: selected.version, applicantFacts: facts });
+      if (generation !== requestGeneration.current) return;
+      setApplicantFacts(facts); setQuestions(preview.questions ?? []); setPreviewReady(preview.ready === true);
+      setApplicantCountry(preview.definition.applicantCategory === "country_aware" ? facts.residenceCountry ?? "" : applicantCountry);
+      setSelected({ ...preview.item, definition: preview.definition, ruleVersion: preview.ruleVersion, profileIdentity }); setKey(crypto.randomUUID());
+    } catch (e) { if (generation === requestGeneration.current) setError(errorMessage(e)); }
+    finally { if (generation === requestGeneration.current) setBusy(false); }
   }
   function choosePath(value: string) {
     setPath(value); setSelected(null); setError("");
@@ -84,26 +112,33 @@ export function StudentBoardTemplates({ api, studentId, student, canSaveProfile 
     const known = matches.find(row => row.key === profile.templateKey);
     if (known || matches.length === 1) void select(known ?? matches[0]);
   }
-  function back() { setError(""); if (selected && routes.length > 1) setSelected(null); else if (path) { setPath(""); setSelected(null); } else onClose(); }
+  function back() { setError(""); if (reviewApplicantDetails) { setReviewApplicantDetails(false); return; } if (selected && routes.length > 1) setSelected(null); else if (path) { setPath(""); setSelected(null); } else onClose(); }
   async function create() {
-    if (!definition || definition.cycle !== cycle || needsCountry || busy || !name.trim()) return;
+    if (!definition || definition.cycle !== cycle || !previewReady || needsCountry || busy || !name.trim()) return;
     setBusy(true); setError("");
     try {
-      const data = await api(`planning/v1/templates/${definition.key}/instantiate`, "POST", { studentId, version: definition.version, name: name.trim(), idempotencyKey: key, applicabilityConfirmed: true, applicability: templateScope(definition, applicantCountry), sharing: "student" }, key);
+      const input = { studentId, version: definition.version, name: name.trim(), idempotencyKey: key, applicabilityConfirmed: true, applicability: templateScope(definition, applicantCountry, applicantFacts, selected?.ruleVersion), sharing: "student" };
+      if (canSaveProfile && saveApplicantFacts) {
+        const saved = await api(`clients/v1/clients/${studentId}`, "PATCH", { planningProfile: { ...profile, applicantFacts } });
+        onProfileSaved?.(saved.item);
+      }
+      const data = await api(`planning/v1/templates/${definition.key}/instantiate`, "POST", input, key);
       onCreated(data.item.id);
     } catch (e) { setError(errorMessage(e)); } finally { setBusy(false); }
   }
   return <section ref={guide} className="planning-guide" aria-label="Create an application plan">
     <div className="planning-guide-top"><button disabled={loading || busy} onClick={back}><ArrowLeft size={16} />{path ? "Back" : "All boards"}</button><span className="planning-step-label">{step === 1 ? "Choose your path" : step === 2 ? "Make it yours" : "Your plan"}</span><button disabled={busy} onClick={onClose}>Close</button></div>
     <div className="planning-step-track" aria-label={`Step ${step} of 3`}>{[1, 2, 3].map(value => <span key={value} className={value <= step ? "is-complete" : ""} />)}</div>
-    <Notice error={error} />
-    {cycle === null ? <div className="planning-guide-step"><span className="planning-eyebrow"><GraduationCap size={16} /> A quick school detail</span><h2>{askGraduation ? "When do you expect to graduate?" : knownGradeWithoutYear ? "Which school year is this grade for?" : "What grade are you in?"}</h2><p className="planning-guide-description">{resolved.reason} We’ll use this to choose your application dates.</p>{!askGraduation ? <><p className="crm-helper">{schoolYear}–{String(Number(schoolYear) + 1).slice(-2)} school year <button disabled={busy} onClick={() => setEditSchoolYear(!editSchoolYear)}>{editSchoolYear ? "Done" : "Change school year"}</button></p>{editSchoolYear && <label>School year starting in September<input type="number" min={2000} max={2199} value={schoolYear} disabled={busy} onChange={event => setSchoolYear(event.target.value)} /></label>}<div className="planning-path-grid">{(knownGradeWithoutYear ? [profile.currentGrade!] : [9, 10, 11, 12]).map(grade => <button className="planning-choice" key={grade} disabled={busy || !schoolYear} onClick={() => void applyProfile(gradeProfile(grade))}><strong>{knownGradeWithoutYear ? `Use ${schoolYear}–${String(Number(schoolYear) + 1).slice(-2)} for Grade ${grade}` : `Grade ${grade}`}</strong><span>University entry {Number(schoolYear) + 13 - grade}</span></button>)}</div><button disabled={busy} onClick={() => setAskGraduation(true)}>I know my graduation year / another school system</button></> : <form onSubmit={event => { event.preventDefault(); void applyProfile({ graduationYear: Number(graduation) }); }}><label>Expected graduation year<input type="number" min={2000} max={2200} required value={graduation} disabled={busy} onChange={event => setGraduation(event.target.value)} /></label><div className="form-actions"><button className="primary" disabled={busy || !graduation} type="submit">{busy ? "Saving…" : "Continue"}</button><button type="button" disabled={busy} onClick={() => setAskGraduation(false)}>Choose grade instead</button></div></form>}<p className="planning-guide-footnote">{canSaveProfile ? "These education details will be saved to the student record." : "This choice is used for this plan. Your tutor can save education details to your student record."}</p></div>
+    <Notice error={error} />{error && !loading && !selected && <TemplateLoadRetry busy={busy} onRetry={() => setLoadAttempt(attempt => attempt + 1)} />}
+    {cycle === null ? <div className="planning-guide-step"><span className="planning-eyebrow"><GraduationCap size={16} /> A quick school detail</span><h2>{askGraduation ? "When do you expect to graduate?" : knownGradeWithoutYear ? "Which school year is this grade for?" : "What grade are you in?"}</h2><p className="planning-guide-description">{resolved.reason} We’ll use this to choose your application dates.</p>{!askGraduation ? <><p className="crm-helper">{schoolYear}–{String(Number(schoolYear) + 1).slice(-2)} school year <button disabled={busy} onClick={() => setEditSchoolYear(!editSchoolYear)}>{editSchoolYear ? "Done" : "Change school year"}</button></p>{editSchoolYear && <label>School year starting in September<input type="number" min={2000} max={2199} value={schoolYear} disabled={busy} onChange={event => setSchoolYear(event.target.value)} /></label>}<div className="planning-path-grid">{(knownGradeWithoutYear ? [profile.currentGrade!] : [9, 10, 11, 12]).map(grade => <button className="planning-choice" key={grade} disabled={busy || !schoolYear} onClick={() => void applyProfile(gradeProfile(grade))}><strong>{knownGradeWithoutYear ? `Use ${schoolYear}–${String(Number(schoolYear) + 1).slice(-2)} for Grade ${grade}` : `Grade ${grade}`}</strong><span>University entry {Number(schoolYear) + 13 - grade}</span></button>)}</div><button disabled={busy} onClick={() => setAskGraduation(true)}>I know my graduation year / another school system</button></> : <form onSubmit={event => { event.preventDefault(); void applyProfile({ ...(profile.applicantFacts ? { applicantFacts: profile.applicantFacts } : {}), graduationYear: Number(graduation) }); }}><label>Expected graduation year<input type="number" min={2000} max={2200} required value={graduation} disabled={busy} onChange={event => setGraduation(event.target.value)} /></label><div className="form-actions"><button className="primary" disabled={busy || !graduation} type="submit">{busy ? "Saving…" : "Continue"}</button><button type="button" disabled={busy} onClick={() => setAskGraduation(false)}>Choose grade instead</button></div></form>}<p className="planning-guide-footnote">{canSaveProfile ? "These education details will be saved to the student record." : "This choice is used for this plan. Your tutor can save education details to your student record."}</p></div>
     : cycle < earliestUpcomingEntry ? <div className="planning-guide-step"><span className="planning-eyebrow"><GraduationCap size={16} /> Confirm your next step</span><h2>When do you expect to start university?</h2><p className="planning-guide-description">Your education details show graduation or entry in {cycle}. If you are taking a gap year, tell us your expected university entry year.</p><form onSubmit={event => { event.preventDefault(); void applyProfile({ ...profile, entryCycle: Number(entryYear) }); }}><label>Expected university entry year<input type="number" min={earliestUpcomingEntry} max={2200} required value={entryYear} disabled={busy} onChange={event => setEntryYear(event.target.value)} /></label><div className="form-actions"><button className="primary" disabled={busy || !entryYear} type="submit">{busy ? "Saving…" : "Continue"}</button></div></form><p className="planning-guide-footnote">{canSaveProfile ? "Your expected entry year will be saved to the student record." : "This choice is used for this plan. Your tutor can save it to your student record."}</p></div>
     : loading ? <Empty>Preparing your planning space…</Empty> : <div key={`${path}:${selected?.key ?? "choose"}:${needsCountry}`} className="planning-guide-step">
       {!path ? <><span className="planning-eyebrow"><Sparkles size={16} /> Let’s make a plan</span><h2>Where would you like to apply?</h2><p className="planning-guide-description">Pick a path. We’ll organize the next steps for {student?.displayName ?? "you"}.</p><div className="planning-path-grid">{paths.map(item => <button key={item.key} className="planning-choice" disabled={!items.some(row => (row.definition ?? row).key.startsWith(item.key))} onClick={() => choosePath(item.key)}><span className="planning-path-mark"><BrandLogo brand={item.key.replaceAll("-", "")} size={34} /></span><strong>{item.name}</strong><span>{item.detail}</span><ArrowRight className="planning-choice-arrow" size={18} /></button>)}{items.filter(row => !paths.some(item => row.key.startsWith(item.key))).map(row => <button className="planning-choice" key={row.key} onClick={() => { setPath(row.key); void select(row); }}><GraduationCap /><strong>{row.name}</strong><span>Custom application plan</span></button>)}</div><p className="planning-guide-footnote">Entry {cycle} · You can create more than one plan.</p></>
       : !selected ? <><span className="planning-eyebrow">{paths.find(item => item.key === path)?.name ?? "Application plan"}</span><h2>Which route fits your application?</h2><p className="planning-guide-description">This helps us put the right deadlines on your board.</p><div className="planning-route-list">{routes.map(row => { const [title, detail] = routeLabel(row); return <button className="planning-choice" key={row.key} onClick={() => void select(row)}><strong>{title}</strong><span>{detail}</span><ArrowRight className="planning-choice-arrow" size={18} /></button>; })}</div>{!routes.length && <Empty>No current template for this path. You can create a blank board instead.</Empty>}</>
+      : reviewApplicantDetails ? <ApplicantDetailsReview definition={definition} facts={applicantFacts} busy={busy} onChange={key => void answerApplicant(key, undefined)} onDone={() => setReviewApplicantDetails(false)} />
+      : questions.length ? <ApplicantQuestionStep key={`${selected.key}:${questions[0].key}`} question={questions[0]} countries={countries} busy={busy} onAnswer={answerApplicant} />
       : needsCountry ? <><h2>Which applicant procedure are you using?</h2><p className="planning-guide-description">Choose the country that manages your application.</p><div className="planning-route-list">{definition.applicantCountries.map((country: string) => <button className="planning-choice" key={country} onClick={() => setApplicantCountry(country)}><strong>{new Intl.DisplayNames(undefined, { type: "region" }).of(country)}</strong><ArrowRight size={18} /></button>)}</div></>
-      : <><span className="planning-eyebrow"><Check size={16} /> Ready when you are</span><h2>Your next steps, in one place.</h2><p className="planning-guide-description">{definition.name}{applicantCountry ? ` · ${new Intl.DisplayNames(undefined, { type: "region" }).of(applicantCountry)} procedure` : ""}</p><div className="planning-preview"><div className="planning-preview-header"><BrandLogo brand={templateBrand(definition.key)} size={32} />{rename ? <label>Plan name<input autoFocus disabled={busy} required maxLength={200} value={name} onChange={e => { setName(e.target.value); setKey(crypto.randomUUID()); }} /></label> : <strong>{name}</strong>}<button disabled={busy} onClick={() => setRename(!rename)}>{rename ? "Done" : "Rename"}</button></div><TemplateTaskPreview cards={definition.cards} /></div><details className="planning-procedure"><summary>Procedure & official sources</summary><p>{definition.applicability}</p>{definition.sourceUrls?.map((url: string) => publicLink(url) && <a key={url} href={url} target="_blank" rel="noopener noreferrer">{new URL(url).hostname} ↗</a>)}</details><p className="planning-guide-footnote">Suggested targets help you prepare. Check official dates and requirements for your chosen institutions. Shared with your tutor.</p><button className="primary planning-create" disabled={busy || !name.trim()} onClick={() => void create()}>{busy ? "Creating your plan…" : "Create my plan"}<ArrowRight size={18} /></button></>}
+      : <><span className="planning-eyebrow"><Check size={16} /> Ready when you are</span><h2>Your next steps, in one place.</h2><p className="planning-guide-description">{definition.name}{applicantCountry ? ` · ${new Intl.DisplayNames(undefined, { type: "region" }).of(applicantCountry)} procedure` : ""}</p><div className="planning-preview"><div className="planning-preview-header"><BrandLogo brand={templateBrand(definition.key)} size={32} />{rename ? <label>Plan name<input autoFocus disabled={busy} required maxLength={200} value={name} onChange={e => { setName(e.target.value); setKey(crypto.randomUUID()); }} /></label> : <strong>{name}</strong>}<button disabled={busy} onClick={() => setRename(!rename)}>{rename ? "Done" : "Rename"}</button></div><TemplateTaskPreview cards={definition.cards} />{selected.ruleVersion && <button type="button" disabled={busy} onClick={() => setReviewApplicantDetails(true)}>Review applicant details</button>}{definition.key.startsWith("common-app") && applicantFacts.satRequired === "required" && <label><input type="checkbox" disabled={busy} checked={applicantFacts.satAccommodations === "requested"} onChange={event => void answerApplicant("satAccommodations", event.target.checked ? "requested" : "not_requested")} /> I want a task to request SAT accommodations</label>}</div><details className="planning-procedure"><summary>Procedure & official sources</summary><p>{definition.applicability}</p>{definition.sourceUrls?.map((url: string) => publicLink(url) && <a key={url} href={url} target="_blank" rel="noopener noreferrer">{new URL(url).hostname} ↗</a>)}</details>{canSaveProfile && selected.ruleVersion && <label><input type="checkbox" disabled={busy} checked={saveApplicantFacts} onChange={event => setSaveApplicantFacts(event.target.checked)} /> Save these confirmed applicant details to the student record</label>}<p className="planning-guide-footnote">Suggested targets help you prepare. Check official dates and requirements for your chosen institutions. Shared with your tutor.</p><button className="primary planning-create" disabled={busy || !previewReady || !name.trim()} onClick={() => void create()}>{busy ? "Creating your plan…" : "Create my plan"}<ArrowRight size={18} /></button></>}
     </div>}
   </section>;
 }
@@ -112,4 +147,26 @@ function TemplateTaskPreview({ cards }: { cards: Row[] }) {
   const hasResources = cards.some(card => card.references?.length), hasChecklists = cards.some(card => card.checklist?.length);
   const tasks = (rows: Row[]) => <ul>{rows.map(card => <li key={card.key}><span className="planning-preview-check"><Check size={14} /></span><div><strong>{card.title}</strong>{card.deadline && <small>{card.deadline.dueAt ? `${deadlineCaption(card.deadline)}: ${deadlinePreviewTime(card.deadline)}` : "Date to confirm with your institution"}</small>}</div></li>)}</ul>;
   return <><p className="planning-preview-summary">{cards.length} tasks{hasResources ? " · linked official resources" : ""}{hasChecklists ? " · checklists" : ""}</p>{tasks(cards.slice(0, 5))}{cards.length > 5 && <details className="planning-preview-more"><summary>See all {cards.length} tasks</summary>{tasks(cards.slice(5))}</details>}</>;
+}
+
+function ApplicantQuestionStep({ question, countries, busy, onAnswer }: {question: Row; countries: Row[]; busy: boolean; onAnswer: (key: keyof ApplicantFacts, value: unknown) => void}) {
+  const [choice, setChoice] = useState("");
+  const [citizenships, setCitizenships] = useState<string[]>([]);
+  const names = new Intl.DisplayNames(undefined, { type: "region" });
+  const options = countries.map(country => ({ value: country.code, label: names.of(country.code) ?? country.code })).sort((a,b) => a.label.localeCompare(b.label));
+  if (question.key === "residenceCountry" || question.key === "citizenshipCountries") return <><h2>{question.prompt}</h2><p className="planning-guide-description">Use your own confirmed details so we can choose the right procedure.</p><form onSubmit={event => { event.preventDefault(); onAnswer(question.key, question.key === "citizenshipCountries" ? citizenships : choice); }}><label>{question.key === "residenceCountry" ? "Country of residence" : "Add a citizenship"}<select value={choice} disabled={busy} onChange={event => { setChoice(event.target.value); if (question.key === "citizenshipCountries" && event.target.value) setCitizenships(previous => previous.includes(event.target.value) ? previous : [...previous, event.target.value]); }}><option value="">Choose a country</option>{options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>{question.key === "citizenshipCountries" && <div>{citizenships.map(code => <button key={code} type="button" disabled={busy} onClick={() => setCitizenships(previous => previous.filter(value => value !== code))}>{names.of(code)} ×</button>)}</div>}<button className="primary" disabled={busy || (question.key === "citizenshipCountries" ? !citizenships.length : !choice)}>{busy ? "Preparing…" : "Continue"}</button></form></>;
+  return <><h2>{question.prompt}</h2><p className="planning-guide-description">Choose a confirmed answer, or select the option to check where available.</p><div className="planning-route-list">{question.options.map((option: Row) => <button className="planning-choice" key={option.value} disabled={busy} onClick={() => onAnswer(question.key, question.key === "aidSeeking" ? option.value === "true" : option.value)}><strong>{option.label}</strong><ArrowRight size={18} /></button>)}</div></>;
+}
+
+export function TemplateLoadRetry({ busy, onRetry }: { busy: boolean; onRetry: () => void }) {
+  return <button type="button" disabled={busy} onClick={onRetry}>Retry loading plans</button>;
+}
+
+export function ApplicantDetailsReview({ definition, facts, busy, onChange, onDone }: { definition: Row; facts: ApplicantFacts; busy: boolean; onChange: (key: keyof ApplicantFacts) => void; onDone: () => void }) {
+  const labels: Partial<Record<keyof ApplicantFacts, string>> = { residenceCountry: "Country of residence", citizenshipCountries: "Citizenships", entryLevel: "Study level", qualification: "Qualification", applicationRoute: "Application procedure", campusFranceProcedure: "USA course procedure", aidSeeking: "Apply for financial aid", federalAidEligibility: "Federal aid eligibility", cssProfileRequired: "College CSS Profile requirement", satRequired: "SAT score plan" };
+  const values: Record<string, string> = { first_year: "First year undergraduate", later_undergraduate: "Later undergraduate year", masters: "Master’s", doctorate: "Doctorate", french_baccalaureate: "French baccalauréat", european_baccalaureate: "European Baccalaureate", other: "Another qualification", etudes_en_france: "Études en France", parcoursup: "Parcoursup", dap: "DAP — first-year public university or architecture at any level", direct: "Institution application", mon_master: "Mon Master", eligible_citizen: "Confirmed eligible citizen or national", eligible_noncitizen: "Confirmed eligible noncitizen", ineligible: "Not eligible for federal aid", required: "Required or selected", not_required: "Not required / not selected", unknown: "Needs confirmation", hdap: "HDAP — connected Licence 2/3 or Master’s; excludes architecture and art" };
+  const keys: (keyof ApplicantFacts)[] = definition.applicantCategory === "country_aware" ? ["residenceCountry", "citizenshipCountries", "entryLevel", ...(facts.entryLevel === "first_year" ? ["qualification" as const] : []), "applicationRoute", ...(facts.residenceCountry === "US" && facts.applicationRoute === "etudes_en_france" ? ["campusFranceProcedure" as const] : [])] : ["aidSeeking", ...(facts.aidSeeking ? ["federalAidEligibility" as const, "cssProfileRequired" as const] : []), "satRequired"];
+  const names = new Intl.DisplayNames(undefined, { type: "region" });
+  const label = (key: keyof ApplicantFacts) => { const value = facts[key]; if (value === undefined) return "Needs confirmation"; if (key === "campusFranceProcedure" && value === "other") return "Art or another institution-specific procedure"; if (key === "residenceCountry") return names.of(String(value)); if (Array.isArray(value)) return value.map(code => names.of(code)).join(", "); if (typeof value === "boolean") return value ? "Yes" : "No"; return values[value] ?? value; };
+  return <><h2>Review applicant details</h2><p className="planning-guide-description">These details choose the tasks for this plan. Change any answer that no longer fits.</p><div className="planning-route-list">{keys.map(key => <div key={key}><strong>{labels[key]}</strong><p>{label(key)}</p><button type="button" disabled={busy} aria-label={`Change ${labels[key]}`} onClick={() => onChange(key)}>Change</button></div>)}</div><button type="button" className="primary" disabled={busy} onClick={onDone}>Return to my plan</button></>;
 }

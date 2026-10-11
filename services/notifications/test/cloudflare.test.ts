@@ -37,3 +37,10 @@ test("Worker initialization registers consent handlers without polling", async (
     await assert.rejects(resolvePublicHost("smtp.example.com"), /unavailable/);
   } finally { if (previous === undefined) delete process.env.TUTS_RUNTIME; else process.env.TUTS_RUNTIME = previous; }
 });
+
+test("campaign worker does not lease provider work with insufficient shared tick budget", async () => {
+  const previous = process.env.ALLOW_OUTBOUND_DELIVERY;process.env.ALLOW_OUTBOUND_DELIVERY='true';
+  const queries:string[]=[];
+  const worker=new CommunicationWorker({withTenant:async (_businessId:string,work:(tx:unknown)=>Promise<unknown>)=>work({query:async(sql:string)=>{queries.push(sql);return {rows:[],rowCount:0};}})} as any,{} as any);
+  try{await worker.processTenant('11111111-1111-4111-8111-111111111111',performance.now()+1000);assert.equal(queries.some(sql=>sql.includes('SELECT * FROM communication_campaigns')),false);assert.equal(queries.some(sql=>sql.includes("status='sending',lease_token")),false);}finally{if(previous===undefined)delete process.env.ALLOW_OUTBOUND_DELIVERY;else process.env.ALLOW_OUTBOUND_DELIVERY=previous;}
+});

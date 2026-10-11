@@ -28,6 +28,7 @@ Local port: 4001. [Service guide](../services/platform/README.md).
 | POST | `/v1/portal/accept` | Public | [PortalController.accept](../services/platform/src/portal.controller.ts#L59) |
 | GET | `/v1/portal/access` | Public | [PortalController.access](../services/platform/src/portal.controller.ts#L69) |
 | DELETE | `/v1/portal/access/:id` | Public | [PortalController.revokeAccess](../services/platform/src/portal.controller.ts#L76) |
+| POST | `/internal/reminder-recipient` | Public | [ReminderRecipientController.resolve](../services/platform/src/reminder-recipient.ts#L51) |
 
 ### Owned schema
 
@@ -233,9 +234,9 @@ Local port: 4007. [Service guide](../services/notifications/README.md).
 
 | Method | Service path | Declared access metadata | Controller |
 | --- | --- | --- | --- |
-| GET | `/internal/auth-mail/status` | Public | [AuthMailController.status](../services/notifications/src/auth-mail.ts#L142) |
-| POST | `/internal/auth-mail/password-reset` | Public | [AuthMailController.sendPasswordReset](../services/notifications/src/auth-mail.ts#L148) |
-| POST | `/internal/auth-mail/portal-invitation` | Public | [AuthMailController.sendPortalInvitation](../services/notifications/src/auth-mail.ts#L164) |
+| GET | `/internal/auth-mail/status` | Public | [AuthMailController.status](../services/notifications/src/auth-mail.ts#L161) |
+| POST | `/internal/auth-mail/password-reset` | Public | [AuthMailController.sendPasswordReset](../services/notifications/src/auth-mail.ts#L167) |
+| POST | `/internal/auth-mail/portal-invitation` | Public | [AuthMailController.sendPortalInvitation](../services/notifications/src/auth-mail.ts#L183) |
 | GET | `/v1/communication-connections` | Roles(owner, admin, tutor) | [CommunicationConnectionsController.list](../services/notifications/src/communications.ts#L703) |
 | POST | `/v1/communication-connections` | Roles(owner, admin, tutor); Roles(owner, admin) | [CommunicationConnectionsController.create](../services/notifications/src/communications.ts#L710) |
 | PATCH | `/v1/communication-connections/:id` | Roles(owner, admin, tutor); Roles(owner, admin) | [CommunicationConnectionsController.patch](../services/notifications/src/communications.ts#L720) |
@@ -249,6 +250,9 @@ Local port: 4007. [Service guide](../services/notifications/README.md).
 | GET | `/v1/notifications` | Roles(owner, admin, tutor) | [NotificationsController.list](../services/notifications/src/notifications.ts#L52) |
 | POST | `/v1/notifications` | Roles(owner, admin, tutor) | [NotificationsController.create](../services/notifications/src/notifications.ts#L55) |
 | PATCH | `/v1/notifications/:id` | Roles(owner, admin, tutor) | [NotificationsController.update](../services/notifications/src/notifications.ts#L58) |
+| GET | `/v1/portal/reminders` | StudentScoped; Roles(student, parent); Permissions(notifications.read) | [StudentRemindersController.list](../services/notifications/src/student-reminders.ts#L114) |
+| POST | `/v1/portal/reminders` | StudentScoped; Roles(student, parent); Permissions(notifications.write) | [StudentRemindersController.create](../services/notifications/src/student-reminders.ts#L116) |
+| PATCH | `/v1/portal/reminders/:id` | StudentScoped; Roles(student, parent); Permissions(notifications.write) | [StudentRemindersController.patch](../services/notifications/src/student-reminders.ts#L118) |
 
 ### Owned schema
 
@@ -256,6 +260,8 @@ Local port: 4007. [Service guide](../services/notifications/README.md).
 | --- | --- |
 | [001_notifications.sql](../services/notifications/migrations/001_notifications.sql) | `notifications` |
 | [002_communications.sql](../services/notifications/migrations/002_communications.sql) | `communication_connections`, `communication_campaigns`, `communication_recipients`, `communication_consent` |
+| [003_student_reminders.sql](../services/notifications/migrations/003_student_reminders.sql) | `notification_reminder_directory`, `student_reminders`, `student_reminder_attempts` |
+| [004_reminder_attempt_tenant_integrity.sql](../services/notifications/migrations/004_reminder_attempt_tenant_integrity.sql) | Alters existing schema/policies |
 
 ## integrations
 
@@ -290,27 +296,29 @@ Local port: 4009. [Service guide](../services/planning/README.md).
 
 | Method | Service path | Declared access metadata | Controller |
 | --- | --- | --- | --- |
-| GET | `/v1/templates` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.read) | [PlanningController.templates](../services/planning/src/planning.controller.ts#L11) |
-| GET | `/v1/templates/:key` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.read) | [PlanningController.template](../services/planning/src/planning.controller.ts#L14) |
-| POST | `/v1/templates` | StudentScoped; Roles(owner, admin, tutor, student, parent); Roles(owner, admin, tutor); Permissions(planning.write) | [PlanningController.publish](../services/planning/src/planning.controller.ts#L17) |
-| POST | `/v1/templates/:key/instantiate` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.write, clients.read) | [PlanningController.instantiate](../services/planning/src/planning.controller.ts#L20) |
-| GET | `/v1/overview` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.read) | [PlanningController.overview](../services/planning/src/planning.controller.ts#L23) |
-| GET | `/v1/boards` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.read) | [PlanningController.boards](../services/planning/src/planning.controller.ts#L26) |
-| POST | `/v1/boards` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.write, clients.read) | [PlanningController.createBoard](../services/planning/src/planning.controller.ts#L29) |
-| GET | `/v1/boards/:id` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.read) | [PlanningController.board](../services/planning/src/planning.controller.ts#L32) |
-| PATCH | `/v1/boards/:id` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.write) | [PlanningController.updateBoard](../services/planning/src/planning.controller.ts#L35) |
-| DELETE | `/v1/boards/:id` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.write) | [PlanningController.deleteBoard](../services/planning/src/planning.controller.ts#L38) |
-| POST | `/v1/boards/:id/columns` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.write) | [PlanningController.createColumn](../services/planning/src/planning.controller.ts#L41) |
-| PATCH | `/v1/boards/:id/columns/:columnId` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.write) | [PlanningController.updateColumn](../services/planning/src/planning.controller.ts#L44) |
-| DELETE | `/v1/boards/:id/columns/:columnId` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.write) | [PlanningController.deleteColumn](../services/planning/src/planning.controller.ts#L47) |
-| GET | `/v1/boards/:id/cards` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.read) | [PlanningController.cards](../services/planning/src/planning.controller.ts#L50) |
-| POST | `/v1/boards/:id/cards` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.write) | [PlanningController.createCard](../services/planning/src/planning.controller.ts#L53) |
-| GET | `/v1/cards/:id` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.read) | [PlanningController.card](../services/planning/src/planning.controller.ts#L56) |
-| PATCH | `/v1/cards/:id` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.write) | [PlanningController.updateCard](../services/planning/src/planning.controller.ts#L59) |
-| POST | `/v1/cards/:id/move` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.write) | [PlanningController.move](../services/planning/src/planning.controller.ts#L62) |
-| DELETE | `/v1/cards/:id` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.write) | [PlanningController.deleteCard](../services/planning/src/planning.controller.ts#L65) |
-| GET | `/v1/boards/:id/template-review` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.read) | [PlanningController.review](../services/planning/src/planning.controller.ts#L68) |
-| POST | `/v1/boards/:id/template-apply` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.write) | [PlanningController.apply](../services/planning/src/planning.controller.ts#L71) |
+| GET | `/v1/applicant-countries` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.read) | [PlanningController.countries](../services/planning/src/planning.controller.ts#L11) |
+| POST | `/v1/templates/:key/preview` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.read) | [PlanningController.preview](../services/planning/src/planning.controller.ts#L14) |
+| GET | `/v1/templates` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.read) | [PlanningController.templates](../services/planning/src/planning.controller.ts#L17) |
+| GET | `/v1/templates/:key` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.read) | [PlanningController.template](../services/planning/src/planning.controller.ts#L20) |
+| POST | `/v1/templates` | StudentScoped; Roles(owner, admin, tutor, student, parent); Roles(owner, admin, tutor); Permissions(planning.write) | [PlanningController.publish](../services/planning/src/planning.controller.ts#L23) |
+| POST | `/v1/templates/:key/instantiate` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.write, clients.read) | [PlanningController.instantiate](../services/planning/src/planning.controller.ts#L26) |
+| GET | `/v1/overview` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.read) | [PlanningController.overview](../services/planning/src/planning.controller.ts#L29) |
+| GET | `/v1/boards` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.read) | [PlanningController.boards](../services/planning/src/planning.controller.ts#L32) |
+| POST | `/v1/boards` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.write, clients.read) | [PlanningController.createBoard](../services/planning/src/planning.controller.ts#L35) |
+| GET | `/v1/boards/:id` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.read) | [PlanningController.board](../services/planning/src/planning.controller.ts#L38) |
+| PATCH | `/v1/boards/:id` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.write) | [PlanningController.updateBoard](../services/planning/src/planning.controller.ts#L41) |
+| DELETE | `/v1/boards/:id` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.write) | [PlanningController.deleteBoard](../services/planning/src/planning.controller.ts#L44) |
+| POST | `/v1/boards/:id/columns` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.write) | [PlanningController.createColumn](../services/planning/src/planning.controller.ts#L47) |
+| PATCH | `/v1/boards/:id/columns/:columnId` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.write) | [PlanningController.updateColumn](../services/planning/src/planning.controller.ts#L50) |
+| DELETE | `/v1/boards/:id/columns/:columnId` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.write) | [PlanningController.deleteColumn](../services/planning/src/planning.controller.ts#L53) |
+| GET | `/v1/boards/:id/cards` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.read) | [PlanningController.cards](../services/planning/src/planning.controller.ts#L56) |
+| POST | `/v1/boards/:id/cards` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.write) | [PlanningController.createCard](../services/planning/src/planning.controller.ts#L59) |
+| GET | `/v1/cards/:id` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.read) | [PlanningController.card](../services/planning/src/planning.controller.ts#L62) |
+| PATCH | `/v1/cards/:id` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.write) | [PlanningController.updateCard](../services/planning/src/planning.controller.ts#L65) |
+| POST | `/v1/cards/:id/move` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.write) | [PlanningController.move](../services/planning/src/planning.controller.ts#L68) |
+| DELETE | `/v1/cards/:id` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.write) | [PlanningController.deleteCard](../services/planning/src/planning.controller.ts#L71) |
+| GET | `/v1/boards/:id/template-review` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.read) | [PlanningController.review](../services/planning/src/planning.controller.ts#L74) |
+| POST | `/v1/boards/:id/template-apply` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(planning.write) | [PlanningController.apply](../services/planning/src/planning.controller.ts#L77) |
 
 ### Owned schema
 

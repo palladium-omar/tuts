@@ -26,6 +26,7 @@ export function defaultPermissions(role: string): Permission[] {
   if (role === 'student' || role === 'parent') return [
     'clients.read', 'scheduling.read', 'learning.read', 'learning.write',
     'planning.read', 'planning.write', 'integrations.read',
+    'notifications.read', 'notifications.write',
     ...(role === 'student' ? ['reporting.write' as const] : []),
   ];
   return [];

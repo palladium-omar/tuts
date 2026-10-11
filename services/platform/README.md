@@ -227,3 +227,7 @@ Business creation and every settings save emit `platform.business-profile-update
 ## Cloudflare runtime
 
 `src/worker.ts` exports this domain as an independent Worker through the shared Nest runtime; `src/main.ts` remains the Node entrypoint. The service retains its own PostgreSQL database, signed caller context, tenant RLS and event contracts. Migrations are applied during deployment, outside requests. Worker secrets and bindings are supplied by the deployment configuration.
+
+## Private reminder recipient resolution
+
+`POST /internal/reminder-recipient` is private, requires the timing-safe `X-Auth-Mail-Secret` check against `AUTH_MAIL_INTERNAL_SECRET`, and accepts only `{businessId,userId,studentId,targetKind?,operation:'read'|'write'|'delivery'}`. Notifications supplies its stored authenticated account identity; callers cannot supply recipient addresses. The resolver requires a current student/parent membership with student scope, a nonrevoked exact student grant, Clients and Notifications features, effective read/write permission overrides, and the target resource feature/read permission for creation/delivery. Clients validates that the granted student is active, canonical and portal protected. The response carries only the owning account's current email; it is never exposed in the portal API. Missing private validation fails closed and does not disable the in-app mail-independent state machine.

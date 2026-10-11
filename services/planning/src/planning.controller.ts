@@ -9,6 +9,12 @@ import * as s from './schemas.js';
 export class PlanningController {
  constructor(@Inject(PlanningService) private readonly service:PlanningService) {}
  @Header('Cache-Control','no-store')
+ @Get('applicant-countries') @Permissions('planning.read')
+ countries() {return this.service.applicantCountries();}
+ @Header('Cache-Control','no-store')
+ @Post('templates/:key/preview') @Permissions('planning.read')
+ preview(@CurrentContext() ctx:RequestContext,@Param('key') key:string,@Body() body:unknown) {return this.service.templatePreview(ctx,parseBody(s.templateKeySchema,key),parseBody(s.templatePreviewSchema,body));}
+ @Header('Cache-Control','no-store')
  @Get('templates') @Permissions('planning.read')
  templates(@CurrentContext() ctx:RequestContext,@Query() query:unknown) {return this.service.templates(ctx,parseBody(s.templateQuerySchema,query));}
  @Header('Cache-Control','no-store')

@@ -1,7 +1,9 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { FileText, Upload, X } from "lucide-react";
-import { date, downloadFile, errorMessage, type Api, type Row } from "../../lib/api";
+import { date, downloadFile, errorMessage, type Api, type Business, type Row } from "../../lib/api";
 import { homeworkDraftKey, readHomeworkDraft } from "../../lib/homework-draft";
+import { createHomeworkWorkGuard, loadLinkedHomework, portalUuid, homeworkOpenError } from "./homework-navigation";
+import { ReminderControl, canUseReminders } from "./portal-reminders";
 import { Empty, Modal, Notice } from "../../components/shared";
 
 const labels: Record<string, string> = { assigned: "Assigned", submitted: "Submitted · awaiting tutor review", completed: "Completed", needs_revision: "Needs another attempt" };
@@ -11,8 +13,9 @@ function Material({ resource, onDownload }: { resource: Row; onDownload: (resour
   return <div className="portal-material"><FileText size={18} /><div><strong>{resource.title}</strong><small>{resource.kind === "google_doc" ? "Google Docs" : resource.kind === "link" ? "Web resource" : [resource.fileName, typeof resource.sizeBytes === "number" ? `${Math.max(1, Math.ceil(resource.sizeBytes / 1024))} KB` : ""].filter(Boolean).join(" · ")}</small>{resource.kind === "google_doc" && <small>{resource.sharingNotice ?? "Google controls access to this document. Ask your tutor to share it with your Google account."}</small>}</div>{["google_doc", "link"].includes(resource.kind) && url ? <a href={url} target="_blank" rel="noopener noreferrer">{resource.kind === "google_doc" ? "Open essay ↗" : "Open link ↗"}</a> : resource.storageStatus === "stored" ? <button onClick={() => onDownload(resource)}>Download</button> : <small>Download unavailable</small>}</div>;
 }
 
-export function PortalLearning({ api, businessId, authorId, studentId, resourcesOnly, canSubmit }: { api: Api; businessId: string; authorId: string; studentId: string; resourcesOnly: boolean; canSubmit: boolean }) {
+export function PortalLearning({ api, businessId, authorId, studentId, resourcesOnly, canSubmit, assignmentId, onAssignmentChange, business }: { assignmentId: string | null; onAssignmentChange: (id: string | null) => void; business: Business; api: Api; businessId: string; authorId: string; studentId: string; resourcesOnly: boolean; canSubmit: boolean }) {
   const [rows, setRows] = useState<Row[]>([]), [total, setTotal] = useState(0), [offset, setOffset] = useState(0), [loading, setLoading] = useState(true), [error, setError] = useState(""), [message, setMessage] = useState(""), [revision, setRevision] = useState(0), [selected, setSelected] = useState<Row | null>(null), [opening, setOpening] = useState(false);
+  const [openError, setOpenError] = useState(""), [openRevision, setOpenRevision] = useState(0);
   const [filter, setFilter] = useState(resourcesOnly ? "" : "actionable");
   useEffect(() => { setOffset(0); setRows([]); setSelected(null); setMessage(""); }, [studentId, resourcesOnly]);
   useEffect(() => {
@@ -23,17 +26,29 @@ export function PortalLearning({ api, businessId, authorId, studentId, resources
     return () => { cancelled = true; };
   }, [api, studentId, resourcesOnly, offset, revision, filter]);
   async function download(resource: Row) { setError(""); try { await downloadFile(`learning/v1/portal/resources/${resource.id}/download`, businessId, resource.fileName ?? resource.title); } catch (e) { setError(errorMessage(e)); } }
-  async function open(assignment: Row) { setOpening(true); setError(""); try { const data = await api(`learning/v1/portal/assignments/${assignment.id}`); setSelected(data.item); } catch (e) { setError(errorMessage(e)); } finally { setOpening(false); } }
+  useEffect(() => {
+    const controller = new AbortController(); setSelected(null); setOpenError(""); setOpening(false);
+    if (!assignmentId || resourcesOnly) return () => controller.abort();
+    if (!portalUuid(assignmentId)) { setOpenError("This homework link is invalid."); return () => controller.abort(); }
+    setOpening(true);
+    loadLinkedHomework(api, studentId, assignmentId, controller.signal).then(item => { if (!controller.signal.aborted) setSelected(item); }).catch(e => { if (!controller.signal.aborted) setOpenError(homeworkOpenError(e)); }).finally(() => { if (!controller.signal.aborted) setOpening(false); });
+    return () => controller.abort();
+  }, [api, studentId, assignmentId, resourcesOnly, openRevision]);
+  function closeAssignment() { setSelected(null); onAssignmentChange(null); }
   return <>
     <Notice error={error} message={message} />
+    {opening && <p role="status" className="crm-helper">Opening assignment…</p>}
+    {openError && <div className="portal-link-error" role="alert"><p>{openError}</p>{portalUuid(assignmentId) && <button onClick={() => setOpenRevision(n => n + 1)}>Retry opening assignment</button>}<button onClick={closeAssignment}>Dismiss homework link</button></div>}
     <div className="portal-learning-toolbar"><div><h2>{resourcesOnly ? "Your library" : "Your homework"}</h2><p className="crm-helper">{resourcesOnly ? "Essay documents, files and useful links from your tutor." : "Start with work that needs your attention. Your tutor reviews each submission."}</p></div><label>{resourcesOnly ? "Show resources" : "Show homework"}<select value={filter} onChange={event => { setFilter(event.target.value); setOffset(0); setMessage(""); }}>{resourcesOnly ? <><option value="">All resources</option><option value="google_doc">Google Docs essays</option><option value="file_metadata">Files</option><option value="link">Web links</option></> : <><option value="actionable">To work on</option><option value="">All homework</option><option value="submitted">Awaiting tutor review</option><option value="completed">Completed</option><option value="needs_revision">Needs changes</option></>}</select></label><button disabled={loading || opening} onClick={() => setRevision(n => n + 1)}>Refresh</button></div>
-    {loading ? <Empty>Loading {resourcesOnly ? "resources" : "homework"}…</Empty> : !rows.length && !error ? <Empty>{resourcesOnly ? (filter ? "No resources of this type yet." : "Your tutor has not shared resources yet.") : filter === "actionable" ? <><h3>You’re caught up.</h3><p>No homework is waiting on you. You can still view submitted and completed work.</p><button onClick={() => { setFilter(""); setOffset(0); }}>View all homework</button></> : "No homework matches this filter."}</Empty> : resourcesOnly ? <div className="portal-grid">{rows.map((resource) => <article className="portal-card" key={resource.id}><Material resource={resource} onDownload={(item) => void download(item)} /></article>)}</div> : <div className="portal-grid">{rows.map((assignment) => <article className="portal-card" key={assignment.id}><span className={`status ${assignment.status}`}>{labels[assignment.status] ?? assignment.status}</span><h3>{assignment.title}</h3>{assignment.dueAt && <p className="crm-helper">Due {date(assignment.dueAt)}{["assigned", "needs_revision"].includes(assignment.status) && Date.parse(assignment.dueAt) < Date.now() && <span className="portal-past-due">Past due</span>}</p>}{assignment.description && <p>{assignment.description}</p>}{assignment.feedback && <blockquote><strong>Tutor feedback</strong><p>{assignment.feedback}</p></blockquote>}<button disabled={opening} onClick={() => void open(assignment)}>Open assignment</button></article>)}</div>}
+    {loading ? <Empty>Loading {resourcesOnly ? "resources" : "homework"}…</Empty> : !rows.length && !error ? <Empty>{resourcesOnly ? (filter ? "No resources of this type yet." : "Your tutor has not shared resources yet.") : filter === "actionable" ? <><h3>You’re caught up.</h3><p>No homework is waiting on you. You can still view submitted and completed work.</p><button onClick={() => { setFilter(""); setOffset(0); }}>View all homework</button></> : "No homework matches this filter."}</Empty> : resourcesOnly ? <div className="portal-grid">{rows.map((resource) => <article className="portal-card" key={resource.id}><Material resource={resource} onDownload={(item) => void download(item)} /></article>)}</div> : <div className="portal-grid">{rows.map((assignment) => <article className="portal-card" key={assignment.id}><span className={`status ${assignment.status}`}>{labels[assignment.status] ?? assignment.status}</span><h3>{assignment.title}</h3>{assignment.dueAt && <p className="crm-helper">Due {date(assignment.dueAt)}{["assigned", "needs_revision"].includes(assignment.status) && Date.parse(assignment.dueAt) < Date.now() && <span className="portal-past-due">Past due</span>}</p>}{assignment.description && <p>{assignment.description}</p>}{assignment.feedback && <blockquote><strong>Tutor feedback</strong><p>{assignment.feedback}</p></blockquote>}<button disabled={opening} onClick={() => onAssignmentChange(assignment.id)}>Open assignment</button></article>)}</div>}
     {total > 20 && <div className="portal-pagination"><span>{total ? `${offset + 1}–${Math.min(offset + rows.length, total)} of ${total}` : ""}</span><button disabled={loading || offset === 0} onClick={() => setOffset((n) => Math.max(0, n - 20))}>Previous</button><button disabled={loading || offset + 20 >= total} onClick={() => setOffset((n) => n + 20)}>Next</button></div>}
-    {selected && <AssignmentWork api={api} draftKey={homeworkDraftKey(authorId, businessId, studentId, selected.id)} assignment={selected} canSubmit={canSubmit} onDownload={(resource) => void download(resource)} onClose={() => setSelected(null)} onSubmitted={() => { setSelected(null); setRevision((n) => n + 1); setMessage("Work submitted. Your tutor will review it before marking the assignment complete."); }} />}
+    {selected && <AssignmentWork key={selected.id} api={api} studentId={studentId} remindersAllowed={canUseReminders(business)} draftKey={homeworkDraftKey(authorId, businessId, studentId, selected.id)} assignment={selected} canSubmit={canSubmit} onDownload={(resource) => void download(resource)} onClose={closeAssignment} onSubmitted={() => { closeAssignment(); setRevision((n) => n + 1); setMessage("Work submitted. Your tutor will review it before marking the assignment complete."); }} />}
   </>;
 }
 
-function AssignmentWork({ api, draftKey, assignment, canSubmit, onDownload, onClose, onSubmitted }: { api: Api; draftKey: string; assignment: Row; canSubmit: boolean; onDownload: (resource: Row) => void; onClose: () => void; onSubmitted: () => void }) {
+function AssignmentWork({ api, draftKey, assignment, canSubmit, onDownload, onClose, onSubmitted, studentId, remindersAllowed }: { studentId: string; remindersAllowed: boolean; api: Api; draftKey: string; assignment: Row; canSubmit: boolean; onDownload: (resource: Row) => void; onClose: () => void; onSubmitted: () => void }) {
+  const [workGuard] = useState(createHomeworkWorkGuard);
+  useEffect(() => { workGuard.activate(); return () => workGuard.deactivate(); }, [workGuard]);
   const [files, setFiles] = useState<File[]>([]), [uploaded, setUploaded] = useState<Row[]>(assignment.submissionResources ?? []), [busy, setBusy] = useState(false), [step, setStep] = useState(""), [error, setError] = useState("");
   const [initialDraft] = useState(() => { try { return readHomeworkDraft(window.sessionStorage, draftKey, assignment.revision); } catch { return null; } });
   const [text, setText] = useState(initialDraft?.text ?? assignment.submissionText ?? ""), [url, setUrl] = useState(initialDraft?.url ?? assignment.submissionUrl ?? "");
@@ -43,7 +58,7 @@ function AssignmentWork({ api, draftKey, assignment, canSubmit, onDownload, onCl
     try { window.sessionStorage.setItem(draftKey, JSON.stringify({ revision: assignment.revision, text: nextText, url: nextUrl, savedAt: Date.now() })); setDraftSaved(true); setStorageError(false); } catch { setStorageError(true); setDraftSaved(false); }
   }
   async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); if (!canSubmit) return; const form = new FormData(event.currentTarget), resources = [...uploaded];
+    event.preventDefault(); if (!canSubmit) return; const isCurrentWork = workGuard.ticket(); const form = new FormData(event.currentTarget), resources = [...uploaded];
     const submissionText = String(form.get("submissionText") ?? "").trim(), submissionUrl = String(form.get("submissionUrl") ?? "").trim();
     if (!submissionText && !submissionUrl && !files.length && !resources.length) { setError("Add your answers, a work link or a file before submitting."); return; }
     if (submissionUrl) { try { if (new URL(submissionUrl).protocol !== "https:") throw new Error(); } catch { setError("Use an HTTPS link for your work."); return; } }
@@ -52,13 +67,14 @@ function AssignmentWork({ api, draftKey, assignment, canSubmit, onDownload, onCl
       for (const [index, file] of files.entries()) {
         if (resources.some((resource) => resource.uploadFile === file)) continue;
         setStep(`Uploading file ${index + 1} of ${files.length}…`); const body = new FormData(); body.set("title", file.name); body.set("file", file);
-        const data = await api(`learning/v1/portal/assignments/${assignment.id}/submission-upload`, "POST", body); resources.push({ ...data.item, uploadFile: file }); setUploaded([...resources]);
+        const data = await api(`learning/v1/portal/assignments/${assignment.id}/submission-upload`, "POST", body); if (!isCurrentWork()) return; resources.push({ ...data.item, uploadFile: file }); setUploaded([...resources]);
       }
-      setStep("Submitting work…"); await api(`learning/v1/portal/assignments/${assignment.id}/submit`, "POST", { ...(submissionText ? { submissionText } : {}), ...(submissionUrl ? { submissionUrl } : {}), submissionResourceIds: resources.map((resource) => resource.id), expectedRevision: assignment.revision }); try { window.sessionStorage.removeItem(draftKey); } catch {} onSubmitted();
-    } catch (e) { setError(errorMessage(e)); } finally { setBusy(false); setStep(""); }
+      if (!isCurrentWork()) return; setStep("Submitting work…"); await api(`learning/v1/portal/assignments/${assignment.id}/submit`, "POST", { ...(submissionText ? { submissionText } : {}), ...(submissionUrl ? { submissionUrl } : {}), submissionResourceIds: resources.map((resource) => resource.id), expectedRevision: assignment.revision }); try { window.sessionStorage.removeItem(draftKey); } catch {} if (isCurrentWork()) onSubmitted();
+    } catch (e) { if (isCurrentWork()) setError(errorMessage(e)); } finally { if (isCurrentWork()) { setBusy(false); setStep(""); } }
   }
   return <Modal title={assignment.title} onClose={() => { if (!busy) onClose(); }}>
     <Notice error={error} /><span className={`status ${assignment.status}`}>{labels[assignment.status] ?? assignment.status}</span>{assignment.dueAt && <p className="crm-helper">Due {date(assignment.dueAt)}</p>}{assignment.description && <p className="teaching-work-text">{assignment.description}</p>}
+    <ReminderControl api={api} studentId={studentId} allowed={remindersAllowed} target={{targetKind:"homework",assignmentId:assignment.id}} dueAt={assignment.dueAt} completed={assignment.status === "completed"} />
     <h3>Learning materials</h3>{assignment.resources?.length ? assignment.resources.map((resource: Row) => <Material key={resource.id} resource={resource} onDownload={onDownload} />) : <p className="crm-helper">No materials attached.</p>}
     {assignment.feedback && <blockquote><strong>Tutor feedback</strong><p className="teaching-work-text">{assignment.feedback}</p></blockquote>}
     {assignment.submissionText && <section><h3>Your last submission</h3><p className="teaching-work-text">{assignment.submissionText}</p></section>}

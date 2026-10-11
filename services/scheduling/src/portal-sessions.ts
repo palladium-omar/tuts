@@ -41,10 +41,10 @@ export class PortalSessionsService {
       const studentId=await requireStudentScope(tx,ctx,input.studentId);
       const values=[ctx.businessId,studentId];
       const counts=(await tx.query(`SELECT count(*) FILTER (WHERE status='completed') AS completed,
-        count(*) FILTER (WHERE status='scheduled' AND ends_at>now()) AS upcoming
+        count(*) FILTER (WHERE status='scheduled' AND ends_at>now() AND coalesce(provider_status,'')<>'cancelled') AS upcoming
         FROM (${sourceUnion}) s WHERE business_id=$1 AND client_id=$2`,values)).rows[0];
       const rows=(await tx.query(`SELECT class_id,source,title,starts_at,ends_at FROM (${sourceUnion}) s
-        WHERE business_id=$1 AND client_id=$2 AND status='scheduled' AND ends_at>now()
+        WHERE business_id=$1 AND client_id=$2 AND status='scheduled' AND ends_at>now() AND coalesce(provider_status,'')<>'cancelled'
         ORDER BY starts_at,source,class_id LIMIT 5`,values)).rows;
       return {summary:{completed:Number(counts.completed),upcoming:Number(counts.upcoming)},
         sessions:rows.map(row=>({id:row.class_id,source:row.source,title:row.title,startsAt:new Date(row.starts_at).toISOString(),endsAt:new Date(row.ends_at).toISOString()})),limit:5};

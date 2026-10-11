@@ -8,9 +8,11 @@ import { IdentityService } from "./identity.service.js";
 import { PortalController } from "./portal.controller.js";
 import { PortalService } from "./portal.service.js";
 
+import {ReminderRecipientController, ReminderRecipientService} from "./reminder-recipient.js";
+
 export const appOptions = {
   name: "platform",
   port: 4001,
-  controllers: [AuthController, BusinessesController, ContextController, PortalController],
-  providers: [IdentityService, PortalService],
+  controllers: [AuthController, BusinessesController, ContextController, PortalController, ReminderRecipientController],
+  providers: [IdentityService, PortalService, ReminderRecipientService],
 };

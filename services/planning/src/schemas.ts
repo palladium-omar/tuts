@@ -1,5 +1,6 @@
 import {z} from 'zod';
 import {isIP} from 'node:net';
+import {applicantFactsSchema} from './applicant-rules.js';
 export const idSchema=z.uuid();
 export const revisionSchema=z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 const title=z.string().trim().min(1).max(200);
@@ -38,7 +39,7 @@ export const listSchema=z.object({studentId:z.uuid().optional(),limit:z.coerce.n
 export const templateQuerySchema=z.object({cycle:z.coerce.number().int().min(2027).max(2200).default(2027)}).strict();
 export const templateVersionQuery=z.object({version:z.coerce.number().int().positive().optional()}).strict();
 export const templateKeySchema=z.string().regex(/^[a-z][a-z0-9-]{2,79}$/);
-export const applicabilitySchema=z.object({cycle:z.number().int().min(2027).max(2200),country:z.string().regex(/^[A-Z]{2}$/),applicantCountry:z.string().regex(/^[A-Z]{2}$/).optional(),applicantCategory:z.string().min(1).max(100),program:z.string().min(1).max(100),round:z.string().min(1).max(100)}).strict();
+export const applicabilitySchema=z.object({cycle:z.number().int().min(2027).max(2200),country:z.string().regex(/^[A-Z]{2}$/),applicantCountry:z.string().regex(/^[A-Z]{2}$/).optional(),applicantCategory:z.string().min(1).max(100),program:z.string().min(1).max(100),round:z.string().min(1).max(100),applicantFacts:applicantFactsSchema.optional(),ruleVersion:z.string().max(50).optional(),applicationRoute:applicantFactsSchema.shape.applicationRoute}).strict();
 export const instantiateSchema=z.object({studentId:z.uuid(),version:z.number().int().positive(),name:title.optional(),idempotencyKey:z.string().min(8).max(100).regex(/^[a-zA-Z0-9_-]+$/),applicabilityConfirmed:z.literal(true),applicability:applicabilitySchema,sharing:sharingSchema.default('private')}).strict();
 export const customTemplateSchema=z.object({key:templateKeySchema,name:title,cycle:z.number().int().min(2027).max(2200),country:z.string().regex(/^[A-Z]{2}$/),applicantCountries:z.array(z.string().regex(/^[A-Z]{2}$/)).max(50).default([]),applicantCategory:z.string().min(1).max(100),program:z.string().min(1).max(100),round:z.string().min(1).max(100),applicability:z.string().max(2000),sourceUrls:z.array(linkSchema).max(10).default([]),columns:z.array(title).min(1).max(30),cards:z.array(z.object({...cardFields,key:z.string().regex(/^[a-z0-9-]{1,80}$/),columnIndex:z.number().int().nonnegative().max(29)}).strict()).max(200)}).strict().refine(v=>v.cards.every(c=>c.columnIndex<v.columns.length)&&new Set(v.cards.map(c=>c.key)).size===v.cards.length,'Use existing columns and unique card keys');
 export const templateReviewSchema=z.object({version:z.coerce.number().int().positive()}).strict();
@@ -49,3 +50,5 @@ export type Deadline=z.infer<typeof deadlineSchema>;
 export function enteredDeadline(input:z.infer<typeof deadlineInputSchema>|null):Deadline|null {
  return input?{...input,status:input.kind==='personal'&&input.dueAt?'user_set':'requires_confirmation',verifiedAt:null}:null;
 }
+
+export const templatePreviewSchema=z.object({version:z.number().int().positive(),applicantFacts:applicantFactsSchema.default({})}).strict();

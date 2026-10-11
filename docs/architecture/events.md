@@ -56,7 +56,7 @@ The table covers cross-service flows relevant to the current implementation. Ind
 
 Optional automation must check tenant configuration. Financial reconciliation consumers continue settling previously accepted payments even after feature access changes. Emit a new event version for incompatible payload changes. Adding consumers must not require changing the producer's implementation.
 
-## Active subscription registry (10 October 2026)
+## Active subscription registry (11 October 2026)
 
 Cloudflare uses per-consumer queues and private R2 pointers for oversized envelopes; Node uses RabbitMQ. The registry is the exact subscription source for fanout and provisioning. Selected examples above are not its complete list. Changes must update contracts, handlers, transport configuration, docs and retry tests together.
 
@@ -70,4 +70,10 @@ Cloudflare uses per-consumer queues and private R2 pointers for oversized envelo
 | reporting | `scheduling.class-updated.v1`, `learning.assignment-created.v1`, `learning.assignment-submitted.v1`, `learning.assignment-reviewed.v1`, `learning.assignment-updated.v1`, `learning.resource-created.v1`, `learning.resource-updated.v1`, `billing.invoice-updated.v1`, `clients.student-merged.v1` |
 | learning | `clients.student-merged.v1` |
 | payments | `billing.invoice-issued.v1` |
-| notifications | `clients.client-created.v1`, `clients.client-updated.v1`, `scheduling.session-created.v1`, `scheduling.session-completed.v1`, `learning.assignment-created.v1`, `billing.invoice-issued.v1`, `payments.payment-confirmed.v1` |
+| notifications | `clients.client-created.v1`, `clients.client-updated.v1`, `scheduling.session-created.v1`, `scheduling.session-completed.v1`, `learning.assignment-created.v1`, `learning.assignment-reviewed.v1`, `planning.board-updated.v1`, `planning.card-updated.v1`, `platform.portal-access-revoked.v1`, `billing.invoice-issued.v1`, `payments.payment-confirmed.v1` |
+
+## Reminder suppression events
+
+`planning.card-updated.v1` adds `completed:boolean` to its existing `cardId,boardId,studentId,revision,columnId,sharing,archived,learningAssignmentId,updatedAt` payload. Completion uses the same normalized Done/Completed/Complete column labels as Planning Overview. Moving a card or renaming a column across status categories produces current revisioned card evidence in the mutation transaction. Notifications suppresses only the exact matching reminder when the event establishes completion, archive or loss of student sharing. Historical events without the additive flag remain compatible and do not prove completion.
+
+Notifications also consumes exact reviewed-completed homework, board archive/private sharing and `platform.portal-access-revoked.v1`. These events suppress work; they never establish access. Delivery independently asks Platform to verify current account membership, student grant, permissions and enabled feature. Event suppression is eventual, and provider-accepted email cannot be recalled. See [reminder architecture](student-reminders-and-applicant-rules.md) and [Notifications](../../services/notifications/README.md).

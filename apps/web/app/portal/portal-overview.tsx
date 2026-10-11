@@ -5,12 +5,15 @@ import { ArrowUpRight, BookOpen, CalendarDays, CheckCircle2, ListTodo } from 'lu
 import { date, errorMessage, type Api, type Business, type Row } from '../../lib/api';
 import { overviewLink, overviewDeadlineLabel, priorityPlanningTasks, progressPercent } from './overview-model';
 import {createOverviewLoader, type OverviewLoad} from './overview-loader';
+import { homeworkLink } from './homework-navigation';
+import { ReminderInbox, ReminderControl, canReadReminders, canUseReminders } from './portal-reminders';
 import './overview.css';
 type Domain = 'learning' | 'planning' | 'scheduling';
 type Load = OverviewLoad;
 const titles = {learning:'Homework',planning:'Planning',scheduling:'Sessions'};
-export function PortalOverview({api,business,studentId,onNavigate}:{api:Api;business:Business;studentId:string;onNavigate:(section:string,boardId?:string,cardId?:string)=>void}) {
+export function PortalOverview({api,business,studentId,onNavigate}:{api:Api;business:Business;studentId:string;onNavigate:(section:string,boardId?:string,cardId?:string,assignmentId?:string)=>void}) {
   const [states,setStates]=useState<Partial<Record<Domain,Load>>>({});
+  const [reminderRevision,setReminderRevision]=useState(0);
   const permitted = (domain:Domain)=>business.entitlements.includes(domain)&&hasPermission(business,`${domain}.read`);
   const domains = (['learning','planning','scheduling'] as Domain[]).filter(permitted);
   const coverage = domains.join(',');
@@ -23,9 +26,10 @@ export function PortalOverview({api,business,studentId,onNavigate}:{api:Api;busi
     return ()=>{current.dispose();if(loader.current===current)loader.current=null;};
   },[api,studentId,coverage]);
   async function retry(domain:Domain) {await loader.current?.refresh(domain);}
-  function link(section:string,label:string,boardId?:string,cardId?:string) {
-    const href=overviewLink(typeof window==='undefined'?'https://local/portal':window.location.href,studentId,section,boardId,cardId);
-    return <a href={href} onClick={event=>{if(event.button===0&&!event.metaKey&&!event.ctrlKey&&!event.shiftKey&&!event.altKey){event.preventDefault();onNavigate(section,boardId,cardId);}}}>{label}<ArrowUpRight size={15}/></a>;
+  function link(section:string,label:string,boardId?:string,cardId?:string,assignmentId?:string) {
+    const current=typeof window==='undefined'?'https://local/portal':window.location.href;
+    const href=assignmentId?homeworkLink(current,studentId,assignmentId)??overviewLink(current,studentId,section):overviewLink(current,studentId,section,boardId,cardId);
+    return <a href={href} onClick={event=>{if(event.button===0&&!event.metaKey&&!event.ctrlKey&&!event.shiftKey&&!event.altKey){event.preventDefault();onNavigate(section,boardId,cardId,assignmentId);}}}>{label}<ArrowUpRight size={15}/></a>;
   }
   function status(domain:Domain) {
     const state=states[domain];
@@ -35,6 +39,7 @@ export function PortalOverview({api,business,studentId,onNavigate}:{api:Api;busi
   const priorityTasks=planning?priorityPlanningTasks(planning.tasks,planning.upcomingTasks):[];
   return <div className="student-overview">
     <div className="overview-intro"><div><span className="overview-eyebrow">Your next steps</span><h2>Keep your momentum.</h2><p className="muted">See what needs your attention and what’s coming up.</p></div><CheckCircle2 aria-hidden="true" size={38}/></div>
+    {canReadReminders(business)&&<ReminderInbox key={studentId} api={api} business={business} studentId={studentId} reloadToken={reminderRevision}/>}
     {!domains.length?<div className="portal-card"><h3>Your overview is waiting.</h3><p>Your tutor has not enabled homework, planning or sessions in this space yet.</p></div>:<>
     {domains.filter(domain=>states[domain]?.data&&states[domain]?.error).map(domain=><p key={domain} className="muted" role="status">{titles[domain]} may be out of date. {states[domain]?.error} <button onClick={()=>void retry(domain)}>Retry {titles[domain].toLowerCase()}</button></p>)}
     <div className="overview-metrics">
@@ -45,7 +50,7 @@ export function PortalOverview({api,business,studentId,onNavigate}:{api:Api;busi
     </div>
     <div className="overview-columns">
       {(permitted('learning')||permitted('planning'))&&<div className="overview-stack overview-stack-left">
-      {permitted('learning')&&<article className="portal-card overview-section overview-homework"><header><h3>Homework to tackle</h3>{link('homework','All homework')}</header>{learning?<>{learning.homework.length?<ul>{learning.homework.map((item:Row)=><li key={item.id}><div><strong>{item.title}</strong><small>{item.status==='needs_revision'?'Revision requested · ':''}{item.dueAt?`${Date.parse(item.dueAt)<Date.now()?'Past due · ':'Due '}${date(item.dueAt)}`:'No due date'}</small></div>{link('homework','Open homework')}</li>)}</ul>:<p>{learning.summary.total?(learning.summary.submitted?'You’re caught up. Submitted work is waiting for your tutor’s review.':'You’re caught up. Your homework is complete.'):'Your tutor hasn’t assigned homework yet.'}</p>}{learning.summary.pending>learning.homework.length&&<p className="muted">Showing the next {learning.homework.length} of {learning.summary.pending} assignments.</p>}</>:status('learning')}</article>}
+      {permitted('learning')&&<article className="portal-card overview-section overview-homework"><header><h3>Homework to tackle</h3>{link('homework','All homework')}</header>{learning?<>{learning.homework.length?<ul>{learning.homework.map((item:Row)=><li key={item.id}><div><strong>{item.title}</strong><small>{item.status==='needs_revision'?'Revision requested · ':''}{item.dueAt?`${Date.parse(item.dueAt)<Date.now()?'Past due · ':'Due '}${date(item.dueAt)}`:'No due date'}</small></div><div>{link('homework','Open homework',undefined,undefined,item.id)}<ReminderControl api={api} studentId={studentId} allowed={canUseReminders(business)} target={{targetKind:'homework',assignmentId:item.id}} dueAt={item.dueAt} onChanged={()=>setReminderRevision(n=>n+1)}/></div></li>)}</ul>:<p>{learning.summary.total?(learning.summary.submitted?'You’re caught up. Submitted work is waiting for your tutor’s review.':'You’re caught up. Your homework is complete.'):'Your tutor hasn’t assigned homework yet.'}</p>}{learning.summary.pending>learning.homework.length&&<p className="muted">Showing the next {learning.homework.length} of {learning.summary.pending} assignments.</p>}</>:status('learning')}</article>}
       {permitted('planning')&&<article className="portal-card overview-section overview-planning"><header><h3>Planning next steps</h3>{link('planning','All boards')}</header>{planning?<>{priorityTasks.length?<ul>{priorityTasks.map((item:Row)=><li key={item.id}><div><strong>{link('planning',item.title,item.boardId,item.id)}</strong><small>{item.boardName}</small>{overviewDeadlineLabel(item.deadline)&&<small className="overview-task-date">{overviewDeadlineLabel(item.deadline)}</small>}</div></li>)}</ul>:<p>{planning.summary.pending+planning.summary.inProgress?'See upcoming deadlines for your next dated tasks.':planning.summary.total?'Your planning tasks are complete.':'No shared planning tasks yet.'}</p>}{planning.summary.pending+planning.summary.inProgress>Math.min(5,planning.tasks.length)&&<p className="muted">Open your boards to see all remaining work.</p>}</>:status('planning')}</article>}
       </div>}
       {(permitted('planning')||permitted('scheduling'))&&<div className="overview-stack overview-stack-right">

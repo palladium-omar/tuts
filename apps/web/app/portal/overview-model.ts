@@ -2,7 +2,7 @@ import {deadlineCaption, deadlineTime} from '../../lib/student-board-presentatio
 export function overviewLink(current: string, studentId: string, section: string, boardId?: string, cardId?: string) {
   const url = new URL(current);
   url.searchParams.set('student', studentId); url.searchParams.set('section', section);
-  url.searchParams.delete('board'); url.searchParams.delete('card');
+  url.searchParams.delete('board'); url.searchParams.delete('card'); url.searchParams.delete('assignment');
   if (boardId) url.searchParams.set('board', boardId);
   if (boardId && cardId) url.searchParams.set('card', cardId);
   return `${url.pathname}${url.search}${url.hash}`;

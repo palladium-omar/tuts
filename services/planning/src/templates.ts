@@ -1,5 +1,6 @@
 import type {Deadline} from './schemas.js';
 import {actionableTemplate} from './actionable-resources.js';
+import {campusTemplate} from './applicant-rules.js';
 export interface TemplateCard {
  key:string;title:string;description:string;columnIndex:number;checklist:{id:string;text:string;done:boolean}[];
  references:Record<string,unknown>[];deadline:Deadline|null;learningAssignmentId:string|null;
@@ -158,10 +159,16 @@ export function templatesForCycle(cycle:number):TemplateDefinition[] {
   return t;
  });
 }
+/** New releases derive tasks from confirmed applicant facts at preview/creation.
+ * Keep templatesForCycle and all older persisted definitions unchanged. */
+export function applicantTemplatesForCycle(cycle:number):TemplateDefinition[] {
+ const common=templatesForCycle(cycle).find(t=>t.key.startsWith('common-app'))!;
+ return [{...structuredClone(common),version:common.version+1},campusTemplate(cycle)];
+}
 // Retain both earlier releases byte-for-byte for reproducible existing boards.
-export const builtInTemplates:TemplateDefinition[]=[...legacyTemplates,...[2027,2028,2029,2030,2031].flatMap(milestoneTemplatesForCycle),...[2027,2028,2029,2030,2031].flatMap(actionableTemplatesForCycle),...templatesForCycle(2027).filter(t=>t.version===4)];
+export const builtInTemplates:TemplateDefinition[]=[...legacyTemplates,...[2027,2028,2029,2030,2031].flatMap(milestoneTemplatesForCycle),...[2027,2028,2029,2030,2031].flatMap(actionableTemplatesForCycle),...templatesForCycle(2027).filter(t=>t.version===4),...[2027,2028,2029,2030,2031].flatMap(applicantTemplatesForCycle)];
 export function cycleForSystemKey(key:string):number|undefined {
- const match=/^(?:ucas-(\d{4})-(?:standard|early)|common-app-(\d{4})|bocconi-(\d{4})-(?:winter|early)-international|campus-france-maroc-(\d{4}))$/.exec(key);
+ const match=/^(?:ucas-(\d{4})-(?:standard|early)|common-app-(\d{4})|bocconi-(\d{4})-(?:winter|early)-international|campus-france-maroc-(\d{4})|campus-france-(\d{4}))$/.exec(key);
  const cycle=match?Number(match.slice(1).find(Boolean)):undefined;
  return cycle!==undefined&&cycle>=2027&&cycle<=2200?cycle:undefined;
 }

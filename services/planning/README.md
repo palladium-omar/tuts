@@ -144,6 +144,8 @@ dated release uses version 2 and the same template/card keys.
 | Method/path | Input | Response |
 | --- | --- | --- |
 | GET `/v1/templates` | `?cycle=2027` (entry year, 2027–2200) | `{items:[Template],cycle}` (bounded200 latest versions) |
+| GET `/v1/applicant-countries` | None | `{items:[{code,guidanceUrls}]}` (249 ISO choices) |
+| POST `/v1/templates/:key/preview` | `{version,applicantFacts}` | `{item,definition,applicantFacts,questions,ready,ruleVersion}` |
 | GET `/v1/templates/:key` | `?version=1` optional; latest otherwise | `{item:Template}` |
 | POST `/v1/templates/:key/instantiate` | below | board detail plus `{replayed:boolean}` |
 | POST `/v1/templates` | custom definition below; staff role only | `{item:Template}` with next immutable version |
@@ -158,8 +160,10 @@ country constraint. Columns are names; cards have a stable `key`, `columnIndex`
 and the ordinary card fields, with response deadline metadata.
 
 Built-in releases cover entry cycles 2027–2031. A request for a later supported
-cycle generates the same six template families with dated suggested preparation
-milestones and persists them as immutable version 1. Direct detail/instantiate
+cycle generates immutable milestone/actionable releases and new personalized
+Common App/Campus France releases. The guided list contains six application
+routes after excluding the historical Morocco-specific family; historical keys
+remain available through explicit detail/version reads. Direct detail/instantiate
 requests for those system keys also seed the matching cycle. This generation
 never copies a 2027 verified date into a future official deadline. Future dates
 all require confirmation, even where a provider has announced an anticipated
@@ -192,8 +196,9 @@ Instantiation requires an explicit template choice and scope confirmation:
 }
 ```
 
-Use definition values for scope selections. For Morocco add `applicantCountry:
-"MA"`. All exact scope fields must match the template and its applicant country
+Use definition values for scope selections. Historical Morocco-family versions
+require `applicantCountry:"MA"`. New country-aware versions use the confirmed
+residence and applicant-rule contract documented below. All exact scope fields must match the template and its applicant country
 constraint. This acknowledges applicability; it is not automatic eligibility
 determination. Reusing the same key and body returns the original board; a
 different body with the same key returns409. Archived originals are not silently
@@ -279,7 +284,7 @@ Mutations write events in the same tenant transaction as state:
 - `planning.board-updated.v1`: boardId, studentId, revision, sharing, archived,
   updatedAt.
 - `planning.card-updated.v1`: cardId, boardId, studentId, revision, columnId,
-  sharing, archived, learningAssignmentId, updatedAt.
+  sharing, archived, completed, learningAssignmentId, updatedAt.
 - `planning.template-published.v1`: templateKey, version.
 
 No invitation tokens, essays, notes, titles, checklist text or document URLs are
@@ -318,7 +323,7 @@ and automatic homework completion are not advertised capabilities.
 
 ## Actionable release and reviewed updates
 
-System templates publish version 3 for 2027 (Campus France Morocco additionally publishes corrected version 4) and version 2 for later entry years. The original release and previous milestone release remain available unchanged. Every task includes public HTTPS provider references and short actionable checklist steps. SAT accommodations and FAFSA are separate optional tasks without assumed deadlines or eligibility. No personal health documentation is requested for storage on a planning board.
+Historical actionable releases publish version 3 for 2027 (Campus France Morocco additionally publishes corrected version 4) and version 2 for later entry years. New personalized Common App publishes v4 for 2027 and v3 for later cycles; country-aware `campus-france-<cycle>` publishes v1. The current guided list excludes historical Morocco-family keys. The original release and previous milestone release remain available unchanged. Every task includes public HTTPS provider references and short actionable checklist steps. SAT accommodations and FAFSA are separate optional tasks without assumed deadlines or eligibility. No personal health documentation is requested for storage on a planning board.
 
 Existing boards receive no automatic edits. Deadline review omits unchanged proposals using semantic comparison: JSONB property order, source URL ordering and equivalent timestamp offsets do not create a date change; actual date/provenance/status changes still appear and manual dates remain protected. `template-review` adds `resourceSuggestions` containing card ID/revision and current/proposed references and checklist items. `template-apply` accepts optional `resourceCardIds` in addition to existing date selection (`cardIds`) and new-task selection (`addedCardKeys`). Resource updates append missing links and checklist steps. They preserve titles, descriptions, manual links and labels, existing checklist IDs/text/completion, and all dates. URLs deduplicate with URL-normalized scheme/host while preserving case-sensitive paths; checklist IDs and text prevent duplicate additions. Replays add no duplicate content; stale board revisions conflict. Capacity failures roll back the transaction.
 
@@ -338,3 +343,15 @@ Primary task guidance reviewed 2026-10-11:
 Version 4 for `campus-france-maroc-2027` preserves the official calendar’s 15 November 2026, 23:59 Morocco wall time as `2026-11-15T23:59:00Z`, with `Africa/Casablanca`. Morocco returned permanently to UTC on 20 September 2026 under [ministry decree 2.26.530](https://bdj.mmsp.gov.ma/Ar/Document/10664-D%C3%A9cret-n-2-26-530du-9-moharrem-1448-25-juin-2026.aspx). [IANA tzdb 2026c release notes](https://data.iana.org/time-zones/tzdb-2026c/NEWS) and [Africa zone data](https://data.iana.org/time-zones/tzdb-2026c/africa) record the transition. The [official Campus France calendar](https://www.maroc.campusfrance.org/calendrier-de-la-procedure-de-candidature-20262027) specifies 23h59 Moroccan time. Sources reviewed 11 October 2026; Node 26.8.2 / ICU 78.3 / tzdb 2026c formats the corrected instant as 23:59. The timestamp is pinned to the reviewed release, not recalculated from whichever timezone database runs the service.
 
 Versions 1, 2 and 3 retain their original `22:59Z` conversions for reproducibility. Existing board deadlines change only through an explicit version-4 review/application, and manually edited dates remain protected. Future-cycle dates remain personal targets requiring confirmation; this correction supplies no future official calendar. Older browser/runtime timezone databases may format Morocco with outdated rules and need updating.
+
+## Personalized applicant rules
+
+See [the exact applicant API contract](../../docs/architecture/student-reminders-and-applicant-rules.md#applicant-api-contract) and [annual source register](../../docs/annual-review.md) for field enums, sources and researched country limits. `POST /v1/templates/:key/preview` requires `planning.read`, a version and strict applicant facts. It returns missing questions and a personalized definition; the wizard can review/change saved facts and retry failed catalog loads. `GET /v1/applicant-countries` supplies residence/citizenship choices and useful official links, without asserting local calendar research for all countries.
+
+New dynamic instantiation uses the preview's rule version and confirmed nested applicant facts in `applicability`. Campus France also binds `applicantCountry` to residence and `applicationRoute` to the selected nested route. Planning recomputes tasks and rejects missing questions, incompatible routes or mismatched rule versions before any board is written. The board stores the confirmed facts and version; the client does not supply task definitions. Authorized staff can explicitly save approved facts to Clients; student-specific choices otherwise remain in the board snapshot.
+
+Local calendar research covers France, USA and Morocco for 2027 entry. Only Morocco connected Études en France and explicitly confirmed USA connected Licence 2/3 or Master’s HDAP (excluding architecture/art) procedures have verified closing instants. USA confirmed DAP (public-university first year or architecture at every level) and France-resident dossier vert DAP supply a closing day with the cutoff time unresolved. Other routes, countries and cycles retain useful tasks and official guidance with deadline confirmation required. French/European and French/European Baccalaureate first-year facts follow appropriate Parcoursup/institution guidance; Mon Master eligibility distinguishes residence and nationality. FAFSA tasks accept confirmed eligible citizens and eligible noncitizens; CSS tasks require a confirmed participating-college requirement. USA Études en France requires `campusFranceProcedure` confirmation; art/other/unconfirmed choices get no verified calendar, and first-year HDAP is rejected. Unknowns produce review tasks, and SAT/accommodations are selected explicitly.
+
+Earlier definitions remain unchanged. Template review derives new suggestions from the board's saved facts; a board lacking newly required facts needs a new personalized plan. Existing review/apply mechanisms continue preserving manual titles, dates, resources and completed checklist state.
+
+`GET /v1/cards/:id` adds `item.columnKind`. Card events add `completed:boolean`, derived from normalized Done/Completed/Complete labels. Moving a card or changing a column's status semantics emits current card evidence in the same transaction; semantic column renames increment affected card revisions. Reordering a column does not change card revisions. Notifications uses completion evidence for exact reminder suppression; event delivery is eventual.

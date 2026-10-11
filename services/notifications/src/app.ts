@@ -11,6 +11,8 @@ import {
 } from "./communications.js";
 import { CommunicationWorker } from "./communication-worker.js";
 import { AuthMailController, AuthMailService } from "./auth-mail.js";
+import {StudentRemindersController, StudentRemindersService} from "./student-reminders.js";
+import {ReminderWorker} from "./reminder-worker.js";
 export const appOptions = {
   name: "notifications",
   port: 4007,
@@ -20,6 +22,7 @@ export const appOptions = {
     CampaignsController,
     CommunicationConnectionsController,
     AuthMailController,
+    StudentRemindersController,
   ],
   providers: [
     NotificationConsumer,
@@ -27,5 +30,7 @@ export const appOptions = {
     CommunicationsService,
     CommunicationWorker,
     AuthMailService,
+    StudentRemindersService,
+    ReminderWorker,
   ],
 };

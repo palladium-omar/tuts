@@ -1,3 +1,10 @@
+export type ApplicantFacts = {
+ residenceCountry?: string; citizenshipCountries?: string[]; qualification?: "french_baccalaureate" | "european_baccalaureate" | "other";
+ entryLevel?: "first_year" | "later_undergraduate" | "masters" | "doctorate"; applicationRoute?: "etudes_en_france" | "parcoursup" | "dap" | "direct" | "mon_master";
+ campusFranceProcedure?: "hdap" | "dap" | "other" | "unknown";
+ aidSeeking?: boolean; federalAidEligibility?: "eligible_citizen" | "eligible_noncitizen" | "ineligible" | "unknown";
+ cssProfileRequired?: "required" | "not_required" | "unknown"; satRequired?: "required" | "not_required" | "unknown"; satAccommodations?: "requested" | "not_requested";
+};
 export type PlanningProfile = {
   currentGrade?: number;
   /** September starting year for the recorded grade; never advanced implicitly. */
@@ -6,6 +13,7 @@ export type PlanningProfile = {
   entryCycle?: number;
   applicantCountry?: string;
   templateKey?: string;
+  applicantFacts?: ApplicantFacts;
 };
 export type ApplicationCycle = { cycle: number; source: "entry" | "graduation" | "grade"; graduationYear?: number; reason?: never } | { cycle: null; reason: string; source?: never; graduationYear?: never };
 const year = (value: unknown): value is number => typeof value === "number" && Number.isInteger(value) && value >= 2000 && value <= 2200;
@@ -37,5 +45,5 @@ export function applicationCycle(value: unknown): ApplicationCycle {
 // This identity invalidates pending template reads and route selections when
 // education facts change, even if both profiles happen to resolve to one cycle.
 export function planningProfileKey(value: PlanningProfile | null | undefined): string {
-  return JSON.stringify([value?.currentGrade, value?.academicYear, value?.graduationYear, value?.entryCycle, value?.applicantCountry, value?.templateKey]);
+  return JSON.stringify([value?.currentGrade, value?.academicYear, value?.graduationYear, value?.entryCycle, value?.applicantCountry, value?.templateKey, value?.applicantFacts ? Object.entries(value.applicantFacts).sort(([a],[b]) => a.localeCompare(b)) : null]);
 }

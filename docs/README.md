@@ -11,6 +11,8 @@ Updated for the **11 October 2026** student portal improvements and the 10 Octob
 - [Student experience review](reviews/2026-10-11-student-experience.md): actual student walkthrough, fixed UX issues and remaining opportunities.
 - [Audit remediation and release receipt](reviews/2026-10-10-audit-remediation.md): completed changes and remaining operational limits.
 - [Current audit and remediation order](reviews/2026-10-10-platform-audit.md): measured evidence, vulnerabilities, limitations and open work.
+- [Student reminders and applicant rules](architecture/student-reminders-and-applicant-rules.md): reminder ownership, guided applicant facts, personalized template APIs and researched country limits.
+- [Annual application-source review](annual-review.md): every maintained deadline, preparation target, requirement, source and next review trigger.
 - [Operations and documentation maintenance](operations.md): checks, releases, recovery and review requirements.
 
 ## Feature contracts
@@ -25,7 +27,8 @@ Updated for the **11 October 2026** student portal improvements and the 10 Octob
 | Calendars, attendance, student bookings | [Scheduling](../services/scheduling/README.md), [Connector protocols](architecture/connectors.md) |
 | Monthly arrears invoices, historical work/invoices, dashboard | [Monthly billing](architecture/monthly-billing.md), [History and analytics](architecture/business-history-analytics.md), [Billing](../services/billing/README.md) |
 | Payment adapters | [Payments](architecture/payments.md), [Payment service](../services/payments/README.md) |
-| Multiple Kanban boards, templates, education-based cycles | [Planning](../services/planning/README.md), [Latest planning revision](architecture/student-workspace.md#kanban-interaction-and-application-planning-revision-2026-10-10) |
+| Student reminders and direct homework links | [Reminder and applicant architecture](architecture/student-reminders-and-applicant-rules.md), [Notifications](../services/notifications/README.md) |
+| Multiple Kanban boards, templates, education-based cycles | [Planning](../services/planning/README.md), [Applicant rules](architecture/student-reminders-and-applicant-rules.md#applicant-api-contract), [Annual source review](annual-review.md), [Earlier planning revision](architecture/student-workspace.md#kanban-interaction-and-application-planning-revision-2026-10-10) |
 | Student metrics, activity, attribution and Beacons links | [Reporting](../services/reporting/README.md) |
 
 ## Shared contracts and deployment

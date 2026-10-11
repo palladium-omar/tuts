@@ -240,6 +240,8 @@ changes production, commits, or sends external messages independently.
 
 ## Kanban interaction and application planning revision (2026-10-10)
 
+For the subsequent 11 October applicant-profile, personalized-preview and reminder changes, use [student reminders and applicant rules](student-reminders-and-applicant-rules.md) and the [annual source register](../annual-review.md). The section below records the earlier revision.
+
 A drag updates the browser's board immediately. A board-scoped mutation queue
 persists moves through Planning's authenticated HTTP API in order, using the
 latest acknowledged board/card revisions. Later optimistic moves remain visible

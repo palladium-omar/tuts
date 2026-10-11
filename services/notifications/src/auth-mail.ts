@@ -80,6 +80,25 @@ function configuration(): { provider: AuthMailProvider; appOrigin: string } | nu
 
 @Injectable()
 export class AuthMailService {
+  async sendStudentReminder(input: {recipientEmail:string; reminderId:string; title:string; portalPath:string}) {
+    const config=configuration();
+    if (process.env.AUTH_MAIL_ENABLED !== 'true' || !config) throw new ServiceUnavailableException('Reminder email is unavailable');
+    const message=z.object({recipientEmail:emailSchema,reminderId:z.uuid(),title:z.string().min(1).max(200).regex(/^[^\x00-\x1f\x7f]+$/),portalPath:z.string().max(400)}).strict().safeParse(input);
+    if (!message.success) throw new BadRequestException('Invalid reminder message');
+    const url=new URL(input.portalPath,config.appOrigin);
+    const params=Object.fromEntries(url.searchParams);
+    const common={business:z.uuid(),student:z.uuid()};
+    const route=z.discriminatedUnion('section',[
+      z.object({...common,section:z.literal('homework'),assignment:z.uuid()}).strict(),
+      z.object({...common,section:z.literal('planning'),board:z.uuid(),card:z.uuid()}).strict(),
+    ]);
+    if (url.origin!==config.appOrigin || url.pathname!=='/portal' || url.hash ||
+      !input.portalPath.startsWith('/portal?') || !route.safeParse(params).success ||
+      [...url.searchParams.keys()].length!==Object.keys(params).length)
+      throw new BadRequestException('Invalid reminder message');
+    return config.provider.sendStudentReminder({...input,portalUrl:`${config.appOrigin}${input.portalPath}`});
+  }
+
   status() {
     const enabled = process.env.AUTH_MAIL_ENABLED === "true";
     const config = configuration();

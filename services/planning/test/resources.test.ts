@@ -28,3 +28,14 @@ test('deadline comparison ignores JSONB key order, provenance ordering and equiv
  for(const field of ['kind','dueAt','timeZone','status','verifiedAt','round','applicability'])assert.equal(sameDeadline(current,{...proposed,[field]:'Changed'}),false,field);
  assert.equal(sameDeadline(current,{...proposed,sourceUrls:['https://example.com/a','https://example.com/B']}),false);
 });
+
+test('card events expose explicit completion from the same known column labels as overview',async()=>{
+ const {cardEvent}=await import('../src/planning.service.js');
+ for(const [name,completed] of [['Done',true],[' completed ',true],['Complete',true],['Review',false],['Not done',false]] as const){
+  const calls:any[]=[];const ctx:any={businessId:randomUUID(),requestId:randomUUID()};const board:any={id:randomUUID(),student_id:randomUUID(),sharing:'student'};const row:any={id:randomUUID(),column_id:randomUUID(),revision:7};
+  const tx:any={query:async(sql:string,args:any[])=>{calls.push({sql,args});return {rows:sql.startsWith('SELECT name')?[{name}]:[]};}};
+  await cardEvent(tx,ctx,board,row);
+  assert.deepEqual(calls[0].args,[row.column_id,board.id]);assert.match(calls[0].sql,/LIMIT 1/);
+  const event=JSON.parse(calls.find(c=>c.sql.startsWith('INSERT INTO service_outbox')).args[1]);assert.equal(event.data.completed,completed);assert.equal(event.data.revision,7);assert.equal(event.businessId,ctx.businessId);
+ }
+});

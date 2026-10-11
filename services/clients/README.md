@@ -3,10 +3,11 @@
 > Current cross-service context: [system](../../docs/architecture/system.md), [API/schema inventory](../../docs/service-inventory.md), [security/performance audit](../../docs/reviews/2026-10-10-platform-audit.md). Service descriptions below define APIs and local behavior; provider/configuration readiness is separate.
 
 Port `4002`, gateway prefix `/api/clients`, service-owned PostgreSQL database.
-Every endpoint requires verified gateway membership, the `clients` entitlement,
+Every CRM endpoint requires verified gateway membership, the `clients` entitlement,
 and an owner/admin/tutor role. Delete and custom-field creation/editing additionally require owner/admin. Domain
-SQL uses a tenant transaction and forced RLS. Student/parent portal access remains
-unavailable.
+SQL uses a tenant transaction and forced RLS. Dedicated student/parent portal
+snapshot routes enforce explicit student grants and a safe response whitelist;
+CRM records and notes remain staff-only.
 
 | Method | Path                     | Request / response                                                                                                                                                                         |
 | ------ | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -283,3 +284,9 @@ portal protection and internal source mappings. Lists filter exact signed
 studentIds for student/parent or student scope, and detail rechecks both requested
 and canonical IDs. Business-scoped staff may read the safe directory. Client
 custom fields remain staff-private until an explicit sharing policy exists.
+
+## Approved education and applicant facts
+
+Staff create/PATCH accepts a strict nullable `planningProfile` for students. Education facts remain `currentGrade,academicYear,graduationYear,entryCycle`; approved `applicantFacts` adds residence, citizenships, qualification, entry level, application route, USA course procedure (`campusFranceProcedure`: `hdap|dap|other|unknown`) and selected aid/testing requirements. Exact enums, confirmation semantics and the personalized Planning API are documented in [student reminders and applicant rules](../../docs/architecture/student-reminders-and-applicant-rules.md#applicant-api-contract). Country choices use ISO codes; no name, email, CRM address or tutor/business location supplies eligibility.
+
+The portal whitelist exposes only approved education keys and validated nested applicant facts. Legacy staff-only `applicantCountry` and `templateKey` remain excluded. Private metadata, diagnosis/documents and unknown schema keys are rejected; there is no health-document field in applicant facts. Whole-profile updates validate grade/year consistency and preserve approved facts in the education UI. The guided plan can prefill these approved values, review/change them for its own board, and let authorized staff explicitly save confirmed facts. Planning independently persists the confirmed board applicability snapshot and derives tasks server-side.
