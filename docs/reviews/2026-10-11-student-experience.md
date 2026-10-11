@@ -25,6 +25,7 @@ The architecture was documented before implementation in [Student overview and a
 | Returning to Overview showed stale homework counts | Each mount/retry requests fresh independent summaries. Submitting homework updates the overview on return without polling. |
 | Navigating away before a background move finished could leave Overview stale | A mounted invalidation observer refreshes the affected summary after persistence. Older overlapping responses are ignored; existing values remain visible during refresh. |
 | Live anonymous visits showed an authentication error above the login form | Expected HTTP 401 resets the portal to its clean sign-in state. Other service/network errors remain visible. |
+| A long planning backlog pushed approaching deadlines below the first desktop row | Independent desktop stacks put upcoming deadlines beside homework; mobile orders homework, approaching deadlines, planning and sessions. |
 
 ## Browser walkthrough performed
 
@@ -39,6 +40,7 @@ The architecture was documented before implementation in [Student overview and a
 - Updated an older Common App board by selecting one resource update and one optional addition. Unselected tasks remained unchanged. Updated Campus France v3 to v4 with one selected deadline and zero redundant resource proposals.
 - Checked the 390 × 844 layout. Overview uses two metric columns; the page stays 390 px wide. Planning's horizontal scrolling stays inside the board.
 - Moved another task and immediately returned to Overview; its completed total changed from three to four after the background save.
+- Final layout check confirmed Homework and Upcoming deadlines begin at the same desktop height (565 px); mobile section order follows urgency and the page still has no horizontal overflow.
 
 Screenshots are local, ignored verification artifacts under `.local/student-ux-20261011/`, not student data committed to Git.
 
