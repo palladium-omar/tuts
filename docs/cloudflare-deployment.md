@@ -90,9 +90,12 @@ in the Google Cloud project. Production OAuth stays unavailable while the flag
 is absent or differs from `"true"`; the private-feed capability is independent.
 The redirect must use trusted `PUBLIC_APP_URL`'s HTTPS origin and exactly
 `/integrations/google-calendar/callback`, matching the OAuth client's registered
-redirect. Current Google Cloud API activation and audience setup remain pending;
-no live grant or private feed has been supplied, and deployment does not establish
-a verified live connection. See [Google Calendar](architecture/google-calendar.md).
+redirect. Calendar API and the two read-only scopes are configured, the External
+audience is published **In production**, and native OAuth is enabled. Google's
+verification remains pending; its unverified warning and 100-new-user cap apply
+to the current limited personal-use rollout. An authenticated hosted status
+probe confirmed availability; no customer grant or calendar feed was supplied,
+so this does not establish end-to-end ingestion. See [Google Calendar](architecture/google-calendar.md).
 
 System password emails have separate configuration from business communications. Platform and Notifications receive `AUTH_MAIL_INTERNAL_SECRET`; only Notifications receives `AUTH_MAIL_PROVIDER`, `AUTH_MAIL_FROM` and `AUTH_MAIL_API_KEY`. Configure a real verified sender before setting `authMailEnabled: true` in the deployment manifest, regenerate configuration and deploy both services. The default is disabled, and the generator refuses to enable mail without its required credentials. No marketing connector credential is reused for identity recovery.
 

@@ -133,6 +133,24 @@ Without configured OAuth credentials the one-click Google sign-in displays
 setup pending; the calendar-link method remains available. No paid hosting
 product is added.
 
+### Platform setup versus customer connections
+
+Tuts has one deployment-owned OAuth web client. The business administrator
+clicks **Connect Google Calendar**, chooses their own Google account, approves
+the two read-only scopes and selects a calendar. That connection's encrypted
+grant belongs to their workspace and creating actor; the platform owner's
+Google grant is not reused. The authorization request uses
+`prompt=select_account consent` so an existing browser account is not selected
+implicitly. Customers need no Google Cloud project, API key or client secret.
+
+The current deployment's External audience is **In production** and native
+sign-in is enabled. The public [privacy notice](https://tuts.palladiumscholars.com/privacy)
+describes Google data use, infrastructure processing, retention and deletion
+requests; the public sign-in page links to it. Google verification remains
+pending. For the current limited personal-use rollout, the unverified warning
+and lifetime 100-new-user cap apply. Broader commercial availability needs
+Google's verification process. Publishing alone does not verify the app.
+
 Official references: [OAuth web-server flow](https://developers.google.com/identity/protocols/oauth2/web-server),
 [Calendar scopes](https://developers.google.com/workspace/calendar/api/auth),
 [Events list](https://developers.google.com/workspace/calendar/api/v3/reference/events/list),

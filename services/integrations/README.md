@@ -207,7 +207,12 @@ review the external ledger before billing.
 Manual operations use current verified gateway context. Background sync retains
 the existing saved entitlement snapshot limitation described above. OAuth
 configuration availability does not prove that Google consent, publication,
-verification or a customer grant has succeeded. Google Cloud Calendar API
-activation and OAuth audience setup remain pending. No live customer grant or
-feed was supplied, and no complete live connection flow has been verified.
-No tests were added or run.
+verification or a customer grant has succeeded. Calendar API activation and
+scope setup are complete, the External audience is published **In production**,
+and the deployed native OAuth capability is enabled. Each connection uses its
+user's account; the platform owner's Google grant is never reused. Google
+verification remains pending, with an unverified warning and 100-new-user cap
+for the current personal-use rollout. No live customer grant or feed was
+supplied, and no complete live connection flow has been verified. See the
+[release evidence](../../docs/reviews/2026-10-12-google-calendar.md).
+No tests were added or manually run.

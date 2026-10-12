@@ -80,17 +80,31 @@ does not establish successful Google user consent or calendar ingestion.
 The Google OAuth web client was created with explicit user approval, and its
 credentials were stored only in protected deployment settings/Integrations
 secrets. The existing Google CLI authorization was renewed and Calendar API
-activation was confirmed with the supported CLI. Google audience/scope setup
-and user consent are separate provider steps. Business-account console sign-in
-was completed. The isolated console's audience/scope pages and project selector
-still fail to load. Chrome redirects business sign-in to the existing business
-profile, which is not connected to the browser-control extension; native
-controls for that window report offscreen/unavailable targets. Those UI settings
-have no documented public CLI/API replacement. Until they are complete,
-production Google sign-in stays
-disabled with an explicit status; the private calendar-link option remains
-available. No live customer grant or calendar feed was supplied, so successful
-calendar ingestion has not been verified end to end.
+activation was confirmed with the supported CLI. The isolated console could not
+load its project/audience settings. Native Chrome navigation to the existing
+business profile resolved that setup blocker without another user login.
+
+Both read-only scopes were declared, the application homepage and public
+`/privacy` notice were saved, and the External audience was published as **In
+production** on October 12, 2026. `GOOGLE_CALENDAR_ENABLED=true` was then set on
+the deployed Integrations Worker and preserved in protected deployment settings.
+The authenticated production status probe returned **200, available=true**;
+the public privacy notice returned 200. Google sign-in explicitly asks users to
+choose their own account before consent. Customers do not create Google Cloud
+projects, provide a platform client secret, or share the platform owner's grant.
+
+This is currently an unverified small personal-use rollout: Google may show an
+unverified-app warning and applies its lifetime 100-new-user cap. Google's
+verification approval has not been obtained. Verification is required before
+expanding the integration into the broader commercial rollout; do not present
+publishing status as verification. Testing-mode seven-day token expiry is no
+longer the publishing-mode constraint, though Google can still expire or revoke
+grants for other reasons. See [Google's personal-use exception](https://support.google.com/cloud/answer/13464323)
+and [audience and publishing rules](https://support.google.com/cloud/answer/15549945).
+
+No live customer grant or calendar feed was supplied, so successful user
+consent, token exchange and calendar ingestion have not been verified end to end.
+The production status probe verifies deployment configuration, not those steps.
 
 Pages deployment metadata previously reported an older source commit even when
 current assets were uploaded. The deploy script now supplies the committed Git
