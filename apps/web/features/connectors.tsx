@@ -50,6 +50,7 @@ export function safeLink(value: unknown): string | undefined {
 }
 type ConnectorScope = { api: Api; businessId?: string; active: boolean };
 type ConnectionSyncState = { phase: "syncing" | "error" | "done"; message: string };
+type PendingDisconnect = { id: string; displayName: string; provider: string };
 export function Connectors({
   api,
   role,
@@ -92,7 +93,9 @@ export function Connectors({
   const [googleFeedDisplayName, setGoogleFeedDisplayName] = useState("Google Calendar");
   const [googleFeedImportAttendees, setGoogleFeedImportAttendees] = useState(false);
   const [googleFeedIncludeWithoutAttendees, setGoogleFeedIncludeWithoutAttendees] = useState(true);
+  const [pendingDisconnect, setPendingDisconnect] = useState<PendingDisconnect | null>(null);
   const googleBusy = useRef(false);
+  const disconnectLock = useRef(false);
   const [connectionSync, setConnectionSync] = useState<Record<string, ConnectionSyncState>>({});
   const scopeRef = useRef<ConnectorScope>({ api, businessId, active: false });
   const syncRequests = useRef(new Map<string, { scope: ConnectorScope; controller: AbortController }>());
@@ -118,9 +121,12 @@ export function Connectors({
     const changedWorkspace = scopeRef.current.api !== api || scopeRef.current.businessId !== businessId;
     const scope: ConnectorScope = { api, businessId, active: true };
     scopeRef.current = scope;
-    setConnectionSync({});
+    setConnectionSync(Object.fromEntries([...syncRequests.current].filter(([, request]) =>
+      request.scope.api === api || (businessId !== undefined && request.scope.businessId === businessId))
+      .map(([id]) => [id, { phase: "syncing" as const, message: "A previous sync is still running…" }])));
     setConnections([]);
     if (changedWorkspace) {
+      setPendingDisconnect(null);
       setPendingCalendarId("");
       calendarRefreshRequested.current = false;
       setCalendarLoading(false);
@@ -405,7 +411,11 @@ export function Connectors({
     }
   }
   async function sync(id: string, initial = false, scope = scopeRef.current) {
-    if (!canManage || !currentScope(scope) || syncRequests.current.has(id)) return;
+    if (!canManage || !currentScope(scope)) return;
+    if (syncRequests.current.has(id)) {
+      setConnectionSync((states) => ({ ...states, [id]: { phase: "syncing", message: "A previous sync is still running. This connection will be available when it finishes." } }));
+      return;
+    }
     const controller = new AbortController(), request = { scope, controller };
     syncRequests.current.set(id, request);
     setConnectionSync((states) => ({ ...states, [id]: { phase: "syncing", message: initial ? "Importing your calendar events…" : "Syncing this connection…" } }));
@@ -430,20 +440,37 @@ export function Connectors({
       } }));
       if (currentScope(scope) && !controller.signal.aborted) void load(false, scope);
     } finally {
-      if (syncRequests.current.get(id) === request) syncRequests.current.delete(id);
+      if (syncRequests.current.get(id) === request) {
+        syncRequests.current.delete(id);
+        const activeScope = scopeRef.current;
+        if (activeScope !== scope && currentScope(activeScope) &&
+            (activeScope.api === scope.api || (activeScope.businessId !== undefined && activeScope.businessId === scope.businessId))) {
+          setConnectionSync((states) => states[id]?.phase === "syncing" ? { ...states, [id]: {
+            phase: "done", message: "The previous sync request has finished. You can sync again if needed.",
+          } } : states);
+          void load(false, activeScope);
+        }
+      }
     }
   }
   async function disconnect(id: string) {
+    const scope = scopeRef.current;
+    if (!currentScope(scope) || disconnectLock.current || busy) return;
+    disconnectLock.current = true;
     setBusy(id);
     setError("");
     try {
-      await api(`integrations/v1/connections/${id}`, "DELETE");
-      await load();
+      await scope.api(`integrations/v1/connections/${encodeURIComponent(id)}`, "DELETE");
+      if (!currentScope(scope)) return;
+      await load(true, scope);
+      if (!currentScope(scope)) return;
+      setPendingDisconnect(null);
       setMessage("Source disconnected. Imported CRM contacts are kept.");
     } catch (e) {
-      setError(errorMessage(e));
+      if (currentScope(scope)) setError(errorMessage(e));
     } finally {
-      setBusy("");
+      disconnectLock.current = false;
+      if (currentScope(scope)) setBusy("");
     }
   }
   const visible = connections.filter(
@@ -688,17 +715,14 @@ export function Connectors({
                   {canManage && (
                     <button
                       className="icon-button"
-                      disabled={!!busy || connectionSync[c.id]?.phase === "syncing"}
+                      disabled={!!busy || !!pendingDisconnect || connectionSync[c.id]?.phase === "syncing"}
                       title="Disconnect source"
                       aria-label={`Disconnect ${c.displayName}`}
-                      onClick={() => {
-                        if (
-                          window.confirm(
-                            `Disconnect ${c.displayName}? Imported CRM contacts will remain.`,
-                          )
-                        )
-                          void disconnect(c.id);
-                      }}
+                      onClick={() => setPendingDisconnect({
+                        id: String(c.id),
+                        displayName: String(c.displayName || names[c.provider] || "connection"),
+                        provider: String(c.provider || ""),
+                      })}
                     >
                       <Unplug size={16} />
                     </button>
@@ -1075,6 +1099,38 @@ export function Connectors({
               </button>
             </div>
           </form>
+        </Modal>
+      )}
+      {pendingDisconnect && (
+        <Modal
+          title={`Disconnect ${pendingDisconnect.displayName}?`}
+          closable={busy !== pendingDisconnect.id}
+          onClose={() => {
+            if (busy !== pendingDisconnect.id) setPendingDisconnect(null);
+          }}
+        >
+          <p className="muted">
+            {pendingDisconnect.provider === "google_calendar"
+              ? "Google Calendar events already synced into Tuts Scheduling will be removed. Contacts already imported into your CRM will remain."
+              : "Disconnecting stops future syncs. Contacts already imported into your CRM will remain."}
+          </p>
+          <div className="form-actions">
+            <button
+              type="button"
+              disabled={busy === pendingDisconnect.id}
+              onClick={() => setPendingDisconnect(null)}
+            >
+              Cancel
+            </button>
+            <button
+              className="primary"
+              disabled={!!busy || connectionSync[pendingDisconnect.id]?.phase === "syncing"}
+              onClick={() => void disconnect(pendingDisconnect.id)}
+            >
+              {busy === pendingDisconnect.id ? "Disconnecting…" : "Disconnect"}
+              <Unplug size={16} />
+            </button>
+          </div>
         </Modal>
       )}
     </>
