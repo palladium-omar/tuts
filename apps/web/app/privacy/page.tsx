@@ -26,6 +26,9 @@ export default function PrivacyPage() {
             If you connect with Google sign-in, Tuts requests read-only access to your Google Calendar event data and calendar list. You choose one readable calendar. Tuts syncs event details needed to show sessions in your workspace, such as titles, times, cancellations, attendee details supplied with an event, and an event link when available. Sync covers a rolling period of 90 days in the past and 180 days ahead, subject to a limit of 2,000 events per sync.
           </p>
           <p>
+            To keep previously synchronized sessions accurate, Tuts can also check a limited number of those events individually, including an event moved outside that rolling period. Connector sync snapshots are retained while the connection is active to identify changes, cancellations, and retries.
+          </p>
+          <p>
             You can also connect with a private iCal address from one Google Calendar. That address can grant access to the calendar feed, so keep it private. A Google Workspace administrator may disable private calendar addresses.
           </p>
           <p>
@@ -55,7 +58,7 @@ export default function PrivacyPage() {
         <section>
           <h2>Disconnecting and deletion requests</h2>
           <p>
-            Disconnecting removes the stored Google credentials or private iCal address and stops future synchronization. It also removes the connector&apos;s private sync snapshots. Sessions and contacts already imported into the Tuts business workspace may remain as business records; disconnecting does not automatically erase them.
+            Disconnecting removes the stored Google credentials or private iCal address, stops future synchronization, deletes the connector&apos;s private sync snapshots, and removes that connection&apos;s synchronized session records from the Tuts session calendar. If you enabled attendee import, contacts already added to the business CRM are separate records and may remain after disconnect; a workspace administrator can remove those contacts or request deletion.
           </p>
           <p>
             You can revoke Tuts&apos;s Google access in your Google Account. For an iCal connection, reset the private calendar address in Google Calendar to invalidate the old address. To ask about deleting Tuts-held data, contact{" "}
