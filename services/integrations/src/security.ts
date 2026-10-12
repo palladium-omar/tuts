@@ -34,7 +34,9 @@ export function encrypt(value: unknown, businessId: string) {
     .map((b) => b.toString("base64url"))
     .join(".");
 }
-export function decrypt(value: string, businessId: string): { token?: string } {
+export function decrypt(value: string, businessId: string): { token?: string };
+export function decrypt<T>(value: string, businessId: string): T;
+export function decrypt(value: string, businessId: string): unknown {
   const parts = value.split(".").map((p) => Buffer.from(p, "base64url"));
   if (parts.length !== 3)
     throw new ConnectorError("Stored credentials could not be opened");

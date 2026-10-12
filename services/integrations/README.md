@@ -8,7 +8,7 @@ This independent Nest process runs on port 4008 and owns its PostgreSQL database
 
 Set `DATABASE_URL`, `RABBITMQ_URL`, `CONTEXT_PUBLIC_KEY` and `INTEGRATIONS_ENCRYPTION_KEY`. The encryption key is 32 random bytes encoded as 64 hexadecimal characters or base64. Generate it outside source control, keep it in the deployment secret store, and retain it across restarts. AES-256-GCM protects provider credentials with the business UUID as associated data. Losing/changing the key requires reconnecting affected providers. Public hook body limits are enforced by the gateway/shared bootstrap.
 
-A real Calendly personal access token or Cal.com `cal_` API key must be supplied by the business administrator. The service verifies `/users/me` or `/v2/me` before marking the connection connected. These are token connectors; this implementation does not claim a configured OAuth application.
+A real Calendly personal access token or Cal.com `cal_` API key must be supplied by the business administrator. The service verifies `/users/me` or `/v2/me` before marking the connection connected. Calendly and Cal.com use token connectors. Google Calendar OAuth and its private feed fallback are described below.
 
 ## Business API
 
@@ -20,7 +20,7 @@ All examples are request payload shapes, not saved credentials.
 - `POST /v1/connections/:id/sync`: bounded real provider pull and durable event publication. Returns counts, timestamp and `synced`/`partial`; provider failures return 502 and persist a redacted error. A concurrent synchronization returns 409.
 - `DELETE /v1/connections/:id`: revoke local credentials and form secret, stop polling, and emit a projection cleanup event. This does not cancel a remote booking or revoke the provider-issued token itself.
 
-Providers: `calendly`, `calcom`, `json_api`, `form_webhook`. Booking URL is optional and stored for external navigation only. This service never creates, edits or cancels provider bookings.
+Providers: `calendly`, `calcom`, `json_api`, `form_webhook`, `google_calendar`. Booking URL is optional and stored for external navigation only. This service never creates, edits or cancels provider bookings.
 
 ## Contact endpoints and forms
 
@@ -127,3 +127,87 @@ Primary documentation checked for this implementation:
 - [Cal.com public booking embeds and prefill](https://cal.com/embed)
 
 Static review: Cal no-show update hooks use `bookingUid`; ordinary booking hooks use `uid`. Both identify only the canonical provider read. Polling and individual reads require a positive connected account host ID; a malformed/missing host identity fails closed and bookings hosted only by other accounts are excluded. [Official API host response](https://cal.com/docs/api-reference/v2/bookings/get-all-bookings).
+
+## Google Calendar
+
+Apply `005_google_calendar.sql`. Google Calendar uses provider `google_calendar`.
+Owners/admins with current `integrations.manage` and Integrations access may use:
+
+- `GET /v1/google-calendar/status`: deployment OAuth configuration availability, a safe reason when unavailable, and `privateFeedAvailable`.
+- `POST /v1/google-calendar/oauth/start` with `{displayName?}`: an authorization URL with offline event/calendar-list read scopes and PKCE.
+- `POST /v1/google-calendar/oauth/complete` with `{state,code}`: a credential-free `{item}` initially `awaiting_selection`.
+- `GET /v1/google-calendar/connections/:id/calendars`: bounded `{items,truncated}` readable calendars.
+- `POST /v1/google-calendar/connections/:id/select` with `{calendarId,importAttendees?,includeEventsWithoutAttendees?,displayName?}`: select one calendar and schedule its pull.
+- `POST /v1/google-calendar/private-feed` with `{calendarUrl,displayName?,importAttendees?,includeEventsWithoutAttendees?}`: validate and connect a Google iCalendar feed. The fixed Google HTTPS URL must be a Calendar `public/basic.ics` or `private-<hex>/basic.ics` feed, without query parameters, fragments or embedded credentials. The secret feed URL is encrypted and excluded from connection views and logs. This fallback works without a configured OAuth client. A private feed URL grants read access to everyone who holds it; use the Calendar account's reset control to revoke it remotely.
+
+The existing connection list, manual sync and disconnect routes compose these
+sources. Ordinary token creation rejects Google; ordinary patch accepts only its
+display name. Use dedicated selection to update preferences. Google connection
+views expose only `authMode` (`oauth` or `ical`) and safe selected-calendar metadata.
+Changing a selected calendar requires a new connector. Preference changes affect
+later pulls and do not remove events already projected into Scheduling.
+
+OAuth requires deployment secrets `GOOGLE_CALENDAR_CLIENT_ID`,
+`GOOGLE_CALENDAR_CLIENT_SECRET`, and trusted `GOOGLE_CALENDAR_REDIRECT_URI`.
+Production also requires `GOOGLE_CALENDAR_ENABLED=true`, set only after the
+Calendar API, requested scopes and intended OAuth audience are configured.
+The flag defaults off; private feeds remain available independently.
+Production requires the HTTPS origin from trusted `PUBLIC_APP_URL` and exactly
+the `/integrations/google-calendar/callback` path. The current deployment uses
+`https://tuts.palladiumscholars.com/integrations/google-calendar/callback`.
+Development also accepts local HTTP on loopback hosts with that callback path.
+Google Calendar API and a web OAuth client must be configured in the Cloud
+project, with the exact redirect and an appropriate external customer audience.
+The authenticated callback exchanges a code once and receives no tokens. State
+is business/actor bound, hashed, expires after ten minutes and is consumed before
+the exchange. PKCE verifiers and grants use tenant-bound AES-GCM. At most five
+pending authorizations per actor, twenty per business and fifty connections are
+allowed. Failed exchanges require fresh consent; authorization codes are not
+replayed. Missing offline grants and revoked permissions return safe reconnect
+errors.
+
+Google refresh/list/pull operations share a nineteen-second network deadline. Network
+calls run outside PostgreSQL transactions. A three-minute expiring connection
+lease plus revision checks fence publication, token persistence and errors;
+disconnect or configuration edits invalidate an in-flight operation. Scheduling
+outbox batches and normalized cancellation snapshots commit in the same tenant
+transaction. Snapshot tables force RLS and use composite tenant/connection
+foreign keys. Snapshots retain a 120-day cancellation window, with at most 5,000
+prior rows supplied per pull; exceeding that bound marks the result truncated.
+OAuth pulls apply explicit Google cancellations only; absence from an API pull
+never cancels an appointment. A fully parsed, nontruncated private feed may
+cancel previously seen timed appointments missing from its complete snapshot
+within the import window. Feed identities are tracked before title/attendee
+filters, and unsupported identity groups protect their prior appointments.
+Unknown identities mark the pull truncated. If inferred cancellations cannot
+fit within the 2,000-session/cancellation bounds, no absence decisions are
+published and the pull is marked truncated. Disconnect erases encrypted
+credentials and local snapshots and publishes the existing durable source
+tombstone.
+
+Private snapshots also retain original OAuth event IDs and repair checkpoints.
+A complete API list permits at most twenty known-event lookups per pull, with
+concurrency four and the same provider deadline. This refreshes dates moved
+outside the discovery window. Errors never become cancellations; unresolved or
+legacy records show a repair message in Connectors for tutor review. Provider
+IDs and checkpoints are never published in Scheduling events or API views.
+
+The bounded event window is ninety days past to 180 days future. All-day and
+non-appointment events are omitted. Timed events without attendees are included
+by default; set `includeEventsWithoutAttendees=false` to exclude them. Importing
+attendees into CRM remains opt-in through `importAttendees=true` and requires
+Clients access.
+Multiple attendees do not establish one billable student. Past events stay
+scheduled until tutor attendance review. A private feed may contain less
+attendee detail than an OAuth response; missing detail is not invented.
+Calendar imports do not generate invoices, payments or student booking links.
+OAuth and feed sources (or another booking provider) may overlap; staff should
+review the external ledger before billing.
+
+Manual operations use current verified gateway context. Background sync retains
+the existing saved entitlement snapshot limitation described above. OAuth
+configuration availability does not prove that Google consent, publication,
+verification or a customer grant has succeeded. Google Cloud Calendar API
+activation and OAuth audience setup remain pending. No live customer grant or
+feed was supplied, and no complete live connection flow has been verified.
+No tests were added or run.

@@ -336,7 +336,8 @@ export default {
       logDiagnostic(response.status >= 500 ? 'error' : response.status >= 400 ? 'warn' : 'info', 'request_completed', {
         status: response.status, method: request.method, route: path, durationMs: Date.now() - started, ...timings,
       });
-      const sensitive = path.startsWith("/api/") || /^\/(?:forgot-password|reset-password)(?:\/|$)/.test(path) || path.startsWith("/api/platform/auth/");
+      const sensitive = path.startsWith("/api/") || /^\/(?:forgot-password|reset-password)(?:\/|$)/.test(path) ||
+        /^\/integrations\/google-calendar\/callback(?:\.html|\/|$)/.test(path) || path.startsWith("/api/platform/auth/");
       const secured = responseWithSecurityHeaders(response, sensitive);
       const headers = copyResponseHeaders(secured);
       if (env.CONTENT_SECURITY_POLICY) headers.set('Content-Security-Policy', env.CONTENT_SECURITY_POLICY);

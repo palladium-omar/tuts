@@ -36,8 +36,6 @@ import { z } from "zod";
 import {
   connectionSchema,
   configSchema,
-  type Config,
-  type Provider,
 } from "./schemas.js";
 import { ConnectorError, decrypt, encrypt, hashSecret } from "./security.js";
 import {
@@ -47,6 +45,9 @@ import {
   validateAccount,
   canonicalCalBooking,
 } from "./providers.js";
+import { GoogleCalendarService, assertGoogleManage } from './google-calendar.js';
+import { connectionView, type ConnectionRow } from './connection-view.js';
+export { connectionView, type ConnectionRow } from './connection-view.js';
 const uuid = z.string().uuid();
 const patchSchema = z
   .object({
@@ -65,55 +66,6 @@ const patchSchema = z
   })
   .strict()
   .refine((v) => Object.keys(v).length > 0, "Provide connection fields");
-type Row = {
-  id: string;
-  business_id: string;
-  created_by: string;
-  provider: Provider;
-  display_name: string;
-  credentials_encrypted: string | null;
-  webhook_secret_hash: string | null;
-  cal_webhook_secret_encrypted: string | null;
-  config: Config;
-  account: Record<string, unknown>;
-  status: string;
-  last_sync_at: Date | null;
-  last_attempt_at: Date | null;
-  last_error: string | null;
-  next_sync_at: Date | null;
-  sync_counts: Record<string, unknown>;
-  last_import_result: Record<string, unknown> | null;
-  dispatch_entitlements: string[];
-  created_at: Date;
-  updated_at: Date;
-};
-function view(row: Row) {
-  return {
-    id: row.id,
-    businessId: row.business_id,
-    ownerUserId: row.created_by,
-    provider: row.provider,
-    displayName: row.display_name,
-    config: row.config,
-    account: row.account,
-    status: row.status,
-    lastSyncAt: row.last_sync_at?.toISOString() ?? null,
-    lastAttemptAt: row.last_attempt_at?.toISOString() ?? null,
-    lastError: row.last_error,
-    nextSyncAt: row.next_sync_at?.toISOString() ?? null,
-    syncCounts: row.sync_counts,
-    lastImportResult: row.last_import_result,
-    dispatchEntitlements: row.dispatch_entitlements,
-    createdAt: row.created_at.toISOString(),
-    updatedAt: row.updated_at.toISOString(),
-    calWebhookConfigured: Boolean(row.cal_webhook_secret_encrypted),
-    ...(row.provider === 'calcom' && row.cal_webhook_secret_encrypted
-      ? {webhookPath: `/api/integrations/hooks/${row.business_id}/${row.id}`} : {}),
-    ...(row.provider === "form_webhook"
-      ? { webhookPath: `/api/integrations/hooks/${row.business_id}/${row.id}` }
-      : {}),
-  };
-}
 function message(error: unknown) {
   return error instanceof ConnectorError
     ? error.safeMessage
@@ -128,6 +80,7 @@ export class ConnectionsService {
   constructor(
     @Inject(Database) private readonly db: Database,
     @Inject(EventBus) private readonly events: EventBus,
+    @Inject(GoogleCalendarService) private readonly googleCalendar: GoogleCalendarService,
   ) {}
   onModuleInit() {
     const importResult = z.object({
@@ -171,28 +124,32 @@ export class ConnectionsService {
   async list(ctx: RequestContext) {
     return this.db.withTenant(ctx.businessId, async (tx) => ({
       items: (
-        await tx.query<Row>(
+        await tx.query<ConnectionRow>(
           "SELECT * FROM integration_connections WHERE business_id=$1 ORDER BY created_at DESC LIMIT 200",
           [ctx.businessId],
         )
-      ).rows.map(view),
+      ).rows.map(connectionView),
     }));
   }
   async one(ctx: RequestContext, id: string) {
     parseBody(uuid, id);
     return this.db.withTenant(ctx.businessId, async (tx) => {
       const row = (
-        await tx.query<Row>(
+        await tx.query<ConnectionRow>(
           "SELECT * FROM integration_connections WHERE business_id=$1 AND id=$2",
           [ctx.businessId, id],
         )
       ).rows[0];
       if (!row) throw new NotFoundException("Connection not found");
-      return { item: view(row) };
+      return { item: connectionView(row) };
     });
   }
   async create(ctx: RequestContext, body: unknown) {
     const input = parseBody(connectionSchema, body);
+    if (input.provider === 'google_calendar') {
+      assertGoogleManage(ctx);
+      throw new BadRequestException('Connect Google Calendar through OAuth');
+    }
     if (
       ["json_api", "form_webhook"].includes(input.provider) &&
       !ctx.entitlements.includes("clients")
@@ -231,7 +188,7 @@ export class ConnectionsService {
         [ctx.businessId],
       );
       const row = (
-        await tx.query<Row>(
+        await tx.query<ConnectionRow>(
           `INSERT INTO integration_connections(id,business_id,created_by,provider,display_name,credentials_encrypted,webhook_secret_hash,config,account,dispatch_entitlements,status,next_sync_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'connected',CASE WHEN $4='form_webhook' THEN NULL ELSE now() END) RETURNING *`,
           [
             randomUUID(),
@@ -247,7 +204,7 @@ export class ConnectionsService {
           ],
         )
       ).rows[0]!;
-      return { item: view(row), ...(secret ? { webhookSecret: secret } : {}) };
+      return { item: connectionView(row), ...(secret ? { webhookSecret: secret } : {}) };
     });
   }
   async update(ctx: RequestContext, id: string, body: unknown) {
@@ -255,7 +212,7 @@ export class ConnectionsService {
     const patch = parseBody(patchSchema, body);
     return this.db.withTenant(ctx.businessId, async (tx) => {
       const row = (
-        await tx.query<Row>(
+        await tx.query<ConnectionRow>(
           "SELECT * FROM integration_connections WHERE business_id=$1 AND id=$2 FOR UPDATE",
           [ctx.businessId, id],
         )
@@ -268,6 +225,14 @@ export class ConnectionsService {
         !ctx.entitlements.includes("clients")
       )
         throw new ForbiddenException("Contact sources require the CRM feature");
+      if (row.provider === 'google_calendar') {
+        assertGoogleManage(ctx);
+        if (patch.credentials || patch.config) throw new BadRequestException('Use Google Calendar selection to change preferences; reconnect to change the calendar');
+        const changed = (await tx.query<ConnectionRow>(`UPDATE integration_connections SET display_name=$3,dispatch_entitlements=$4,
+          revision=revision+1,sync_lease_id=NULL,sync_lease_until=NULL,updated_at=now() WHERE business_id=$1 AND id=$2 RETURNING *`,
+          [ctx.businessId,id,patch.displayName ?? row.display_name,ctx.entitlements])).rows[0]!;
+        return {item:connectionView(changed)};
+      }
       const credentials =
         patch.credentials ??
         (row.credentials_encrypted
@@ -291,7 +256,7 @@ export class ConnectionsService {
         throw new BadGatewayException(message(error));
       }
       const changed = (
-        await tx.query<Row>(
+        await tx.query<ConnectionRow>(
           `UPDATE integration_connections SET display_name=$3,config=$4,credentials_encrypted=$5,account=$6,dispatch_entitlements=$7,status='connected',last_error=NULL,updated_at=now(),next_sync_at=CASE WHEN provider='form_webhook' THEN NULL ELSE now() END WHERE business_id=$1 AND id=$2 RETURNING *`,
           [
             ctx.businessId,
@@ -306,19 +271,22 @@ export class ConnectionsService {
           ],
         )
       ).rows[0]!;
-      return { item: view(changed) };
+      return { item: connectionView(changed) };
     });
   }
   async disconnect(ctx: RequestContext, id: string) {
     parseBody(uuid, id);
     return this.db.withTenant(ctx.businessId, async (tx) => {
+      const existing = (await tx.query<{provider:string}>("SELECT provider FROM integration_connections WHERE business_id=$1 AND id=$2 FOR UPDATE", [ctx.businessId,id])).rows[0];
+      if (existing?.provider === "google_calendar") assertGoogleManage(ctx);
       const row = (
-        await tx.query<Row>(
-          `UPDATE integration_connections SET status='disconnected',credentials_encrypted=NULL,webhook_secret_hash=NULL,cal_webhook_secret_encrypted=NULL,next_sync_at=NULL,last_error=NULL,updated_at=now() WHERE business_id=$1 AND id=$2 RETURNING *`,
+        await tx.query<ConnectionRow>(
+          `UPDATE integration_connections SET status='disconnected',credentials_encrypted=NULL,webhook_secret_hash=NULL,cal_webhook_secret_encrypted=NULL,next_sync_at=NULL,last_error=NULL,updated_at=now(),revision=revision+1,sync_lease_id=NULL,sync_lease_until=NULL WHERE business_id=$1 AND id=$2 RETURNING *`,
           [ctx.businessId, id],
         )
       ).rows[0];
       if (!row) throw new NotFoundException("Connection not found");
+      if (row.provider === "google_calendar") await tx.query("DELETE FROM google_calendar_snapshots WHERE business_id=$1 AND connection_id=$2", [ctx.businessId,id]);
       await emitEvent(tx, {
         type: "integrations.connection-disconnected.v1",
         producer: "integrations",
@@ -326,12 +294,12 @@ export class ConnectionsService {
         correlationId: ctx.requestId,
         data: { connectionId: id },
       });
-      return { item: view(row) };
+      return { item: connectionView(row) };
     });
   }
   private async publish(
     tx: PoolClient,
-    row: Row,
+    row: ConnectionRow,
     result: SyncData,
     correlationId?: string,
   ) {
@@ -365,6 +333,8 @@ export class ConnectionsService {
   }
   async sync(ctx: RequestContext, id: string) {
     parseBody(uuid, id);
+    const provider = await this.db.withTenant(ctx.businessId, async tx => (await tx.query<{provider:string}>("SELECT provider FROM integration_connections WHERE business_id=$1 AND id=$2", [ctx.businessId,id])).rows[0]?.provider);
+    if (provider === "google_calendar") assertGoogleManage(ctx);
     const result = await this.syncTenant(
       ctx.businessId,
       id,
@@ -376,7 +346,7 @@ export class ConnectionsService {
       throw new ConflictException(
         "Synchronization already running or connection is disconnected",
       );
-    if (result.status === "error") throw new BadGatewayException(result.error);
+    if (result.status === "error" && "error" in result) throw new BadGatewayException(result.error);
     return result;
   }
   private async syncTenant(
@@ -386,6 +356,8 @@ export class ConnectionsService {
     requestId?: string,
     entitlements?: string[],
   ) {
+    const provider = await this.db.withTenant(businessId, async tx => (await tx.query<{provider:string}>("SELECT provider FROM integration_connections WHERE business_id=$1 AND id=$2", [businessId,id])).rows[0]?.provider);
+    if (provider === "google_calendar") return this.googleCalendar.syncTenant(businessId,id,force,requestId,entitlements);
     return this.db.withTenant(businessId, async (tx) => {
       const locked = await tx.query<{ locked: boolean }>(
         "SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) AS locked",
@@ -393,7 +365,7 @@ export class ConnectionsService {
       );
       if (!locked.rows[0]?.locked) return null;
       const row = (
-        await tx.query<Row>(
+        await tx.query<ConnectionRow>(
           "SELECT * FROM integration_connections WHERE business_id=$1 AND id=$2 FOR UPDATE",
           [businessId, id],
         )
@@ -488,7 +460,7 @@ export class ConnectionsService {
       throw new UnauthorizedException("Invalid webhook credential");
     return this.db.withTenant(businessId, async (tx) => {
       const row = (
-        await tx.query<Row>(
+        await tx.query<ConnectionRow>(
           "SELECT * FROM integration_connections WHERE business_id=$1 AND id=$2 FOR UPDATE",
           [businessId, id],
         )
@@ -536,11 +508,11 @@ export class ConnectionsService {
     parseBody(uuid,id);
     const secret=randomBytes(32).toString('base64url');
     return this.db.withTenant(ctx.businessId,async tx=>{
-      const row=(await tx.query<Row>('SELECT * FROM integration_connections WHERE id=$1 FOR UPDATE',[id])).rows[0];
+      const row=(await tx.query<ConnectionRow>('SELECT * FROM integration_connections WHERE id=$1 FOR UPDATE',[id])).rows[0];
       if(!row || row.provider!=='calcom' || row.status==='disconnected') throw new NotFoundException('Active Cal.com connection not found');
-      const updated=(await tx.query<Row>('UPDATE integration_connections SET cal_webhook_secret_encrypted=$2,dispatch_entitlements=$3,updated_at=now() WHERE id=$1 RETURNING *',
+      const updated=(await tx.query<ConnectionRow>('UPDATE integration_connections SET cal_webhook_secret_encrypted=$2,dispatch_entitlements=$3,updated_at=now() WHERE id=$1 RETURNING *',
         [id,encrypt({token:secret},ctx.businessId),ctx.entitlements])).rows[0]!;
-      return {item:view(updated),webhookSecret:secret,webhookPath:`/api/integrations/hooks/${ctx.businessId}/${id}`,
+      return {item:connectionView(updated),webhookSecret:secret,webhookPath:`/api/integrations/hooks/${ctx.businessId}/${id}`,
         registered:false,registration:'manual',triggers:['BOOKING_CREATED','BOOKING_CANCELLED','BOOKING_RESCHEDULED','BOOKING_REJECTED','BOOKING_REQUESTED','BOOKING_NO_SHOW_UPDATED']};
     });
   }
@@ -550,7 +522,7 @@ export class ConnectionsService {
       throw new UnauthorizedException('Invalid Cal.com webhook signature');
     return this.db.withTenant(businessId,async tx=>{
       await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[`integrations:${businessId}:${id}`]);
-      const row=(await tx.query<Row>('SELECT * FROM integration_connections WHERE id=$1 FOR UPDATE',[id])).rows[0];
+      const row=(await tx.query<ConnectionRow>('SELECT * FROM integration_connections WHERE id=$1 FOR UPDATE',[id])).rows[0];
       if(!row || row.provider!=='calcom' || row.status==='disconnected' || !row.cal_webhook_secret_encrypted)
         throw new UnauthorizedException('Invalid Cal.com webhook signature');
       const secret=decrypt(row.cal_webhook_secret_encrypted,businessId).token;

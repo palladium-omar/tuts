@@ -46,6 +46,25 @@
   color: var(--muted);
   margin: 0 0 16px;
 }
+.connector-card .small-note {
+  margin: 0 0 12px;
+  overflow-wrap: anywhere;
+}
+.google-calendar-option {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: flex-start;
+  gap: 9px;
+  margin: 14px 0;
+  font-weight: 500;
+}
+.google-calendar-option input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  margin-top: 2px;
+  accent-color: var(--accent);
+}
 .setup-connector-guide {
   padding: 15px 18px;
   margin: 16px 0;

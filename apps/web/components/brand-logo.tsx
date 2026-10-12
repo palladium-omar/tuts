@@ -3,6 +3,7 @@ import "./brand-logo.css";
 const brands: Record<string, { name: string; asset: string; square?: boolean }> = {
   calcom: { name: "Cal.com", asset: "calcom.svg" },
   calendly: { name: "Calendly", asset: "calendly.svg", square: true },
+  google_calendar: { name: "Google Calendar", asset: "google-calendar.svg", square: true },
   commonapp: { name: "Common App", asset: "commonapp.svg" },
   ucas: { name: "UCAS", asset: "ucas.svg" },
   bocconi: { name: "Bocconi", asset: "bocconi.svg" },

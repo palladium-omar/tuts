@@ -101,7 +101,7 @@ const launches = [...names, "gateway", "web"].map((name, index) => {
       ]),
     );
   if (name === "integrations")
-    Object.assign(env, select(["INTEGRATIONS_ENCRYPTION_KEY", "PORTAL_INTERNAL_SECRET", "PUBLIC_APP_URL", "PUBLIC_GATEWAY_URL"]), { CLIENTS_URL: configuration.CLIENTS_URL || "http://127.0.0.1:4002" });
+    Object.assign(env, select(["INTEGRATIONS_ENCRYPTION_KEY", "PORTAL_INTERNAL_SECRET", "PUBLIC_APP_URL", "PUBLIC_GATEWAY_URL", "GOOGLE_CALENDAR_CLIENT_ID", "GOOGLE_CALENDAR_CLIENT_SECRET", "GOOGLE_CALENDAR_REDIRECT_URI", "GOOGLE_CALENDAR_ENABLED"]), { CLIENTS_URL: configuration.CLIENTS_URL || "http://127.0.0.1:4002" });
   if (name === "notifications") {
     Object.assign(
       env,

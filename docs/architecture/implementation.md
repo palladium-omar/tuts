@@ -115,4 +115,11 @@ The public gateway's 15-minute schedule invokes private authenticated ticks on a
 
 ## Agent boundaries
 
+Google Calendar remains an Integrations-owned adapter. Its [connection contract](google-calendar.md)
+defines Google consent/private feeds, encrypted grants, bounded reads, leases and
+outbox publication. Scheduling accepts the existing session event with provider
+`google_calendar` and required `providerObservedAt` for serialized Google pulls;
+Clients only receives explicitly enabled attendee imports. Attendance and Billing
+retain their existing tutor-reviewed boundaries.
+
 Each delegated agent owns only its assigned service folders and may add service-specific README/tests there. Root owns apps, shared packages, infra, root manifests, CI, lockfile and architecture documents. No delegated agent commits, pushes, creates a repository or edits another agent's files.

@@ -107,7 +107,7 @@ Local port: 4003. [Service guide](../services/scheduling/README.md).
 | --- | --- | --- | --- |
 | GET | `/v1/class-ledger` | Roles(owner, admin, tutor); StudentScoped; Permissions(scheduling.read) | [ClassLedgerController.list](../services/scheduling/src/class-ledger.ts#L122) |
 | PATCH | `/v1/class-ledger/:source/:id` | Roles(owner, admin, tutor); StudentScoped; Permissions(scheduling.write) | [ClassLedgerController.annotate](../services/scheduling/src/class-ledger.ts#L175) |
-| GET | `/v1/external-sessions` | Roles(owner, admin, tutor); StudentScoped; Permissions(scheduling.read) | [ExternalSessionsController.list](../services/scheduling/src/external-sessions.ts#L228) |
+| GET | `/v1/external-sessions` | Roles(owner, admin, tutor); StudentScoped; Permissions(scheduling.read) | [ExternalSessionsController.list](../services/scheduling/src/external-sessions.ts#L235) |
 | GET | `/v1/portal/overview` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(scheduling.read) | [PortalSessionsController.overview](../services/scheduling/src/portal-sessions.ts#L78) |
 | GET | `/v1/portal/sessions` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(scheduling.read) | [PortalSessionsController.sessions](../services/scheduling/src/portal-sessions.ts#L80) |
 | GET | `/v1/portal/classes` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(scheduling.read) | [PortalSessionsController.classes](../services/scheduling/src/portal-sessions.ts#L82) |
@@ -126,6 +126,7 @@ Local port: 4003. [Service guide](../services/scheduling/README.md).
 | [002_external_sessions.sql](../services/scheduling/migrations/002_external_sessions.sql) | `external_sessions`, `disconnected_session_sources` |
 | [003_class_ledger.sql](../services/scheduling/migrations/003_class_ledger.sql) | `class_annotations`, `class_ledger` |
 | [004_portal_attendance.sql](../services/scheduling/migrations/004_portal_attendance.sql) | `scheduling_student_aliases` |
+| [005_google_calendar.sql](../services/scheduling/migrations/005_google_calendar.sql) | Alters existing schema/policies |
 
 ## learning
 
@@ -288,14 +289,20 @@ Local port: 4008. [Service guide](../services/integrations/README.md).
 
 | Method | Service path | Declared access metadata | Controller |
 | --- | --- | --- | --- |
-| GET | `/v1/connections` | Roles(owner, admin, tutor) | [ConnectionsController.list](../services/integrations/src/connections.ts#L642) |
-| GET | `/v1/connections/:id` | Roles(owner, admin, tutor) | [ConnectionsController.one](../services/integrations/src/connections.ts#L645) |
-| POST | `/v1/connections` | Roles(owner, admin, tutor); Roles(owner, admin) | [ConnectionsController.create](../services/integrations/src/connections.ts#L651) |
-| PATCH | `/v1/connections/:id` | Roles(owner, admin, tutor); Roles(owner, admin) | [ConnectionsController.update](../services/integrations/src/connections.ts#L657) |
-| POST | `/v1/connections/:id/sync` | Roles(owner, admin, tutor); Roles(owner, admin) | [ConnectionsController.sync](../services/integrations/src/connections.ts#L664) |
-| POST | `/v1/connections/:id/calcom-webhook` | Roles(owner, admin, tutor); Roles(owner, admin); Permissions(integrations.manage) | [ConnectionsController.configureCalWebhook](../services/integrations/src/connections.ts#L670) |
-| DELETE | `/v1/connections/:id` | Roles(owner, admin, tutor); Roles(owner, admin) | [ConnectionsController.disconnect](../services/integrations/src/connections.ts#L674) |
-| POST | `/hooks/:businessId/:connectionId` | Public | [FormHooksController.receive](../services/integrations/src/connections.ts#L687) |
+| GET | `/v1/connections` | Roles(owner, admin, tutor) | [ConnectionsController.list](../services/integrations/src/connections.ts#L614) |
+| GET | `/v1/connections/:id` | Roles(owner, admin, tutor) | [ConnectionsController.one](../services/integrations/src/connections.ts#L617) |
+| POST | `/v1/connections` | Roles(owner, admin, tutor); Roles(owner, admin) | [ConnectionsController.create](../services/integrations/src/connections.ts#L623) |
+| PATCH | `/v1/connections/:id` | Roles(owner, admin, tutor); Roles(owner, admin) | [ConnectionsController.update](../services/integrations/src/connections.ts#L629) |
+| POST | `/v1/connections/:id/sync` | Roles(owner, admin, tutor); Roles(owner, admin) | [ConnectionsController.sync](../services/integrations/src/connections.ts#L636) |
+| POST | `/v1/connections/:id/calcom-webhook` | Roles(owner, admin, tutor); Roles(owner, admin); Permissions(integrations.manage) | [ConnectionsController.configureCalWebhook](../services/integrations/src/connections.ts#L642) |
+| DELETE | `/v1/connections/:id` | Roles(owner, admin, tutor); Roles(owner, admin) | [ConnectionsController.disconnect](../services/integrations/src/connections.ts#L646) |
+| POST | `/hooks/:businessId/:connectionId` | Public | [FormHooksController.receive](../services/integrations/src/connections.ts#L659) |
+| GET | `/v1/google-calendar/status` | Roles(owner, admin); Permissions(integrations.manage) | [GoogleCalendarController.status](../services/integrations/src/google-calendar.ts#L294) |
+| POST | `/v1/google-calendar/private-feed` | Roles(owner, admin); Permissions(integrations.manage) | [GoogleCalendarController.privateFeed](../services/integrations/src/google-calendar.ts#L295) |
+| POST | `/v1/google-calendar/oauth/start` | Roles(owner, admin); Permissions(integrations.manage) | [GoogleCalendarController.start](../services/integrations/src/google-calendar.ts#L296) |
+| POST | `/v1/google-calendar/oauth/complete` | Roles(owner, admin); Permissions(integrations.manage) | [GoogleCalendarController.complete](../services/integrations/src/google-calendar.ts#L297) |
+| GET | `/v1/google-calendar/connections/:id/calendars` | Roles(owner, admin); Permissions(integrations.manage) | [GoogleCalendarController.calendars](../services/integrations/src/google-calendar.ts#L298) |
+| POST | `/v1/google-calendar/connections/:id/select` | Roles(owner, admin); Permissions(integrations.manage) | [GoogleCalendarController.select](../services/integrations/src/google-calendar.ts#L299) |
 | GET | `/v1/portal/booking` | StudentScoped; Roles(owner, admin, tutor, student, parent); Permissions(integrations.read, scheduling.read) | [PortalBookingController.booking](../services/integrations/src/portal-booking.ts#L90) |
 | GET | `/v1/portal/booking-config` | StudentScoped; Roles(owner, admin, tutor); Permissions(integrations.read) | [PortalBookingController.own](../services/integrations/src/portal-booking.ts#L93) |
 | PUT | `/v1/portal/booking-config` | StudentScoped; Roles(owner, admin, tutor); Permissions(integrations.write) | [PortalBookingController.configure](../services/integrations/src/portal-booking.ts#L95) |
@@ -308,6 +315,7 @@ Local port: 4008. [Service guide](../services/integrations/README.md).
 | [002_import_result.sql](../services/integrations/migrations/002_import_result.sql) | Alters existing schema/policies |
 | [003_dispatch_entitlements.sql](../services/integrations/migrations/003_dispatch_entitlements.sql) | Alters existing schema/policies |
 | [004_portal_booking.sql](../services/integrations/migrations/004_portal_booking.sql) | `portal_booking_configs`, `cal_webhook_receipts` |
+| [005_google_calendar.sql](../services/integrations/migrations/005_google_calendar.sql) | `google_calendar_oauth_states`, `google_calendar_snapshots` |
 
 ## planning
 

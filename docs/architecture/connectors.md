@@ -1,21 +1,22 @@
 # External connectors and data exchange
 
-> **Current status:** Tuts has an integrations service with real token-based Calendly and Cal.com readers, an HTTPS JSON contact reader, and authenticated form webhooks. The Node target connects to these protocols; Cloudflare permits fixed Cal.com/Calendly endpoints and form hooks but rejects arbitrary customer JSON endpoint pulls without a safe egress adapter. Live behavior still depends on each business entering its own credentials and has not been verified here. The connectors use user-supplied tokens, not an OAuth application. See the [integrations service README](../../services/integrations/README.md) for limits and provider documentation.
+> **Current status:** Tuts has an integrations service with token-based Calendly and Cal.com readers, a Google Calendar adapter, an HTTPS JSON contact reader, and authenticated form webhooks. Google Calendar supports encrypted private iCal links and an OAuth calendar-selection flow, whose one-click availability depends on deployment credentials. Cloudflare permits fixed provider origins and form hooks but rejects arbitrary customer JSON endpoint pulls without a safe egress adapter. Live sync depends on each business granting its own access. See the [Google Calendar architecture](google-calendar.md) and [integrations service README](../../services/integrations/README.md) for provider and deployment limits.
 
 ## Ownership and user flow
 
 The integrations service runs independently on port `4008`, owns its database, encrypts credentials with `INTEGRATIONS_ENCRYPTION_KEY`, and exposes its authenticated business API at `/api/integrations/v1`. Owners and admins connect, edit, sync, and disconnect sources. Staff can inspect credential-free connection status. The service validates provider tokens before saving a connection. It never creates, changes, cancels, or reschedules a booking in an external calendar.
 
-The staff app offers four source types:
+The staff app offers five source types:
 
 | Source           | Read direction                                                                               | Authentication                                                                        |
 | ---------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
 | Calendly         | Scheduled events, invitees, attendees, and cancellations from the recent 90-day window       | Business-supplied personal access token validated against Calendly's current-user API |
 | Cal.com          | Upcoming, recurring, past, cancelled, and unconfirmed bookings from the recent 90-day window | Business-supplied API key validated against Cal.com's current-account API             |
+| Google Calendar  | Timed events and recurring instances in one calendar; 90 days past and 180 days ahead | Business-user Google consent, or an encrypted Google-hosted private iCal link |
 | Contact JSON API | Read-only HTTPS JSON response, optionally selecting a nested array                           | Optional business-supplied bearer token                                               |
 | Form webhook     | Contact records pushed by a business's form provider or server                               | Per-connection bearer secret, shown once at connection creation                       |
 
-These are direct token/API integrations, not OAuth. The business keeps ownership of provider authorization and can revoke it at the provider. The connector stores only encrypted credentials and sanitized account/connection metadata. A successful validation confirms the credentials against the identity endpoint; it does not certify a particular calendar's data, source field mapping, or ongoing live polling.
+Calendly and Cal.com use direct tokens; Google Calendar supports Google OAuth or a private calendar feed. The business keeps ownership of provider authorization and can revoke it at the provider. The connector stores only encrypted credentials and sanitized account/connection metadata. A successful validation does not certify ongoing live polling. Google events never imply completed attendance, and attendee CRM ingestion is opt-in.
 
 ## Business API
 
@@ -28,9 +29,9 @@ These are direct token/API integrations, not OAuth. The business keeps ownership
 | POST   | `/v1/connections/:id/sync` | Run an immediate bounded pull and enqueue accepted records                             |
 | DELETE | `/v1/connections/:id`      | Revoke the local secret/credentials, stop future polling, and emit cleanup events      |
 
-New connections accept `{provider,displayName,credentials,config}`. Provider is `calendly`, `calcom`, `json_api`, or `form_webhook`. Calendars accept optional `config.bookingUrl`; JSON APIs accept `config.url`, optional `config.recordsPath`, optional token, and `config.mapping`. Mapping names Tuts contact properties and dot-separated JSON source paths. If `recordsPath` is omitted, the response must be an array. Requests are read-only and support at most 2,000 records per sync.
+Ordinary token connections accept `{provider,displayName,credentials,config}` with provider `calendly`, `calcom`, `json_api`, or `form_webhook`. Google Calendar uses its dedicated [OAuth/private-feed endpoints](google-calendar.md#connection-contract); tokens and secret feed URLs are never public configuration. Booking calendars accept optional `config.bookingUrl`; JSON APIs accept `config.url`, optional `config.recordsPath`, optional token, and `config.mapping`. Mapping names Tuts contact properties and dot-separated JSON source paths. If `recordsPath` is omitted, the response must be an array. Requests are read-only and support at most 2,000 records per sync.
 
-The polling worker checks due sources every 30 seconds and schedules the next attempt five minutes after a success or failure. An immediate sync is also available in the UI. Each provider pull is bounded by request count, time, pagination, and record limits; Calendly and Cal.com pulls start at 90 days ago, not full-history backfills. Truncation is reported in connection status. See the integrations README for the exact limits.
+The Node polling worker checks due sources every 30 seconds and schedules the next attempt five minutes after a success or failure. Cloudflare invokes the scheduled service tick every 15 minutes; an immediate sync is available in the UI. Each provider pull is bounded by request count, time, pagination, and record limits; Calendly and Cal.com pulls start at 90 days ago, not full-history backfills. Truncation is reported in connection status. See the integrations README for the exact limits.
 
 Outbound JSON requests require HTTPS on port 443, reject embedded credentials and redirects, resolve and reject private or special-use IP addresses, and pin a validated address for the TLS request. Requests time out after 15 seconds and responses are limited to 2 MB. The service reports sanitized provider errors, not raw response bodies, credentials, or network errors.
 

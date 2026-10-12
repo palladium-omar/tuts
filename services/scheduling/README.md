@@ -12,6 +12,16 @@ Responses are `{items, total, limit, offset}`. `limit` defaults to 100 and accep
 
 Example: `GET /v1/external-sessions?from=2026-10-01T00:00:00Z&to=2026-11-01T00:00:00Z&limit=200&offset=0` returns external appointments overlapping October; the gateway exposes this as `/api/scheduling/v1/external-sessions`.
 
+## Google Calendar
+
+Google Calendar is a third external provider (`google_calendar`), supplied by
+Integrations through its Google consent/private-feed adapter. Apply
+`005_google_calendar.sql`. Google observations are ordered by
+`providerObservedAt`, independently of the provider update timestamp, so sparse
+cancellations and later restorations remain coherent. The existing tenant,
+tutor ownership and student-access restrictions apply. Elapsed Google events
+never imply completed or billable attendance. See the [Google Calendar contract](../../docs/architecture/google-calendar.md).
+
 ## Web calendar
 
 The Sessions feature has month and week views, Today/previous/next controls, a selected-day agenda, and booking detail dialogs. Times use the viewer's browser timezone, shown above the calendar. The client converts the visible local date boundaries to UTC for the API. Weeks begin on Monday. Cross-midnight appointments appear on each overlapping day; overlapping appointments share columns in the weekly timeline. Cancelled appointments are hidden initially and can be shown with their own visual treatment.

@@ -53,6 +53,9 @@ export function onApiInvalidation(api: Api, invalidate: (matches: (path: string)
 // Reporting composes these domains; unrelated domain lists retain their snapshots.
 export function affectedRead(mutation: string, read: string) {
   const domain = mutation.split("/")[0];
+  // Connector synchronization publishes session/contact projections asynchronously.
+  if (domain === "integrations" && /\/(sync|select)$/.test(mutation) &&
+      ["scheduling", "clients", "reporting"].includes(read.split("/")[0]!)) return true;
   // Billing's reviewed work import can create canonical Clients profiles.
   if (/^billing\/v1\/history-imports\/[^/]+\/students$/.test(mutation) && read.startsWith('clients/')) return true;
   return domain === "platform" || read.split("/")[0] === domain ||

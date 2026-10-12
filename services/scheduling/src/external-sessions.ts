@@ -22,6 +22,7 @@ const session = z
     endsAt: z.string().datetime(),
     status: z.enum(["scheduled", "completed", "cancelled", "no_show"]),
     providerUpdatedAt: z.string().datetime().optional(),
+    providerObservedAt: z.string().datetime().optional(),
     revisionSource: z.enum(['provider','observed']).optional(),
     attendeeName: z.string().max(200).optional(),
     attendeeEmail: z.string().email().max(254).optional(),
@@ -42,9 +43,12 @@ const session = z
   .refine((v) => Date.parse(v.endsAt) > Date.parse(v.startsAt));
 const sync = z.object({
   connectionId: z.string().uuid(),
-  provider: z.enum(["calendly", "calcom"]),
+  provider: z.enum(["calendly", "calcom", "google_calendar"]),
   ownerUserId: z.string().min(1).max(128),
   sessions: z.array(session).max(200),
+}).superRefine((value, ctx) => {
+  if (value.provider === 'google_calendar' && value.sessions.some(item => !item.providerObservedAt))
+    ctx.addIssue({ code: 'custom', path: ['sessions'], message: 'Google Calendar sessions require a provider observation timestamp' });
 });
 const disconnected = z.object({ connectionId: z.string().uuid() });
 const maximumRangeMs = 93 * 24 * 60 * 60 * 1000;
@@ -101,10 +105,12 @@ export class ExternalSessionsService {
         if (revoked.rowCount) return;
         for (const item of data.sessions) {
           const changed = await tx.query(
-            `INSERT INTO external_sessions(id,business_id,connection_id,provider,external_id,owner_user_id,title,starts_at,ends_at,status,attendee_name,attendee_email,booking_url,updated_at,provider_updated_at,revision_source) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) ON CONFLICT(business_id,connection_id,external_id) DO UPDATE SET title=EXCLUDED.title,starts_at=EXCLUDED.starts_at,ends_at=EXCLUDED.ends_at,status=EXCLUDED.status,attendee_name=EXCLUDED.attendee_name,attendee_email=EXCLUDED.attendee_email,booking_url=EXCLUDED.booking_url,updated_at=EXCLUDED.updated_at,provider_updated_at=EXCLUDED.provider_updated_at,revision_source=EXCLUDED.revision_source
-              WHERE (EXCLUDED.revision_source='provider' AND (external_sessions.revision_source<>'provider' OR external_sessions.provider_updated_at<EXCLUDED.provider_updated_at))
+            `INSERT INTO external_sessions(id,business_id,connection_id,provider,external_id,owner_user_id,title,starts_at,ends_at,status,attendee_name,attendee_email,booking_url,updated_at,provider_updated_at,revision_source,provider_observed_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) ON CONFLICT(business_id,connection_id,external_id) DO UPDATE SET title=EXCLUDED.title,starts_at=EXCLUDED.starts_at,ends_at=EXCLUDED.ends_at,status=EXCLUDED.status,attendee_name=EXCLUDED.attendee_name,attendee_email=EXCLUDED.attendee_email,booking_url=EXCLUDED.booking_url,updated_at=EXCLUDED.updated_at,provider_updated_at=EXCLUDED.provider_updated_at,revision_source=EXCLUDED.revision_source,provider_observed_at=EXCLUDED.provider_observed_at
+              WHERE (EXCLUDED.provider='google_calendar' AND EXCLUDED.provider_observed_at IS NOT NULL
+                AND (external_sessions.provider_observed_at IS NULL OR external_sessions.provider_observed_at<EXCLUDED.provider_observed_at))
+                 OR (EXCLUDED.provider<>'google_calendar' AND ((EXCLUDED.revision_source='provider' AND (external_sessions.revision_source<>'provider' OR external_sessions.provider_updated_at<EXCLUDED.provider_updated_at))
                  OR (EXCLUDED.revision_source='observed' AND external_sessions.revision_source IN ('legacy','observed') AND (external_sessions.revision_source='legacy' OR external_sessions.provider_updated_at<EXCLUDED.provider_updated_at))
-                 OR (EXCLUDED.revision_source='legacy' AND external_sessions.revision_source='legacy' AND external_sessions.updated_at<EXCLUDED.updated_at) RETURNING id`,
+                 OR (EXCLUDED.revision_source='legacy' AND external_sessions.revision_source='legacy' AND external_sessions.updated_at<EXCLUDED.updated_at))) RETURNING id`,
             [
               randomUUID(),
               event.businessId,
@@ -121,7 +127,8 @@ export class ExternalSessionsService {
               item.bookingUrl ?? null,
               event.occurredAt,
               item.providerUpdatedAt ?? null,
-              item.providerUpdatedAt ? item.revisionSource ?? 'provider' : 'legacy',
+              item.revisionSource ?? (item.providerUpdatedAt ? 'provider' : 'legacy'),
+              data.provider === 'google_calendar' ? item.providerObservedAt ?? null : null,
             ],
           );
           if (changed.rows[0])

@@ -26,14 +26,18 @@ type Session = {
   startsAt: string;
   endsAt: string;
   status: "scheduled" | "completed" | "cancelled";
-  provider: "calendly" | "calcom";
+  provider: "calendly" | "calcom" | "google_calendar";
   attendeeName?: string | null;
   attendeeEmail?: string | null;
   bookingUrl?: string | null;
 };
 type Booking = Session & { start: Date; end: Date };
 type View = "month" | "week";
-const providers = { calendly: "Calendly", calcom: "Cal.com" };
+const providers = {
+  calendly: "Calendly",
+  calcom: "Cal.com",
+  google_calendar: "Google Calendar",
+};
 const startOfDay = (date: Date) =>
   new Date(date.getFullYear(), date.getMonth(), date.getDate());
 const addDays = (date: Date, days: number) =>
@@ -291,8 +295,8 @@ export function Sessions({
         <div>
           <h1>Your session calendar.</h1>
           <p className="muted">
-            Your Calendly and Cal.com bookings, together. Open a session for its
-            details.
+            Your synced Calendly, Cal.com, and Google Calendar sessions. Open a
+            session for its details.
           </p>
         </div>
         <div className="heading-actions">
@@ -362,6 +366,10 @@ export function Sessions({
           <span>
             <i className="calendar-dot calcom" />
             Cal.com
+          </span>
+          <span>
+            <i className="calendar-dot google_calendar" />
+            Google Calendar
           </span>
         </span>
         <small>
@@ -678,9 +686,9 @@ export function Sessions({
             </div>
           </dl>
           <p className="calendar-detail-note">
-            This booking is synced from {providers[selected.provider]}. Make
-            changes in your booking tool; Tuts will pick them up during the next
-            sync.
+            {selected.provider === "google_calendar"
+              ? "This event was imported from Google Calendar. Edit it in Google Calendar; Tuts will pick up changes during the next sync. Imported events do not create bookings or attendance records."
+              : `This booking is synced from ${providers[selected.provider]}. Make changes in your booking tool; Tuts will pick them up during the next sync.`}
           </p>
           <div className="form-actions">
             <button onClick={() => setSelected(null)}>Close details</button>
@@ -691,7 +699,9 @@ export function Sessions({
                 target="_blank"
                 rel="noreferrer"
               >
-                Open {providers[selected.provider]}
+                {selected.provider === "google_calendar"
+                  ? "Open in Google Calendar"
+                  : `Open ${providers[selected.provider]}`}
                 <ArrowUpRight size={15} />
               </a>
             )}

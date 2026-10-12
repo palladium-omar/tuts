@@ -109,6 +109,10 @@
   background: var(--calendar-purple);
 }
 
+.sessions-calendar .calendar-dot.google_calendar {
+  background: #3c90ff;
+}
+
 .sessions-calendar .calendar-meta small {
   color: var(--muted);
   font-size: 11px;
@@ -276,6 +280,16 @@
     var(--calendar-purple-soft) 78%,
     var(--calendar-purple)
   );
+}
+
+.sessions-calendar .calendar-event.google_calendar {
+  border-left-color: #3c90ff;
+  background: #e8f2ff;
+  color: #174ea6;
+}
+
+.sessions-calendar .calendar-event.google_calendar:hover {
+  background: color-mix(in srgb, #e8f2ff 78%, #3c90ff);
 }
 
 .sessions-calendar .calendar-event time {
@@ -451,6 +465,12 @@
   border-left-color: var(--calendar-purple);
   background: var(--calendar-purple-soft);
   color: #563c7d;
+}
+
+.sessions-calendar .calendar-week-event.google_calendar {
+  border-left-color: #3c90ff;
+  background: #e8f2ff;
+  color: #174ea6;
 }
 
 .sessions-calendar .calendar-week-event.cancelled {

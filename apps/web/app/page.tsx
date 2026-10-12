@@ -512,7 +512,7 @@ function Workspace({
           {view === "integrations" &&
             (business.entitlements.includes("integrations") ? (
               <>
-                <Connectors api={api} role={business.role} filter={filter} />
+                <Connectors key={business.id} api={api} businessId={business.id} role={business.role} filter={filter} />
                 {filter !== "crm" && <StudentBookingSettings api={api} business={business} userId={user.id} />}
               {filter === "all" && <AttributionSettings api={api} business={business} />}
                 {filter === "all" &&

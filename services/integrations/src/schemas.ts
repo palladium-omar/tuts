@@ -47,11 +47,14 @@ export const configSchema = z
     bookingUrl: publicUrl.optional(),
     mapping: mappingSchema.optional(),
     recordsPath: path.optional(),
+    calendarId: z.string().min(1).max(1024).regex(/^[^\r\n]+$/).optional(),
+    importAttendees: z.boolean().optional(),
+    includeEventsWithoutAttendees: z.boolean().optional(),
   })
   .strict();
 export const connectionSchema = z
   .object({
-    provider: z.enum(["calendly", "calcom", "json_api", "form_webhook"]),
+    provider: z.enum(["calendly", "calcom", "json_api", "form_webhook", "google_calendar"]),
     displayName: z.string().trim().min(1).max(100),
     credentials: z
       .object({
@@ -117,5 +120,6 @@ export type ExternalSession = {
   attendeeEmail?: string;
   bookingUrl?: string;
   providerUpdatedAt?: string;
+  providerObservedAt?: string;
   revisionSource?: "provider" | "observed";
 };

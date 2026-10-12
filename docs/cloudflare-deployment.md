@@ -64,6 +64,7 @@ The password-recovery pages and backend are deployed. Live GET requests to `/for
 | Provider route | Cloudflare behavior |
 | --- | --- |
 | Calendly and Cal.com | Fetch adapters target the fixed provider origins; businesses still supply valid tokens |
+| Google Calendar | Fixed Google read adapters; production OAuth requires completed API/audience setup and explicit enablement, while private feeds are available independently |
 | Resend and Meta WhatsApp | Fetch adapters target fixed provider origins; explicit outbound-delivery enablement and campaign approval still apply |
 | Stripe test API | Fetch adapter is implemented; existing test-only restrictions remain |
 | Custom HTTPS contact sources | Unavailable pending a safe egress adapter that preserves DNS/address checks |
@@ -79,6 +80,19 @@ The deployment interface is `node scripts/cloudflare.mjs <command>`, with `init`
 Local deployment metadata belongs in ignored `.cloudflare/deployment.json`, with `prefix`, `accountId`, `publicUrl`, `ingress` (`worker` by default, or `pages`), optional `customDomain`, and a required `pagesProject` for Pages ingress. Generated Wrangler files live under `.cloudflare/generated/<service>/wrangler.json`; the gateway configuration binds `apps/web/out` as `ASSETS` with `run_worker_first: true` so API/private-path checks take precedence over asset serving. Pages mode also generates `.cloudflare/generated/pages/wrangler.json` and `dist/_worker.js`/`dist/_routes.json`. The proxy sends every request to the gateway and returns its response directly, preserving the streamed body and separate session cookies. It has no application secrets or database/queue/storage bindings.
 
 Ignored `.cloudflare/secrets.json` contains the top-level `CONTEXT_PRIVATE_KEY`, `CONTEXT_PUBLIC_KEY`, `PLATFORM_INTERNAL_SECRET`, `INTERNAL_RUNTIME_SECRET`, `BETTER_AUTH_SECRET`, `AUTH_MAIL_INTERNAL_SECRET`, `PORTAL_INTERNAL_SECRET`, `PAYMENT_ENCRYPTION_KEY`, `INTEGRATIONS_ENCRYPTION_KEY`, and `COMMUNICATIONS_ENCRYPTION_KEY`. Its `databasePasswords` and `databaseUrls` maps each have the ten lowercase service names as keys; `adminDatabaseUrl` holds the Neon administration connection used for provisioning databases/roles. Keep both JSON files out of Git and shared artifacts. Stable encryption keys must survive redeployments or stored connector credentials become unreadable. Deployment uploads only the required secrets to each Worker; the administration credential must remain local and the static browser bundle must contain no secrets.
+
+Google Calendar OAuth uses optional top-level `GOOGLE_CALENDAR_CLIENT_ID`,
+`GOOGLE_CALENDAR_CLIENT_SECRET` and `GOOGLE_CALENDAR_REDIRECT_URI` values in the
+ignored secret file; the deploy script uploads them only to Integrations. Store
+`GOOGLE_CALENDAR_ENABLED` there as the string `"true"` only after enabling
+Calendar API and configuring the requested scopes and intended OAuth audience
+in the Google Cloud project. Production OAuth stays unavailable while the flag
+is absent or differs from `"true"`; the private-feed capability is independent.
+The redirect must use trusted `PUBLIC_APP_URL`'s HTTPS origin and exactly
+`/integrations/google-calendar/callback`, matching the OAuth client's registered
+redirect. Current Google Cloud API activation and audience setup remain pending;
+no live grant or private feed has been supplied, and deployment does not establish
+a verified live connection. See [Google Calendar](architecture/google-calendar.md).
 
 System password emails have separate configuration from business communications. Platform and Notifications receive `AUTH_MAIL_INTERNAL_SECRET`; only Notifications receives `AUTH_MAIL_PROVIDER`, `AUTH_MAIL_FROM` and `AUTH_MAIL_API_KEY`. Configure a real verified sender before setting `authMailEnabled: true` in the deployment manifest, regenerate configuration and deploy both services. The default is disabled, and the generator refuses to enable mail without its required credentials. No marketing connector credential is reused for identity recovery.
 

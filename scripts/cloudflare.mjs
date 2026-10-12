@@ -116,6 +116,9 @@ export function createConfigs(configInput, subscriptions, projectRoot = root, ma
     alias: Object.fromEntries(['class-validator', 'class-transformer', 'class-transformer/storage', '@nestjs/websockets/socket-module', '@nestjs/microservices/microservices-module', '@nestjs/microservices'].map(name => [name, join(projectRoot, 'packages/service-kit/dist/cloudflare-optional.js')])),
     send_metrics: false,
     minify: true,
+    // Wrangler substitutes NODE_ENV while bundling. A runtime var cannot undo
+    // a development constant; keep production guards in every deployed bundle.
+    define: { 'process.env.NODE_ENV': JSON.stringify('production') },
     // Explicit production variables are retained alongside Worker secrets.
     vars: { TUTS_RUNTIME: 'cloudflare', NODE_ENV: 'production', PUBLIC_APP_URL: config.publicUrl, PUBLIC_GATEWAY_URL: config.publicUrl, PUBLIC_REPORTING_BASE_URL: `${config.publicUrl}/api/reporting`, INITIAL_BUSINESS_ENTITLEMENTS: featureNames.join(','), ALLOW_OUTBOUND_DELIVERY: 'false', ALLOW_SANDBOX_PAYMENTS: 'false' },
   };
@@ -238,6 +241,9 @@ export function secretsFor(name, secrets) {
   if (['platform', 'notifications'].includes(name)) value.AUTH_MAIL_INTERNAL_SECRET = secrets.AUTH_MAIL_INTERNAL_SECRET;
   if (['platform', 'clients', 'integrations'].includes(name)) value.PORTAL_INTERNAL_SECRET = secrets.PORTAL_INTERNAL_SECRET;
   if (name === 'notifications') for (const key of ['AUTH_MAIL_PROVIDER', 'AUTH_MAIL_FROM', 'AUTH_MAIL_API_KEY']) {
+    if (typeof secrets[key] === 'string' && secrets[key]) value[key] = secrets[key];
+  }
+  if (name === 'integrations') for (const key of ['GOOGLE_CALENDAR_CLIENT_ID', 'GOOGLE_CALENDAR_CLIENT_SECRET', 'GOOGLE_CALENDAR_REDIRECT_URI', 'GOOGLE_CALENDAR_ENABLED']) {
     if (typeof secrets[key] === 'string' && secrets[key]) value[key] = secrets[key];
   }
   const encryption = { payments: 'PAYMENT_ENCRYPTION_KEY', integrations: 'INTEGRATIONS_ENCRYPTION_KEY', notifications: 'COMMUNICATIONS_ENCRYPTION_KEY' }[name];
