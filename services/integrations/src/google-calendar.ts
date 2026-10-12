@@ -97,7 +97,7 @@ export class GoogleCalendarService {
         VALUES($1,$2,$3,$4,$5,now()+interval '10 minutes')`, [ctx.businessId, hashSecret(state), ctx.sub, encrypt({ verifier }, ctx.businessId), input.displayName ?? 'Google Calendar']);
     });
     const authorization = new URL('https://accounts.google.com/o/oauth2/v2/auth');
-    authorization.search = new URLSearchParams({ client_id: config.clientId, redirect_uri: config.redirectUri, response_type: 'code', scope: scopes.join(' '), access_type: 'offline', prompt: 'consent', state, code_challenge: createHash('sha256').update(verifier).digest('base64url'), code_challenge_method: 'S256' }).toString();
+    authorization.search = new URLSearchParams({ client_id: config.clientId, redirect_uri: config.redirectUri, response_type: 'code', scope: scopes.join(' '), access_type: 'offline', prompt: 'select_account consent', state, code_challenge: createHash('sha256').update(verifier).digest('base64url'), code_challenge_method: 'S256' }).toString();
     return { authorizationUrl: authorization.toString() };
   }
   async complete(ctx: RequestContext, body: unknown) {

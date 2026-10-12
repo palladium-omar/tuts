@@ -68,6 +68,7 @@ export function Registration({
         </div>
         <div className="auth-foot">
           <span className="little-star">✳</span>{audience === "student" ? "A little room to grow." : "Built around independent educators."}
+          <a className="auth-privacy" href="/privacy">Privacy</a>
         </div>
       </div>
       <div className="auth-panel">

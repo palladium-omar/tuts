@@ -395,6 +395,17 @@ input[type="color"] {
   color: #c6d4ca;
   font-size: 12px;
 }
+.auth-privacy {
+  margin-left: auto;
+  color: inherit;
+  white-space: nowrap;
+  text-underline-offset: 3px;
+}
+.auth-privacy:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 3px;
+  border-radius: 2px;
+}
 .little-star {
   font-size: 35px;
   color: #cbd8a3;
