@@ -16,7 +16,7 @@ import {
   RefreshCw,
   UserRound,
 } from "lucide-react";
-import { type Api, errorMessage } from "../lib/api";
+import { type Api, errorMessage, getCalendarSyncCompletedAt, onApiInvalidation } from "../lib/api";
 import { Modal, Notice } from "../components/shared";
 import "./sessions-calendar.css";
 
@@ -38,6 +38,8 @@ const providers = {
   calcom: "Cal.com",
   google_calendar: "Google Calendar",
 };
+const attendeeLabel = (session: Session, fallback = "Booked session") =>
+  session.attendeeName || session.attendeeEmail || (session.provider === "google_calendar" ? "Calendar event" : fallback);
 const startOfDay = (date: Date) =>
   new Date(date.getFullYear(), date.getMonth(), date.getDate());
 const addDays = (date: Date, days: number) =>
@@ -141,6 +143,8 @@ export function Sessions({
   const loadedRange = useRef<{ api: Api; from: string; to: string } | null>(
     null,
   );
+  const refreshState = useRef({ api, busy: false, pending: false, blocked: false });
+  const readController = useRef<AbortController | null>(null);
   const today = startOfDay(new Date());
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const rangeStart =
@@ -161,9 +165,57 @@ export function Sessions({
   const days = Array.from({ length: dayCount }, (_, index) =>
     addDays(rangeStart, index),
   );
+  function refreshFresh() {
+    const state = refreshState.current;
+    if (state.api !== api || state.blocked) return;
+    if (state.busy) { state.pending = true; return; }
+    state.busy = true;
+    setRevision((value) => value + 1);
+  }
   useEffect(() => {
+    let current = true, armedAt = 0;
+    const timers = new Set<ReturnType<typeof setTimeout>>();
+    if (refreshState.current.api !== api) refreshState.current = { api, busy: false, pending: false, blocked: false };
+    const stopTimers = () => { for (const timer of timers) clearTimeout(timer); timers.clear(); };
+    const arm = (completedAt: number) => {
+      if (completedAt <= armedAt || refreshState.current.blocked) return;
+      armedAt = completedAt;
+      stopTimers();
+      const now = Date.now();
+      // Keep current rows visible. Coalesce an attempt with a running/manual read.
+      for (const offset of [0, 1000, 3000, 8000, 15000, 30000]) {
+        if (offset !== 0 && completedAt + offset < now) continue;
+        const timer = setTimeout(() => {
+          timers.delete(timer);
+          if (current && refreshState.current.api === api && !refreshState.current.blocked) refreshFresh();
+        }, offset === 0 ? 0 : Math.max(0, completedAt + offset - now));
+        timers.add(timer);
+      }
+    };
+    const unsubscribe = onApiInvalidation(api, (matches, reason, calendarSyncAt) => {
+      if (!current || !matches("scheduling/v1/external-sessions")) return;
+      if (reason === "access" || reason === "dispose") {
+        stopTimers();
+        refreshState.current.blocked = true;
+        refreshState.current.pending = false;
+        readController.current?.abort();
+        setRows([]); setTotal(0); setSelected(null); setLoading(false);
+        setError("Your workspace access changed. Refresh your workspace to continue.");
+        return;
+      }
+      if (calendarSyncAt !== undefined) arm(calendarSyncAt);
+      else refreshFresh();
+    });
+    const completed = getCalendarSyncCompletedAt(api);
+    if (completed !== undefined) arm(completed);
+    return () => { current = false; stopTimers(); unsubscribe(); };
+  }, [api, from, to]);
+  useEffect(() => {
+    if (refreshState.current.api !== api || refreshState.current.blocked) return;
     let current = true;
     const controller = new AbortController();
+    readController.current = controller;
+    refreshState.current.busy = true;
     const signal = AbortSignal.any([
       controller.signal,
       AbortSignal.timeout(25000),
@@ -213,7 +265,14 @@ export function Sessions({
         if (current && !controller.signal.aborted)
           setError(errorMessage(cause));
       } finally {
-        if (current) setLoading(false);
+        if (current) {
+          setLoading(false);
+          refreshState.current.busy = false;
+          if (refreshState.current.pending && !refreshState.current.blocked) {
+            refreshState.current.pending = false;
+            refreshFresh();
+          }
+        }
       }
     })();
     return () => {
@@ -287,7 +346,7 @@ export function Sessions({
       });
   }
   function eventLabel(booking: Booking) {
-    return `${booking.title}, ${timeRange(booking)}, ${booking.attendeeName || booking.attendeeEmail || "Booked session"}, ${booking.status}`;
+    return `${booking.title}, ${timeRange(booking)}, ${attendeeLabel(booking)}, ${booking.status}`;
   }
   return (
     <div className="sessions-calendar">
@@ -302,7 +361,7 @@ export function Sessions({
         <div className="heading-actions">
           <button
             disabled={loading}
-            onClick={() => setRevision((value) => value + 1)}
+            onClick={refreshFresh}
           >
             <RefreshCw size={16} />
             {loading ? "Refreshing…" : "Refresh"}
@@ -598,9 +657,7 @@ export function Sessions({
                   <strong>{booking.title}</strong>
                   <span>
                     <i className={`calendar-dot ${booking.provider}`} />
-                    {booking.attendeeName ||
-                      booking.attendeeEmail ||
-                      "Booked session"}{" "}
+                    {attendeeLabel(booking)}{" "}
                     · {providers[booking.provider]}
                   </span>
                 </span>
@@ -613,8 +670,8 @@ export function Sessions({
           </div>
         ) : (
           <p className="muted">
-            No {showCancelled ? "" : "active "}sessions on this day. Bookings
-            appear here after your calendar syncs.
+            No {showCancelled ? "" : "active "}sessions on this day. Sessions
+            appear here after your calendars sync.
           </p>
         )}
       </section>
@@ -622,10 +679,10 @@ export function Sessions({
         <div className="onboarding-banner">
           <CalendarDays size={24} />
           <div>
-            <strong>No synced bookings in this period.</strong>
+            <strong>No synced sessions in this period.</strong>
             <p>
-              Try another week or month, or check your Calendly and Cal.com
-              connections. New bookings appear after the next sync.
+              Try another week or month, or check your Calendly, Cal.com, or Google Calendar
+              connections. New events appear after sync.
             </p>
           </div>
           <button onClick={onConnect}>
@@ -676,9 +733,7 @@ export function Sessions({
                 Attendee
               </dt>
               <dd>
-                {selected.attendeeName ||
-                  selected.attendeeEmail ||
-                  "No attendee details supplied"}
+                {attendeeLabel(selected, "No attendee details supplied")}
                 {selected.attendeeName && selected.attendeeEmail && (
                   <small>{selected.attendeeEmail}</small>
                 )}

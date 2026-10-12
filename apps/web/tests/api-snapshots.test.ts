@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {createApi,clearApi} from '../lib/api';
+import {createApi,clearApi,getCalendarSyncCompletedAt,onApiInvalidation} from '../lib/api';
 import {ListCache} from '../lib/list-cache';
 
 test('Reporting POST cache isolates body, context and fresh reads; mutations invalidate affected domains', async () => {
@@ -48,5 +48,40 @@ test('authorization failures revoke retained lists and notify mounted consumers'
  globalThis.fetch=async()=>new Response(JSON.stringify({message:'forbidden'}),{status:403});
  try {await assert.rejects(api('clients/v1/clients',undefined,undefined,undefined,{fresh:true}));
   assert.equal(cache.accessRevoked,true);assert.equal(cache.get('clients/v1/clients'),undefined);assert.equal(cache.snapshot('clients/v1/clients'),undefined);assert.equal(notified,1);
+ } finally {globalThis.fetch=original;}
+});
+
+test('calendar projection refresh is armed only after dispatched sync completion, scoped and expires',async()=>{
+ const original=globalThis.fetch;const api=createApi('calendar-tenant'),other=createApi('other-tenant');
+ const signals:(number|undefined)[]=[];
+ const off=onApiInvalidation(api,(matches,_reason,calendarSyncAt)=>{if(matches('scheduling/v1/external-sessions'))signals.push(calendarSyncAt);});
+ let finish!:(response:Response)=>void;
+ globalThis.fetch=async()=>new Promise<Response>(resolve=>{finish=resolve;});
+ try {
+  const pending=api('integrations/v1/connections/calendar-source/sync','POST',{});
+  assert.equal(getCalendarSyncCompletedAt(api),undefined);
+  finish(new Response(JSON.stringify({sessionsDispatched:14}),{status:200}));await pending;
+  const completed=getCalendarSyncCompletedAt(api)!;
+  assert.equal(typeof completed,'number');assert.deepEqual(signals,[undefined,completed]);
+  assert.equal(getCalendarSyncCompletedAt(other),undefined);
+  assert.equal(getCalendarSyncCompletedAt(api,completed+30000),completed);
+  assert.equal(getCalendarSyncCompletedAt(api,completed+30001),undefined);
+  off();assert.equal(getCalendarSyncCompletedAt(api),completed); // New Sessions mount can pick up the retained window.
+  clearApi(api,'access');assert.equal(getCalendarSyncCompletedAt(api),undefined);
+ } finally {off();globalThis.fetch=original;}
+});
+
+test('zero-dispatch or disposed in-flight calendar sync cannot arm later projection reads',async()=>{
+ const original=globalThis.fetch;const empty=createApi('empty-calendar');
+ try {
+  globalThis.fetch=async()=>new Response(JSON.stringify({sessionsDispatched:0}),{status:200});
+  await empty('integrations/v1/connections/source/sync','POST',{});assert.equal(getCalendarSyncCompletedAt(empty),undefined);
+  for(const reason of ['access','dispose'] as const){
+   const disposed=createApi(`disposed-calendar-${reason}`);let finish!:(response:Response)=>void;
+   globalThis.fetch=async()=>new Promise<Response>(resolve=>{finish=resolve;});
+   const pending=disposed('integrations/v1/connections/source/sync','POST',{});
+   clearApi(disposed,reason);finish(new Response(JSON.stringify({sessionsDispatched:3}),{status:200}));await pending;
+   assert.equal(getCalendarSyncCompletedAt(disposed),undefined);
+  }
  } finally {globalThis.fetch=original;}
 });

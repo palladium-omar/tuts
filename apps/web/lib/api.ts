@@ -39,12 +39,22 @@ export function supportReference(response: Response): string {
     : "";
 }
 const requestCaches = new WeakMap<Api, RequestCache>();
+type InvalidationReason = "access" | "dispose";
+const calendarSyncCompleted = new WeakMap<Api, number>();
+const projectionGenerations = new WeakMap<Api, number>();
+/** Thirty-second projection refresh window, retained across navigation within one API context. */
+export function getCalendarSyncCompletedAt(api: Api, now = Date.now()): number | undefined {
+  const completed = calendarSyncCompleted.get(api);
+  return completed !== undefined && now - completed <= 30000 ? completed : undefined;
+}
 export function clearApi(api: Api, reason: "access" | "dispose" = "dispose") {
   requestCaches.get(api)?.clear();
+  calendarSyncCompleted.delete(api);
+  projectionGenerations.set(api, (projectionGenerations.get(api) ?? 0) + 1);
   invalidators.get(api)?.forEach(invalidate => invalidate(() => true, reason));
 }
-const invalidators = new WeakMap<Api, Set<(matches: (path: string) => boolean, reason?: "access" | "dispose") => void>>();
-export function onApiInvalidation(api: Api, invalidate: (matches: (path: string) => boolean, reason?: "access" | "dispose") => void) {
+const invalidators = new WeakMap<Api, Set<(matches: (path: string) => boolean, reason?: InvalidationReason, calendarSyncAt?: number) => void>>();
+export function onApiInvalidation(api: Api, invalidate: (matches: (path: string) => boolean, reason?: InvalidationReason, calendarSyncAt?: number) => void) {
   const subscribers = invalidators.get(api) ?? new Set();
   subscribers.add(invalidate);
   invalidators.set(api, subscribers);
@@ -64,6 +74,7 @@ export function affectedRead(mutation: string, read: string) {
 export function createApi(businessId?: string): Api {
   const cache = new RequestCache();
   const api: Api = async (path, method = "GET", body, key, options) => {
+    const projectionGeneration = projectionGenerations.get(api) ?? 0;
     const readOnly =
       method === "GET" ||
       (method === "POST" &&
@@ -121,7 +132,11 @@ export function createApi(businessId?: string): Api {
       }
       if (mutatesWorkspace) {
         cache.invalidate(read => affectedRead(path, read.split(" ")[1] ?? read));
-        invalidators.get(api)?.forEach(invalidate => invalidate(read => affectedRead(path, read)));
+        const projectedSessions = /^integrations\/v1\/connections\/[^/]+\/sync$/.test(path) &&
+          Number((data.item ?? data).sessionsDispatched) > 0 && projectionGeneration === (projectionGenerations.get(api) ?? 0);
+        const completedAt = projectedSessions ? Date.now() : undefined;
+        if (completedAt !== undefined) calendarSyncCompleted.set(api, completedAt);
+        invalidators.get(api)?.forEach(invalidate => invalidate(read => affectedRead(path, read), undefined, completedAt));
       }
       return data;
     };
