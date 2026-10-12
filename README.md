@@ -27,13 +27,27 @@ Password recovery has request/reset pages, expiring single-use links, confirmati
 | Billing | Prior-month completed-class billing, source-preserving CSV/XLSX/PDF history, work log, reviewed student associations, monthly/status filters, exact aggregates and immutable issued snapshots | Historical paid statuses are declarations; unreviewed names do not establish student identities; no OCR or automatic real charges |
 | Payments | Existing Stripe test adapters and local simulation, clearly separate from confirmed collections | Live Stripe/PayPal/bank provider activation remains separate |
 | Notifications | Durable campaigns, student reminder inbox/scheduling and system invite/recovery sender adapter | Verified system sender; reminder email is opt-in with access rechecks; outbound campaigns disabled by default |
-| Integrations | Calendar/contact connectors, safe student booking links and provider reconciliation | Customer credentials required; no new OAuth registrations |
+| Integrations | Native read-only Google Calendar OAuth, calendar/contact connectors, safe student booking links and provider reconciliation | Google users authorize their own accounts; Google commercial verification is pending; other providers require business credentials |
 | Planning | Multiple boards, ordered background saves, profile-based cycles, country-aware personalized templates, conditional aid/testing tasks and explicit upgrades | Local researched calendars cover France/USA/Morocco 2027 procedures; other dates and institution requirements need confirmation |
 | Reporting | Business dashboard, batch student summaries, coverage/asOf, engagement/inactivity metrics, estimated activity and tagged Beacons links | Imported engagement requires reviewed student associations; incomplete-month churn is provisional; no direct Beacons conversion writes |
 
 The [Cloudflare deployment guide](docs/cloudflare-deployment.md) describes separate private service Workers, PostgreSQL databases, Queues and private R2 uploads. Its adapter preserves the HTTP and event contracts. SMTP, arbitrary contact API pulls and custom AI endpoints require an additional safe egress adapter on Cloudflare; Cal.com, Calendly, Resend and WhatsApp use fixed provider endpoints. Production payments remain unavailable, and outbound messaging is disabled by default. The audit records public HTTP checks and local authenticated verification separately; hosted authenticated performance remains unmeasured; current recovery delivery proof is in the remediation receipt. The earlier [Google Cloud container configuration](docs/deployment.md) remains an alternative and has not been provisioned.
 
-OAuth app connections, production payment providers, country-specific bank integrations, paid subscription administration are future work. Provider integrations require each business to supply its own credentials; their live behavior has not been verified as part of this implementation. See [connector protocols](docs/architecture/connectors.md), [payment provider contracts](docs/architecture/payments.md), and the [service status list](#what-works-today).
+Google Calendar native OAuth is implemented. User-approved production checks in
+an isolated synthetic workspace confirmed consent/token exchange, calendar
+selection, initial session import, manual title/duration updates, exact Google
+event-link opening and cancellation propagation. CRM import remained off and no
+attendance, invoices or payments were created. Reconnecting, refreshing the
+calendar list and navigating to Sessions during the initial background import
+also passed without manual synchronization or page refresh. Unattended scheduled
+sync was not separately observed; Google verification remains pending. See the
+[Google Calendar release evidence](docs/reviews/2026-10-12-google-calendar.md).
+
+Other OAuth app connections, production payment providers, country-specific bank
+integrations and paid subscription administration remain future work. Other
+provider integrations require business credentials and separate live validation.
+See [connector protocols](docs/architecture/connectors.md), [payment provider
+contracts](docs/architecture/payments.md), and the [service status list](#what-works-today).
 
 ## Architecture
 

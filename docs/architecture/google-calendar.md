@@ -48,6 +48,26 @@ the authenticated gateway using the tenant bound into the one-use state. The
 callback never receives an access or refresh token. It removes authorization
 query parameters before making subsequent requests and returns to Connectors.
 
+After calendar selection is saved, the client starts the first pull through the
+existing sync route in the background. Each connector displays its own progress,
+completion or retry error; a failed pull leaves the calendar selection saved.
+Calendar-list refresh preserves the current selection when it is still
+readable. API/business scope, request deduplication and load-generation checks
+prevent stale responses from replacing the current connector view. The durable
+server poll remains the fallback when the client leaves the page. This describes
+the implementation; the release review records which lifecycle checks were
+observed live.
+
+Saving a connection and completing its provider pull do not imply that the
+Scheduling projection has already consumed the outbox event. The shared web API
+records successful session-dispatch completion for thirty seconds, scoped to its
+business API instance. Sessions subscribes to read invalidations and makes fresh
+reads at 0, 1, 3, 8, 15 and 30 seconds after that completion. Running reads are
+coalesced, existing rows stay visible, and navigation, lost access or API disposal
+cleans up the view's timers. This is a bounded handoff across the existing event
+contract; it introduces neither cross-service database access nor continuous
+polling. Scheduled server synchronization remains independent of browser views.
+
 ## Security and limits
 
 Request the `calendar.events.readonly` and `calendar.calendarlist.readonly`
@@ -99,6 +119,12 @@ cancellations and subsequent restorations without inventing a provider update
 time, and ignores older queue deliveries. Existing booking providers retain
 their current provider-revision rules.
 
+Google event detail links are retained from provider `htmlLink` values only for
+HTTPS `calendar.google.com/calendar/...` links or Google's exact
+`www.google.com/calendar/event` path. Embedded credentials, other origins and
+non-443 ports are rejected. These event links support **Open in Google Calendar**;
+private iCal credential URLs never become session source links.
+
 Past Google events remain scheduled until tutor attendance review. Importing a
 Google event does not itself create an invoice, payment or portal booking link.
 Connections to both Google and a booking provider may contain the same meeting;
@@ -119,8 +145,10 @@ review until the event is seen again. Private feeds likewise retain updated date
 for known appointments moved outside the discovery window.
 
 Integrations requires `GOOGLE_CALENDAR_CLIENT_ID`,
-`GOOGLE_CALENDAR_CLIENT_SECRET` and `GOOGLE_CALENDAR_REDIRECT_URI`. The production
-redirect is `https://tuts.palladiumscholars.com/integrations/google-calendar/callback`.
+`GOOGLE_CALENDAR_CLIENT_SECRET` and `GOOGLE_CALENDAR_REDIRECT_URI`. Production
+requires the trusted `PUBLIC_APP_URL` HTTPS origin and the exact
+`/integrations/google-calendar/callback` path. The current deployment's redirect
+is `https://tuts.palladiumscholars.com/integrations/google-calendar/callback`.
 The Google Cloud project must enable Calendar API and configure an OAuth web
 client with that exact redirect. External customer accounts require an External
 OAuth audience. A testing-mode grant can expire after seven days; production
@@ -146,9 +174,10 @@ implicitly. Customers need no Google Cloud project, API key or client secret.
 The current deployment's External audience is **In production** and native
 sign-in is enabled. The public [privacy notice](https://tuts.palladiumscholars.com/privacy)
 describes Google data use, infrastructure processing, retention and deletion
-requests; the public sign-in page links to it. Google verification remains
-pending. For the current limited personal-use rollout, the unverified warning
-and lifetime 100-new-user cap apply. Broader commercial availability needs
+requests; the public sign-in page links to it. A public `/about` product page is
+also deployed, while the OAuth branding homepage still needs updating from `/`
+to `/about`. Google verification remains pending. For the current limited
+personal-use rollout, the unverified warning and lifetime 100-new-user cap apply. Broader commercial availability needs
 Google's verification process. Publishing alone does not verify the app.
 
 Official references: [OAuth web-server flow](https://developers.google.com/identity/protocols/oauth2/web-server),
@@ -157,5 +186,10 @@ Official references: [OAuth web-server flow](https://developers.google.com/ident
 [Synchronization constraints](https://developers.google.com/workspace/calendar/api/guides/sync).
 [Google's private calendar link instructions](https://support.google.com/calendar/answer/37648).
 
-Implementation and hosted verification status are recorded separately in the
-release review. This design does not assert a completed Google consent flow.
+The [release review](../reviews/2026-10-12-google-calendar.md) records completed
+live native OAuth, initial import, manual title/duration updates, exact source-link
+opening and cancellation propagation in an isolated synthetic workspace.
+Reconnection, selection-preserving calendar refresh and the first background
+pull while navigating to Sessions also passed. No live private feed was tested,
+and unattended scheduled sync was not separately observed. Implementation and
+these observed checks remain separate from Google's pending verification approval.

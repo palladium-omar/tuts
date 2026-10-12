@@ -40,6 +40,11 @@ filters to avoid cancelling records merely because a preference excludes them.
   checkpoints. Unresolved repairs remain visible for tutor review and never
   infer cancellation from an error or a missing record.
 - Google feed group aliases cannot become a sole student attendee.
+- Google event source links include Google's exact `www.google.com/calendar/event`
+  path and Calendar-hosted paths, with HTTPS origin/credential/port checks.
+- Calendar selection is saved before its independent first sync. Per-connector
+  progress and retry state keep the connection usable while the pull finishes;
+  response scope and load-generation guards suppress stale local updates.
 
 ### Production build correction
 
@@ -59,7 +64,15 @@ Affected Integrations, Scheduling, gateway and web type checks passed. Service
 boundaries and the generated inventory passed (209 routes across ten services).
 The production dependency audit found no known vulnerabilities. The full static
 build and Workers/Pages bundle checks passed, including the new callback route.
-No automated tests were added or manually run for this request.
+Three focused mocked-provider regression tests passed in
+`services/integrations/test/google-calendar-links.test.ts`. They preserve Google's
+actual `https://www.google.com/calendar/event` format and legitimate
+`calendar.google.com` source links; reject lookalike origins, embedded
+credentials, non-443 ports, HTTP and unrelated `www.google.com` redirect paths;
+and check that sparse cancellation tombstones keep the prior event dates and
+source link without fabricating a Google update timestamp. Repeated source-link
+cases are covered in the same run. All provider fetches were mocked; these tests
+made no network or database calls.
 
 Scheduling and Integrations migrations `005_google_calendar.sql` were applied
 through their ordinary PostgreSQL roles with verified TLS. New OAuth state and
@@ -73,9 +86,10 @@ The public app and health route returned 200. The callback returned 200 with
 `Cache-Control: no-store` and `Referrer-Policy: no-referrer`. Anonymous Google
 status access returned 401. A short-lived, loopback-only private service probe
 returned 200 for authenticated Google status and the existing connection list;
-it confirmed the private-feed capability and reported OAuth setup pending after
-the corrected production bundle. This probe
-does not establish successful Google user consent or calendar ingestion.
+the initial probe confirmed private-feed availability and reported OAuth setup
+pending after the corrected production bundle. Configuration probes alone do
+not establish consent or ingestion; the subsequent live native checks below
+provide that evidence.
 
 The Google OAuth web client was created with explicit user approval, and its
 credentials were stored only in protected deployment settings/Integrations
@@ -102,9 +116,89 @@ longer the publishing-mode constraint, though Google can still expire or revoke
 grants for other reasons. See [Google's personal-use exception](https://support.google.com/cloud/answer/13464323)
 and [audience and publishing rules](https://support.google.com/cloud/answer/15549945).
 
-No live customer grant or calendar feed was supplied, so successful user
-consent, token exchange and calendar ingestion have not been verified end to end.
-The production status probe verifies deployment configuration, not those steps.
+### Live native OAuth and manual synchronization
+
+On October 12, user-approved Google OAuth completed through the production Tuts
+interface, including account selection, consent, callback/token exchange,
+calendar listing and explicit calendar selection. Initial appointments appeared
+in Sessions. These checks used an isolated synthetic Tuts business/account and a
+synthetic Google event. CRM attendee import stayed disabled; no attendance,
+invoices or payments were created.
+
+Changing the same Google event's title and duration to ninety minutes, then
+requesting a manual sync, updated its existing Tuts session. **Open in Google
+Calendar** opened that exact event. The provider's actual link uses
+`https://www.google.com/calendar/event`, which the original allowlist omitted;
+the corrected allowlist accepts that exact Google path and retains the existing
+Calendar-hosted links.
+
+Deleting the synthetic event with Google's ordinary Trash action, then manually
+syncing, changed the same Tuts session to cancelled. **Show cancelled** displayed
+that record with its previously imported ninety-minute start/end dates. This
+live cancellation check complements the sparse-tombstone regression test.
+Readback APIs all returned HTTP 200: Scheduling contained one cancelled external
+session, Clients contained zero contacts, Billing contained zero invoices, and
+Payments contained zero checkouts.
+
+The per-card initial background-sync lifecycle was deployed in `9445a77`:
+selection persists independently, the first pull starts in the background, and
+sync progress or retry errors belong to the affected connector. `4008cb4` added
+an in-app disconnect confirmation and restored progress for retained syncs after
+API-context changes.
+
+The first rapid-navigation check exposed a stale Sessions view: the initial
+read could complete before Scheduling consumed the event, and Sessions did not
+subscribe to API invalidations. `0acfd55` adds that subscription and a bounded
+thirty-second projection refresh window. Running reads coalesce; existing rows
+remain visible. Six focused web API snapshot tests passed, including completion
+markers, retained navigation signals, business isolation, expiration and
+access/disposal fencing. The static export and both GitHub builds passed.
+
+The final native reconnection check completed at 19:09 UTC, between the
+fifteen-minute scheduled ticks. Calendar-list refresh preserved the selected
+test calendar. After selecting it, the card showed **Importing your calendar
+events…** while other navigation remained available. Navigating immediately to
+Sessions produced the recurring appointments automatically, without **Sync now**
+or a manual page refresh. The connection readback reported fourteen dispatched
+events, zero contacts, no truncation and no error; thirteen appointments belonged
+to the synthetic weekly series, with three visible in October. The fourteenth
+record was the earlier cancelled event.
+
+Trashing the synthetic recurring series and syncing changed all fourteen
+projected records to cancelled. The final disconnect check cleared the view and
+removed its Scheduling projection. A tenant-scoped read through the normal
+Integrations role with verified TLS confirmed all three test connections were
+disconnected, with zero retained credentials and zero private snapshots. The
+synthetic account remains separate from customer workspaces; its empty Google
+test calendar is retained, while test events remain recoverable in Google Trash.
+
+One direct Scheduling read returned a transient HTTP 500 during the earlier
+walkthrough. Subsequent range and full-list reads returned 200; a short follow-up
+Worker tail showed two successful requests without logged exceptions. Its cause
+was not established, so these results do not claim an error-free deployment.
+
+Unattended scheduled synchronization was not separately observed. No live
+private iCal feed was tested. These checks do not establish every customer's
+Workspace access policy or Google's verification approval.
+
+The public `/about` product page and `/privacy` notice are deployed. Google's
+branding configuration still uses the older `/` homepage and needs updating to
+`/about`; brand and sensitive-scope verification approval remain pending.
+
+### Final deployment receipt
+
+- Integrations Worker: `148b5775-af02-4f3f-927f-24640502f36b`, including the
+  Google event-link correction committed in `9445a77`.
+- Pages: `aab56e9d-75c6-4b3c-9033-7e2597267fa5`, production branch `main`,
+  source `0acfd55`. Both builds for that commit succeeded. Native browser checks
+  exercised this version's automatic import and Sessions refresh behavior.
+- Public `/about`, `/privacy` and callback routes returned 200. The callback
+  retained `Cache-Control: no-store` and `Referrer-Policy: no-referrer`.
+- Final authenticated readbacks returned 200: zero active test connections,
+  zero external sessions, zero CRM contacts, zero invoices and zero payment
+  checkouts. Private token/snapshot cleanup was checked separately as above.
+- No new Cloudflare resource, paid plan, Google write scope, student invitation
+  or customer financial operation was introduced by this verification work.
 
 Pages deployment metadata previously reported an older source commit even when
 current assets were uploaded. The deploy script now supplies the committed Git

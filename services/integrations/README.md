@@ -40,7 +40,10 @@ Calendly reads scheduled events starting90days ago, including cancellations, and
 
 State changes and emitted events commit together through the service outbox. `integrations.contacts-received.v1` carries `{connectionId,source,contacts}`; `integrations.sessions-synced.v1` carries `{connectionId,provider,ownerUserId,sessions}`. Batches contain at most200 entries. Scheduling stores a separate read-only projection. Received contact counts mean accepted for delivery, not that CRM already created records. CRM emits `clients.source-synced.v1`; `lastImportResult` holds its latest batch result (`created`, `updated`, `skipped`, `errors`, `issues`, `receivedAt`). Multiple batches report independently. Disconnect emits `integrations.connection-disconnected.v1` and scheduling suppresses later delayed batches from that connection.
 
-Build: `pnpm --filter @palladium/integrations build`. No tests were added or run under the current task instruction. Live user-token synchronization remains dependent on real credentials being supplied.
+Build: `pnpm --filter @palladium/integrations build`. The focused Google link and
+sparse cancellation regressions passed with mocked provider fetches. Live native
+OAuth/manual-sync evidence and its remaining limits are recorded in the
+[Google Calendar release review](../../docs/reviews/2026-10-12-google-calendar.md).
 
 ## Primary provider documentation
 
@@ -212,7 +215,14 @@ scope setup are complete, the External audience is published **In production**,
 and the deployed native OAuth capability is enabled. Each connection uses its
 user's account; the platform owner's Google grant is never reused. Google
 verification remains pending, with an unverified warning and 100-new-user cap
-for the current personal-use rollout. No live customer grant or feed was
-supplied, and no complete live connection flow has been verified. See the
+for the current personal-use rollout. A user-approved native OAuth flow in an
+isolated synthetic workspace verified consent/token exchange, calendar listing
+and selection, initial session import, manual title/duration updates, exact
+Google event-link opening and cancellation propagation. CRM import remained off;
+no attendance, invoices or payments were created. Three focused mocked-provider
+regressions cover repeat valid/unsafe source-link cases and sparse cancellation
+preserving prior event dates. Reconnection, calendar-list refresh and initial
+background import while navigating to Sessions also passed without manual sync
+or page refresh. Unattended scheduled sync was not separately observed, and no
+live private feed was tested. See the
 [release evidence](../../docs/reviews/2026-10-12-google-calendar.md).
-No tests were added or manually run.

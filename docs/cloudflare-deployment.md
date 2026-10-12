@@ -94,8 +94,15 @@ redirect. Calendar API and the two read-only scopes are configured, the External
 audience is published **In production**, and native OAuth is enabled. Google's
 verification remains pending; its unverified warning and 100-new-user cap apply
 to the current limited personal-use rollout. An authenticated hosted status
-probe confirmed availability; no customer grant or calendar feed was supplied,
-so this does not establish end-to-end ingestion. See [Google Calendar](architecture/google-calendar.md).
+probe confirmed availability. Subsequent user-approved native OAuth checks in
+an isolated synthetic workspace confirmed consent/token exchange, calendar
+selection, initial import, manual event updates, exact source-link opening and
+cancellation propagation. CRM import remained disabled and no attendance or
+financial records were created. Reconnection and initial background import while
+navigating to Sessions also passed; no manual sync or page refresh was needed.
+Unattended scheduled sync was not separately observed; no live private feed was tested.
+See [Google Calendar](architecture/google-calendar.md) and the
+[release evidence](reviews/2026-10-12-google-calendar.md).
 
 System password emails have separate configuration from business communications. Platform and Notifications receive `AUTH_MAIL_INTERNAL_SECRET`; only Notifications receives `AUTH_MAIL_PROVIDER`, `AUTH_MAIL_FROM` and `AUTH_MAIL_API_KEY`. Configure a real verified sender before setting `authMailEnabled: true` in the deployment manifest, regenerate configuration and deploy both services. The default is disabled, and the generator refuses to enable mail without its required credentials. No marketing connector credential is reused for identity recovery.
 
