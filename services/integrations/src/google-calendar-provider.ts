@@ -219,8 +219,9 @@ function googleEventLink(value: unknown): string | undefined {
   if (typeof value !== "string" || value.length > 2048) return undefined;
   try {
     const url = new URL(value);
-    return url.origin === "https://calendar.google.com" && url.pathname.startsWith("/calendar/") &&
-      !url.username && !url.password ? url.toString() : undefined;
+    const calendarLink = url.origin === "https://calendar.google.com" && url.pathname.startsWith("/calendar/");
+    const legacyEventLink = url.origin === "https://www.google.com" && url.pathname === "/calendar/event";
+    return (calendarLink || legacyEventLink) && !url.username && !url.password ? url.toString() : undefined;
   } catch { return undefined; }
 }
 

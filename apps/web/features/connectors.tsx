@@ -48,6 +48,8 @@ export function safeLink(value: unknown): string | undefined {
   } catch {}
   return;
 }
+type ConnectorScope = { api: Api; businessId?: string; active: boolean };
+type ConnectionSyncState = { phase: "syncing" | "error" | "done"; message: string };
 export function Connectors({
   api,
   role,
@@ -77,6 +79,7 @@ export function Connectors({
   const [googleCalendarsTruncated, setGoogleCalendarsTruncated] =
     useState(false);
   const [calendarLoading, setCalendarLoading] = useState(false);
+  const [calendarRefreshing, setCalendarRefreshing] = useState(false);
   const [calendarError, setCalendarError] = useState("");
   const [calendarId, setCalendarId] = useState("");
   const [calendarRevision, setCalendarRevision] = useState(0);
@@ -90,6 +93,13 @@ export function Connectors({
   const [googleFeedImportAttendees, setGoogleFeedImportAttendees] = useState(false);
   const [googleFeedIncludeWithoutAttendees, setGoogleFeedIncludeWithoutAttendees] = useState(true);
   const googleBusy = useRef(false);
+  const [connectionSync, setConnectionSync] = useState<Record<string, ConnectionSyncState>>({});
+  const scopeRef = useRef<ConnectorScope>({ api, businessId, active: false });
+  const syncRequests = useRef(new Map<string, { scope: ConnectorScope; controller: AbortController }>());
+  const selectionRequest = useRef<{ scope: ConnectorScope; controller: AbortController } | null>(null);
+  const loadSequence = useRef(0);
+  const calendarRefreshRequested = useRef(false);
+  const selectedCalendarId = useRef("");
   const [mapping, setMapping] = useState<Record<string, string>>({
     externalId: "id",
     displayName: "name",
@@ -103,21 +113,51 @@ export function Connectors({
         ? ["calendly", "calcom", "google_calendar"].includes(p)
         : ["json_api", "form_webhook"].includes(p)),
   );
-  async function load() {
-    setLoading(true);
+  const currentScope = (scope: ConnectorScope) => scope.active && scopeRef.current === scope;
+  useEffect(() => {
+    const changedWorkspace = scopeRef.current.api !== api || scopeRef.current.businessId !== businessId;
+    const scope: ConnectorScope = { api, businessId, active: true };
+    scopeRef.current = scope;
+    setConnectionSync({});
+    setConnections([]);
+    if (changedWorkspace) {
+      setPendingCalendarId("");
+      calendarRefreshRequested.current = false;
+      setCalendarLoading(false);
+      setCalendarRefreshing(false);
+    }
+    setBusy("");
+    setMessage("");
+    setError("");
+    return () => {
+      scope.active = false;
+      selectionRequest.current?.controller.abort();
+      selectionRequest.current = null;
+      // Started sync mutations finish so the shared API can invalidate other mounted views.
+      // Each request removes its own dedup entry; scope guards suppress late local updates.
+      loadSequence.current++;
+    };
+  }, [api, businessId]);
+  async function load(showLoading = true, scope = scopeRef.current) {
+    if (!currentScope(scope)) return false;
+    const sequence = ++loadSequence.current;
+    if (showLoading) setLoading(true);
     try {
-      const data = await api("integrations/v1/connections");
-      setConnections(data.items);
-      setError("");
+      const data = await scope.api("integrations/v1/connections", "GET", undefined, undefined, { fresh: true });
+      if (!currentScope(scope) || sequence !== loadSequence.current) return false;
+      setConnections(Array.isArray(data.items) ? data.items : []);
+      if (showLoading) setError("");
+      return true;
     } catch (e) {
-      setError(errorMessage(e));
+      if (showLoading && currentScope(scope) && sequence === loadSequence.current) setError(errorMessage(e));
+      return false;
     } finally {
-      setLoading(false);
+      if (currentScope(scope) && sequence === loadSequence.current) setLoading(false);
     }
   }
   useEffect(() => {
     void load();
-  }, [api]);
+  }, [api, businessId]);
   useEffect(() => {
     if (!canManage) {
       setGoogleStatus({ available: false, privateFeedAvailable: false, reason: "Ask your business administrator to connect Google Calendar." });
@@ -153,6 +193,10 @@ export function Connectors({
     const id = url.searchParams.get("googleCalendarConnection") ?? "";
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) return;
     setPendingCalendarId(id);
+    calendarRefreshRequested.current = false;
+    setCalendarRefreshing(false);
+    selectedCalendarId.current = "";
+    setCalendarId("");
     setImportAttendees(false);
     setIncludeEventsWithoutAttendees(true);
     setGoogleDisplayName("Google Calendar");
@@ -164,9 +208,15 @@ export function Connectors({
     if (!pendingCalendarId) return;
     let current = true;
     const controller = new AbortController();
-    setCalendarLoading(true);
+    const refreshing = calendarRefreshRequested.current;
+    calendarRefreshRequested.current = false;
+    if (refreshing) setCalendarRefreshing(true);
+    else {
+      setCalendarRefreshing(false);
+      setCalendarLoading(true);
+      setGoogleCalendars([]);
+    }
     setCalendarError("");
-    setGoogleCalendars([]);
     api(
       `integrations/v1/google-calendar/connections/${encodeURIComponent(pendingCalendarId)}/calendars`,
       "GET",
@@ -180,20 +230,36 @@ export function Connectors({
         setGoogleCalendars(items);
         setGoogleCalendarsTruncated(Boolean(data.truncated));
         const primary = items.find((item: Row) => item.primary) ?? items[0];
-        setCalendarId(primary?.id ?? "");
+        const stillAvailable = items.some((item: Row) => item.id === selectedCalendarId.current);
+        const nextCalendarId = stillAvailable ? selectedCalendarId.current : primary?.id ?? "";
+        selectedCalendarId.current = nextCalendarId;
+        setCalendarId(nextCalendarId);
       })
       .catch((cause) => {
         if (current && !controller.signal.aborted)
-          setCalendarError(errorMessage(cause));
+          setCalendarError(
+            refreshing
+              ? `Could not refresh calendars. Your previous list is still available; try again. ${errorMessage(cause)}`
+              : `Could not load readable calendars. Try refreshing the list. ${errorMessage(cause)}`,
+          );
       })
       .finally(() => {
-        if (current) setCalendarLoading(false);
+        if (current) {
+          if (refreshing) setCalendarRefreshing(false);
+          else setCalendarLoading(false);
+        }
       });
     return () => {
       current = false;
       controller.abort();
     };
   }, [api, pendingCalendarId, calendarRevision]);
+
+  function refreshGoogleCalendars() {
+    if (!pendingCalendarId || calendarLoading || calendarRefreshing || calendarRefreshRequested.current || selectionRequest.current) return;
+    calendarRefreshRequested.current = true;
+    setCalendarRevision((revision) => revision + 1);
+  }
 
   async function startGoogleCalendar() {
     if (googleBusy.current || !canManage || !googleStatus?.available) return;
@@ -221,28 +287,43 @@ export function Connectors({
   }
 
   async function selectGoogleCalendar() {
-    if (!pendingCalendarId || !calendarId || busy || !canManage) return;
+    if (!pendingCalendarId || !calendarId || busy || !canManage || calendarLoading || calendarRefreshing || calendarRefreshRequested.current || selectionRequest.current) return;
+    const scope = scopeRef.current;
+    if (!currentScope(scope)) return;
+    const id = pendingCalendarId, controller = new AbortController();
+    const request = { scope, controller };
+    selectionRequest.current = request;
     setBusy("google-calendar-select");
     setCalendarError("");
     try {
-      await api(
-        `integrations/v1/google-calendar/connections/${encodeURIComponent(pendingCalendarId)}/select`,
+      const data = await scope.api(
+        `integrations/v1/google-calendar/connections/${encodeURIComponent(id)}/select`,
         "POST",
         {
           calendarId,
           importAttendees,
           includeEventsWithoutAttendees,
           displayName: googleDisplayName.trim() || "Google Calendar",
-        },
+        }, undefined, { signal: controller.signal },
       );
+      if (!currentScope(scope) || controller.signal.aborted) return;
+      const item = data.item ?? data;
+      loadSequence.current++;
+      setLoading(false);
+      if (item?.id === id) setConnections((existing) => existing.some((row) => row.id === id)
+        ? existing.map((row) => row.id === id ? item : row) : [...existing, item]);
       setPendingCalendarId("");
       setGoogleCalendars([]);
-      setMessage("Calendar selected. Your events will start syncing shortly.");
-      await load();
-    } catch (cause) {
-      setCalendarError(errorMessage(cause));
-    } finally {
+      setMessage("Calendar selected.");
       setBusy("");
+      // Keep the saved connection usable while its first pull runs independently.
+      void sync(id, true, scope);
+      void load(false, scope);
+    } catch (cause) {
+      if (currentScope(scope) && !controller.signal.aborted) setCalendarError(errorMessage(cause));
+    } finally {
+      if (selectionRequest.current === request) selectionRequest.current = null;
+      if (currentScope(scope)) setBusy("");
     }
   }
 
@@ -323,24 +404,33 @@ export function Connectors({
       setBusy("");
     }
   }
-  async function sync(id: string) {
-    setBusy(id);
-    setError("");
+  async function sync(id: string, initial = false, scope = scopeRef.current) {
+    if (!canManage || !currentScope(scope) || syncRequests.current.has(id)) return;
+    const controller = new AbortController(), request = { scope, controller };
+    syncRequests.current.set(id, request);
+    setConnectionSync((states) => ({ ...states, [id]: { phase: "syncing", message: initial ? "Importing your calendar events…" : "Syncing this connection…" } }));
     try {
-      const data = await api(
-        `integrations/v1/connections/${id}/sync`,
+      const data = await scope.api(
+        `integrations/v1/connections/${encodeURIComponent(id)}/sync`,
         "POST",
         {},
+        undefined, { signal: controller.signal },
       );
+      if (!currentScope(scope) || controller.signal.aborted) return;
       const item = data.item ?? data;
-      setMessage(
-        `Received ${item.contactsReceived ?? 0} contacts and ${item.sessionsSynced ?? 0} sessions.${item.truncated ? " Some records still need review; see connector status." : ""}${typeof item.repair?.message === "string" ? ` ${item.repair.message}` : ""} Updates are processed in the background.`,
-      );
-      await load();
+      if (item.status === "error") throw new Error(typeof item.error === "string" ? item.error : "Calendar sync could not be completed.");
+      const detail = `Received ${item.contactsReceived ?? 0} contacts and ${item.sessionsSynced ?? 0} sessions.${item.truncated ? " Some records still need review; see connector status." : ""}${typeof item.repair?.message === "string" ? ` ${item.repair.message}` : ""} Updates are processed in the background.`;
+      setConnectionSync((states) => ({ ...states, [id]: { phase: "done", message: detail } }));
+      setConnections((existing) => existing.map((row) => row.id === id ? { ...row, status: "connected", lastError: null,
+        lastSyncAt: item.syncedAt ?? row.lastSyncAt, syncCounts: item } : row));
+      void load(false, scope);
     } catch (e) {
-      setError(errorMessage(e));
+      if (currentScope(scope) && !controller.signal.aborted) setConnectionSync((states) => ({ ...states, [id]: {
+        phase: "error", message: `${initial ? "Your calendar selection was saved, but the first sync did not finish." : "Sync did not finish."} ${errorMessage(e)} Retry sync to try again.`,
+      } }));
+      if (currentScope(scope) && !controller.signal.aborted) void load(false, scope);
     } finally {
-      setBusy("");
+      if (syncRequests.current.get(id) === request) syncRequests.current.delete(id);
     }
   }
   async function disconnect(id: string) {
@@ -444,9 +534,9 @@ export function Connectors({
               {p === "google_calendar"
                 ? googleStatus?.available
                   ? "Read-only access · Choose one calendar after connecting"
-                  : googleStatus === null && googleStatusError
-                    ? "Setup status could not be loaded"
-                    : googleStatus?.privateFeedAvailable ? "Private calendar link available · Google sign-in setup pending" : "Google sign-in setup pending"
+                  : googleStatus === null
+                    ? googleStatusError ? "Connection availability could not be checked" : "Checking Google Calendar availability…"
+                    : googleStatus.privateFeedAvailable ? "Private calendar link available · Google sign-in setup pending" : "Google sign-in setup pending"
                 : p === "calendly"
                 ? "Personal access token required"
                 : p === "calcom"
@@ -534,6 +624,12 @@ export function Connectors({
                         : JSON.stringify(c.lastError)}
                     </p>
                   )}
+                  {connectionSync[c.id] && (
+                    <p className={connectionSync[c.id].phase === "error" ? "inline-error" : "small-note"}
+                      role={connectionSync[c.id].phase === "error" ? "alert" : "status"}>
+                      {connectionSync[c.id].message}
+                    </p>
+                  )}
                   {c.provider === "google_calendar" && typeof c.syncCounts?.repair?.message === "string" && (
                     <p className="inline-error">{c.syncCounts.repair.message}</p>
                   )}
@@ -555,6 +651,11 @@ export function Connectors({
                       disabled={!!busy || !canManage}
                       onClick={() => {
                         setCalendarError("");
+                        calendarRefreshRequested.current = false;
+                        setCalendarRefreshing(false);
+                        selectedCalendarId.current = "";
+                        setCalendarId("");
+                        setGoogleCalendars([]);
                         setPendingCalendarId(c.id);
                       }}
                     >
@@ -577,17 +678,17 @@ export function Connectors({
                   {c.provider !== "form_webhook" &&
                     !(c.provider === "google_calendar" && c.status === "awaiting_selection") && (
                     <button
-                      disabled={!!busy || !canManage}
+                      disabled={!!busy || !canManage || connectionSync[c.id]?.phase === "syncing"}
                       onClick={() => void sync(c.id)}
                     >
                       <RefreshCw size={15} />
-                      {busy === c.id ? "Syncing…" : "Sync now"}
+                      {connectionSync[c.id]?.phase === "syncing" ? "Syncing…" : connectionSync[c.id]?.phase === "error" ? "Retry sync" : "Sync now"}
                     </button>
                   )}
                   {canManage && (
                     <button
                       className="icon-button"
-                      disabled={!!busy}
+                      disabled={!!busy || connectionSync[c.id]?.phase === "syncing"}
                       title="Disconnect source"
                       aria-label={`Disconnect ${c.displayName}`}
                       onClick={() => {
@@ -778,22 +879,30 @@ export function Connectors({
       {pendingCalendarId && (
         <Modal
           title="Choose a Google Calendar"
-          onClose={() => setPendingCalendarId("")}
+          onClose={() => {
+            if (selectionRequest.current) return;
+            calendarRefreshRequested.current = false;
+            setCalendarRefreshing(false);
+            setPendingCalendarId("");
+          }}
         >
           <p className="muted">
             Tuts reads events from one calendar. Recurring events are included and all-day events are skipped. Past events remain scheduled until you review attendance.
           </p>
-          {calendarLoading ? (
+          {calendarError && <Notice error={calendarError} />}
+          {calendarLoading && !googleCalendars.length ? (
             <Empty>Loading readable calendars…</Empty>
-          ) : calendarError ? (
-            <div>
-              <Notice error={calendarError} />
-              <button onClick={() => setCalendarRevision((revision) => revision + 1)}>
-                <RefreshCw size={15} /> Try again
-              </button>
-            </div>
           ) : !googleCalendars.length ? (
-            <Empty>No readable calendars were found for this Google account.</Empty>
+            <>
+              <Empty>No readable calendars are currently listed for this Google account.</Empty>
+              <button
+                type="button"
+                disabled={calendarLoading || calendarRefreshing || busy === "google-calendar-select"}
+                onClick={refreshGoogleCalendars}
+              >
+                <RefreshCw size={15} /> {calendarRefreshing ? "Refreshing…" : "Refresh calendars"}
+              </button>
+            </>
           ) : (
             <>
               <label>
@@ -804,16 +913,31 @@ export function Connectors({
                   maxLength={100}
                 />
               </label>
-              <label>
-                Calendar
-                <select value={calendarId} onChange={(event) => setCalendarId(event.target.value)}>
-                  {googleCalendars.map((calendar) => (
-                    <option key={calendar.id} value={calendar.id}>
-                      {calendar.summary || "Untitled calendar"}{calendar.primary ? " · Primary" : ""}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <div className="google-calendar-refresh-row" aria-busy={calendarRefreshing}>
+                <label>
+                  Calendar
+                  <select
+                    value={calendarId}
+                    onChange={(event) => {
+                      selectedCalendarId.current = event.target.value;
+                      setCalendarId(event.target.value);
+                    }}
+                  >
+                    {googleCalendars.map((calendar) => (
+                      <option key={calendar.id} value={calendar.id}>
+                        {calendar.summary || "Untitled calendar"}{calendar.primary ? " · Primary" : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  disabled={calendarLoading || calendarRefreshing || busy === "google-calendar-select"}
+                  onClick={refreshGoogleCalendars}
+                >
+                  <RefreshCw size={15} /> {calendarRefreshing ? "Refreshing…" : "Refresh calendars"}
+                </button>
+              </div>
               {calendarId && (() => {
                 const chosen = googleCalendars.find((calendar) => calendar.id === calendarId);
                 return chosen ? (
@@ -850,13 +974,17 @@ export function Connectors({
             <button
               type="button"
               disabled={busy === "google-calendar-select"}
-              onClick={() => setPendingCalendarId("")}
+              onClick={() => {
+                calendarRefreshRequested.current = false;
+                setCalendarRefreshing(false);
+                setPendingCalendarId("");
+              }}
             >
               Cancel
             </button>
             <button
               className="primary"
-              disabled={calendarLoading || !calendarId || !!calendarError || !canManage || busy === "google-calendar-select"}
+              disabled={calendarLoading || calendarRefreshing || !calendarId || !canManage || busy === "google-calendar-select"}
               onClick={() => void selectGoogleCalendar()}
             >
               {busy === "google-calendar-select" ? "Saving…" : "Use this calendar"}

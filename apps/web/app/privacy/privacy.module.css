@@ -77,6 +77,15 @@
   margin-bottom: 0;
 }
 
+.notice ol {
+  margin: 0 0 16px;
+  padding-left: 22px;
+}
+
+.notice li + li {
+  margin-top: 8px;
+}
+
 .notice a:not(.wordmark) {
   color: #315d4d;
   text-decoration-thickness: 1px;

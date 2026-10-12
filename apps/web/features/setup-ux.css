@@ -65,6 +65,24 @@
   margin-top: 2px;
   accent-color: var(--accent);
 }
+.google-calendar-refresh-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+}
+.google-calendar-refresh-row > label {
+  min-width: 0;
+  margin: 0;
+}
+.google-calendar-refresh-row > button {
+  white-space: nowrap;
+}
+@media (max-width: 520px) {
+  .google-calendar-refresh-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 .setup-connector-guide {
   padding: 15px 18px;
   margin: 16px 0;
