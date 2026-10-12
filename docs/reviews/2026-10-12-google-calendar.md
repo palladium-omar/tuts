@@ -107,11 +107,12 @@ the public privacy notice returned 200. Google sign-in explicitly asks users to
 choose their own account before consent. Customers do not create Google Cloud
 projects, provide a platform client secret, or share the platform owner's grant.
 
-This is currently an unverified small personal-use rollout: Google may show an
-unverified-app warning and applies its lifetime 100-new-user cap. Google's
-verification approval has not been obtained. Verification is required before
-expanding the integration into the broader commercial rollout; do not present
-publishing status as verification. Testing-mode seven-day token expiry is no
+The connector initially launched without sensitive-scope approval. Google may
+still show an unverified-app warning and applies its unverified-user limits.
+The public tutoring application is not limited to personal or internal use;
+its scope verification request is now under review, as recorded below.
+Do not present production publishing status or submission as scope approval.
+Testing-mode seven-day token expiry is no
 longer the publishing-mode constraint, though Google can still expire or revoke
 grants for other reasons. See [Google's personal-use exception](https://support.google.com/cloud/answer/13464323)
 and [audience and publishing rules](https://support.google.com/cloud/answer/15549945).
@@ -181,9 +182,16 @@ Unattended scheduled synchronization was not separately observed. No live
 private iCal feed was tested. These checks do not establish every customer's
 Workspace access policy or Google's verification approval.
 
-The public `/about` product page and `/privacy` notice are deployed. Google's
-branding configuration still uses the older `/` homepage and needs updating to
-`/about`; brand and sensitive-scope verification approval remain pending.
+The public `/about` product page and `/privacy` notice are deployed. On October
+12, Google's OAuth homepage was updated to `/about`, automatically re-verified,
+and published. The console confirmed that the branding is verified and shown to
+users. The existing Calendar permissions were submitted for scope verification
+with a saved justification and an unlisted demonstration video. The console now
+reports **Your app's data access is under review**, and its progress dialog
+confirms that the Trust and Safety team received the form. Sensitive-scope
+approval is still pending; submission does not remove the warning immediately.
+See [the submission record](google-calendar-verification-submission.md) for
+scope classification, demonstration details and Google's stated review timing.
 
 ### Final deployment receipt
 
