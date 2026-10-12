@@ -10,8 +10,10 @@ The [architecture](../architecture/google-calendar.md) includes its data-flow
 diagram, HTTP contract, limits, security controls and deployment requirements.
 
 The connector supports recurring appointments, updates and cancellations within
-90 days past and 180 days ahead. Unknown or unsupported calendar structures fail
-with actionable errors. Multiple attendees do not arbitrarily become one
+90 days past and 180 days ahead. Unsupported recurrence/timezone formats fail
+with actionable errors. Malformed or excluded events can be skipped; unknown
+feed identities make the pull partial and prevent cancellation inference.
+Multiple attendees do not arbitrarily become one
 billable student. Elapsed event dates do not imply completed attendance.
 
 Google API cancellation records can omit dates/update timestamps. Integrations
@@ -61,8 +63,11 @@ No automated tests were added or manually run for this request.
 
 Scheduling and Integrations migrations `005_google_calendar.sql` were applied
 through their ordinary PostgreSQL roles with verified TLS. New OAuth state and
-Google snapshot tables enforce tenant RLS. Scheduling, Integrations, gateway and
-Pages were published; no new hosting resource or paid plan was introduced.
+Google snapshot tables enforce tenant RLS. All ten service Workers, gateway and
+Pages were rebuilt and published, including Platform's production HTTPS check
+and exclusion of the development entitlement migration, and Payments' refusal
+of Stripe test operations in production. No new hosting resource or paid plan
+was introduced.
 
 The public app and health route returned 200. The callback returned 200 with
 `Cache-Control: no-store` and `Referrer-Policy: no-referrer`. Anonymous Google
