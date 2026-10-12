@@ -541,8 +541,12 @@ async function deploy(config, secrets, scope = 'all') {
     console.log('Identity and notification mail configuration published; verify real delivery before reporting it operational');
   } else if (config.ingress === 'pages') {
     console.log('Publishing Pages ingress');
+    // Supply the source revision explicitly: Pages' generated-directory Git
+    // discovery can retain an earlier commit while deploying current assets.
+    const revision = (await run('git', ['rev-parse', '--verify', 'HEAD'], { quiet: true })).trim();
+    if (!/^[a-f0-9]{40}$/.test(revision)) fail('A committed Git revision is required for Pages deployment metadata');
     await wrangler(['pages', 'deploy', '--project-name', config.pagesProject,
-      '--branch', 'main', '--force', '--cwd', join(directory, 'generated/pages')],
+      '--branch', 'main', '--commit-hash', revision, '--force', '--cwd', join(directory, 'generated/pages')],
       { quiet: true, secrets, env: { CLOUDFLARE_ACCOUNT_ID: config.accountId } });
     console.log(`Pages ingress published for ${config.publicUrl}; associate its custom domain and verify DNS, health, registration and tenant isolation before reporting completion`);
   } else {

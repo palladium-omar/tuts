@@ -79,13 +79,22 @@ does not establish successful Google user consent or calendar ingestion.
 
 The Google OAuth web client was created with explicit user approval, and its
 credentials were stored only in protected deployment settings/Integrations
-secrets. Google API activation, audience publishing and user consent are separate
-provider steps. The Google console's API, audience and scope pages failed to
-load, and renewing the existing CLI session requires a separate Google password
-check. Until those provider steps are complete, production Google sign-in stays
+secrets. The existing Google CLI authorization was renewed and Calendar API
+activation was confirmed with the supported CLI. Google audience/scope setup
+and user consent are separate provider steps. Business-account console sign-in
+was completed. The isolated console's audience/scope pages and project selector
+still fail to load. Chrome redirects business sign-in to the existing business
+profile, which is not connected to the browser-control extension; native
+controls for that window report offscreen/unavailable targets. Those UI settings
+have no documented public CLI/API replacement. Until they are complete,
+production Google sign-in stays
 disabled with an explicit status; the private calendar-link option remains
 available. No live customer grant or calendar feed was supplied, so successful
 calendar ingestion has not been verified end to end.
+
+Pages deployment metadata previously reported an older source commit even when
+current assets were uploaded. The deploy script now supplies the committed Git
+revision explicitly for subsequent Pages releases.
 
 ## Limits
 
