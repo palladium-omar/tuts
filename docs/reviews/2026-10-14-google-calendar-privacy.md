@@ -35,15 +35,16 @@ Google's published guidance says to update the privacy policy at the same URL an
 - Deployment: `node scripts/cloudflare.mjs deploy-web` completed successfully for Gateway and Pages ingress.
 - Public readback: `https://tuts.palladiumscholars.com/privacy` returned HTTP 200; the canonical URL remained unchanged, the page showed October 14, 2026, both anchors were present, and the Neon source link was confirmed.
 - Visual readback: isolated IAB rendered the new disclosures; screenshot evidence is at `artifacts/google-verification/2026-10-14-privacy-protections.png`.
+- Verification Center readback: isolated IAB showed **Your app’s data access is under review.** The progress dialog says to reply to the existing Trust and Safety email thread after resolving all issues, and that review continues once resolved. Homepage (last reviewed Oct 12), app functionality (Oct 14), branding (Oct 12), and minimum scopes (Oct 14) are complete. Privacy requirements remains in error with the same two findings: recipients/sharing are not described, and sensitive-data protection mechanisms are not specified. Screenshot: `artifacts/google-verification/2026-10-14-google-progress-followup.png`.
 - Google email: a reply was prepared in the existing Google verification thread, but has not been sent; human send authorization is pending.
-- Google Cloud Console: the authenticated project is correct, but the Verification Center rendered an empty main panel with JavaScript errors, so no current progress receipt or new Console submission is claimed. Google's guidance for both findings says to reply to the verification email when the privacy URL is unchanged. The existing canonical URL is unchanged; no consent-screen URL change is needed.
+- Google Cloud Console: no resubmission control was exposed in the Verification Center or progress dialog. The privacy URL and requested scopes are unchanged; continue through the existing email thread as the Console directs and Google's published guidance describes. Do not cancel or create a duplicate review.
 - Google review/approval: pending; no approval is claimed.
 
 ## Status
 
 - Privacy notice content, implementation review, production deployment, stable-URL readback, and visual verification: complete as documented above.
 - Reply to the existing verification email: prepared but unsent; human send authorization pending.
-- Google Cloud Console: no URL or scope change made. No duplicate review created or existing review cancelled. The required follow-up for these unchanged-URL corrections is the email reply, pending send authorization.
+- Google Cloud Console: progress readback confirms the review remains open, four requirements are complete, and Privacy requirements still shows the two findings above. No resubmission control was exposed; the required follow-up is replying in the existing email thread, pending send authorization. No duplicate review created or existing review cancelled.
 - Google review status/decision: pending; no approval is claimed.
 
 When the reply or Console workflow changes, append dated receipts here. Add an annual review check for the disclosed recipients, protection mechanisms, and retention/deletion behavior so the notice remains aligned with implementation.
