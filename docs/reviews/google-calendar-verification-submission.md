@@ -226,3 +226,7 @@ or payments without separate explicit staff actions.
 - Tenant-bound encryption: `services/integrations/src/security.ts`
 - Source disconnect cleanup: `services/integrations/src/connections.ts`, `services/scheduling/src/external-sessions.ts`
 - Public disclosures: `apps/web/app/about/page.tsx`, `apps/web/app/privacy/page.tsx`
+
+## Privacy follow-up — October 14, 2026
+
+Trust & Safety's follow-up and the privacy disclosure remediation, implementation references, deployment/readback receipts, and still-pending Google response are tracked in [the October 14 privacy follow-up record](2026-10-14-google-calendar-privacy.md). The stable `/privacy` URL was deployed and read back successfully; the existing verification email reply is prepared but unsent, and no Console resubmission or approval is recorded.

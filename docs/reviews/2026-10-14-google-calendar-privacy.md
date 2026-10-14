@@ -13,7 +13,7 @@ Keep the canonical public privacy URL stable at <https://tuts.palladiumscholars.
 - `#google-data-sharing` — named workspace recipients and their purposes: the connected business and authorized users, Cloudflare, Neon, Google, and conditional messaging providers (Resend/configured SMTP or Meta WhatsApp when the business activates those features). The disclosure also covers exports initiated by authorized staff and states that connecting Calendar alone does not message attendees.
 - `#google-data-protection` — HTTPS/TLS, AES-256-GCM with business-ID associated data for stored credentials, Neon AES-256 at-rest encryption, access controls and tenant isolation, signed expiring internal authorization contexts, and credential/log redaction.
 
-The public source states these protections precisely: session records and sync snapshots are access-controlled workspace records, not claimed as application-level encrypted; Neon documents AES-256 encryption at rest. The notice retains the distinction between disconnect cleanup for connector credentials/snapshots/session projections and separately retained CRM contacts. The auditor reviewed the updated text and found no material unsupported claims. This record documents source review, not public deployment.
+The public source states these protections precisely: session records and sync snapshots are access-controlled workspace records, not claimed as application-level encrypted; Neon documents AES-256 encryption at rest. The notice retains the distinction between disconnect cleanup for connector credentials/snapshots/session projections and separately retained CRM contacts. The auditor reviewed the updated text and found no material unsupported claims.
 
 | Disclosure claim | Implementation/evidence reference |
 | --- | --- |
@@ -29,12 +29,21 @@ The public source states these protections precisely: session records and sync s
 
 Google's published guidance says to update the privacy policy at the same URL and reply to the existing verification email when fixes are complete: [Google Cloud OAuth verification FAQ](https://support.google.com/cloud/answer/13806988?hl=en). If the current Google Cloud Console offers a resubmission/update action, follow that workflow without cancelling the existing review. Do not interpret this record as a submitted response or a renewed approval.
 
-## Status — pending receipts
+## Deployment and follow-up receipts — October 14, 2026
 
-- Privacy notice content change: prepared in the current workspace; live deployment/readback pending.
-- Security, recipient, and retention claim verification: implementation source review recorded; auditor found no material unsupported claims. Production deployment remains pending.
-- Public deployment and stable-URL readback: pending.
-- Reply to the existing verification email or console follow-up: pending.
+- Source revision: `8c5d1c9` (`fix: disclose Google Calendar data recipients and protections`).
+- Deployment: `node scripts/cloudflare.mjs deploy-web` completed successfully for Gateway and Pages ingress.
+- Public readback: `https://tuts.palladiumscholars.com/privacy` returned HTTP 200; the canonical URL remained unchanged, the page showed October 14, 2026, both anchors were present, and the Neon source link was confirmed.
+- Visual readback: isolated IAB rendered the new disclosures; screenshot evidence is at `artifacts/google-verification/2026-10-14-privacy-protections.png`.
+- Google email: a reply was prepared in the existing Google verification thread, but has not been sent; human send authorization is pending.
+- Google Cloud Console: the authenticated project is correct, but the Verification Center rendered an empty main panel with JavaScript errors, so no current progress receipt or new Console submission is claimed. Google's guidance for both findings says to reply to the verification email when the privacy URL is unchanged. The existing canonical URL is unchanged; no consent-screen URL change is needed.
+- Google review/approval: pending; no approval is claimed.
+
+## Status
+
+- Privacy notice content, implementation review, production deployment, stable-URL readback, and visual verification: complete as documented above.
+- Reply to the existing verification email: prepared but unsent; human send authorization pending.
+- Google Cloud Console: no URL or scope change made. No duplicate review created or existing review cancelled. The required follow-up for these unchanged-URL corrections is the email reply, pending send authorization.
 - Google review status/decision: pending; no approval is claimed.
 
-After remediation, attach dated evidence for the deployed page/readback and the sent response or console receipt. Keep this record updated with the actual outcome. Add an annual review check for the disclosed recipients, protection mechanisms, and retention/deletion behavior so the notice remains aligned with implementation.
+When the reply or Console workflow changes, append dated receipts here. Add an annual review check for the disclosed recipients, protection mechanisms, and retention/deletion behavior so the notice remains aligned with implementation.
