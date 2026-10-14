@@ -77,7 +77,8 @@
   margin-bottom: 0;
 }
 
-.notice ol {
+.notice ol,
+.notice ul {
   margin: 0 0 16px;
   padding-left: 22px;
 }
